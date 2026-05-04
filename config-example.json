@@ -1,0 +1,42 @@
+{
+  "data_dir": "/tmp/cactus-data",
+  "log": {
+    "id": "1.3.6.1.4.1.44363.47.1.99",
+    "shortname": "cactus-test",
+    "hash": "sha256",
+    "checkpoint_period_ms": 1000,
+    "pool_size": 256
+  },
+  "ca_cosigner": {
+    "id": "1.3.6.1.4.1.44363.47.1.99.ca",
+    "algorithm": "ecdsa-p256-sha256",
+    "seed_path": "keys/ca-cosigner.seed"
+  },
+  "acme": {
+    "listen": ":14000",
+    "external_url": "http://localhost:14000",
+    "challenge_mode": "auto-pass"
+  },
+  "monitoring": {
+    "listen": ":14080",
+    "external_url": "http://localhost:14080"
+  },
+  "metrics": {
+    "listen": "127.0.0.1:14090"
+  },
+  "landmarks": {
+    "enabled": false,
+    "base_id": "1.3.6.1.4.1.44363.47.1.99.lm",
+    "time_between_landmarks_ms": 3600000,
+    "max_cert_lifetime_ms": 604800000,
+    "landmark_url_path": "/landmarks"
+  },
+  "ca_cosigner_quorum": {
+    "mirrors": [],
+    "min_signatures": 1,
+    "request_timeout_ms": 2000,
+    "best_effort_after_minimum": true,
+    "mirror_retry_deadline_ms": 5000
+  },
+  "log_level": "info"
+}

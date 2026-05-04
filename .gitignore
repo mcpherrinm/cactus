@@ -1,0 +1,21 @@
+# Build outputs.
+/bin/
+/cactus
+/cactus-cli
+/cactus-keygen
+
+# Local config + run-time data.
+/config.json
+/data/
+/keys/
+
+# Editor / OS detritus.
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Local-only working notes and reference material.
+/PROJECT_PLAN.md
+/TODO.md
+/specs/
