@@ -59,14 +59,14 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	cfg := map[string]any{
 		"data_dir": dataDir,
 		"log": map[string]any{
-			"id":                   "1.3.6.1.4.1.44363.47.1.99",
+			"number":               1,
 			"shortname":            "smoke",
 			"hash":                 "sha256",
 			"checkpoint_period_ms": 100,
 			"pool_size":            16,
 		},
 		"ca_cosigner": map[string]any{
-			"id":        "1.3.6.1.4.1.44363.47.1.99.ca",
+			"id":        "1.3.6.1.4.1.44363.47.1.99",
 			"algorithm": "ecdsa-p256-sha256",
 			"seed_path": "keys/ca-cosigner.seed",
 		},

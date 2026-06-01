@@ -79,12 +79,12 @@ func newTestLog(t *testing.T) (*cactuslog.Log, signer.Signer, cert.TrustAnchorID
 //     with HASH(SPKI));
 //  5. compute leaf hash = HASH(0x00 || 0x00 0x01 || tbsContents);
 //  6. evaluate the inclusion proof and compare to MTCProof.subtree.hash;
-//  7. verify the CA cosigner signature over MTCSubtreeSignatureInput.
+//  7. verify the CA cosigner signature over CosignedMessage.
 //
 // All seven checks must pass.
 func TestIssueRoundTripFullValidation(t *testing.T) {
 	l, sgn, logID, cosignerID := newTestLog(t)
-	issuer, err := New(l, string(logID))
+	issuer, err := New(l, string(logID), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,26 +123,28 @@ func TestIssueRoundTripFullValidation(t *testing.T) {
 	// stripping the serialNumber + signature, and replacing
 	// subjectPublicKeyInfo with subjectPublicKeyAlgorithm + OCTET
 	// STRING(HASH(SPKI)).
-	rebuilt, serialFromCert, err := cert.RebuildLogEntryFromTBS(tbs, issuer.LogIDDN)
+	rebuilt, serialFromCert, err := cert.RebuildLogEntryFromTBS(tbs, issuer.CADN)
 	if err != nil {
 		t.Fatalf("RebuildLogEntryFromTBS: %v", err)
 	}
-	if serialFromCert != mtcProof.End-1-(mtcProof.End-mtcProof.Start-1) && serialFromCert == 0 {
-		// trivial sanity: serial > 0 (entry 0 is null)
-		t.Errorf("cert serial = %d (must be > 0)", serialFromCert)
+	// draft-04 §6.1: serial = (log_number << 48) | index. log_number is 1
+	// here, so the serial is always non-zero.
+	logNumber, index, err := cert.SplitSerial(serialFromCert)
+	if err != nil {
+		t.Fatalf("SplitSerial: %v", err)
 	}
-	if serialFromCert == 0 {
-		t.Errorf("cert serial = 0 — must skip null entry")
+	if logNumber != 1 {
+		t.Errorf("cert log number = %d, want 1", logNumber)
 	}
 
-	// (5) Leaf hash = HASH(0x00 || 0x00 0x01 || tbsContents)
+	// (5) Leaf hash = HASH(0x00 || extensions || 0x00 0x01 || tbsContents)
 	leafHash := cert.EntryHash(rebuilt)
 
 	// (6) Evaluate inclusion proof.
 	got, err := tlogx.EvaluateInclusionProof(
 		func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
 		mtcProof.Start, mtcProof.End,
-		serialFromCert,
+		index,
 		leafHash,
 		mtcProof.InclusionProof,
 	)

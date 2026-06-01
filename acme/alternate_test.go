@@ -42,7 +42,7 @@ func TestAlternateURLReturns503WithRetryAfter(t *testing.T) {
 		Signer: s, FS: fs, FlushPeriod: 25 * time.Millisecond,
 	})
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 	srv, _ := New(Config{Issuer: issuer, ChallengeMode: ChallengeAutoPass})
 	hsrv := httptest.NewServer(srv.Handler())
 	defer hsrv.Close()

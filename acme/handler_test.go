@@ -47,7 +47,7 @@ func newTestStack(t *testing.T) (*httptest.Server, *Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(l.Stop)
-	issuer, err := ca.New(l, "32473.1")
+	issuer, err := ca.New(l, "32473.1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

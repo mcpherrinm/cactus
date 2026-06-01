@@ -9,29 +9,19 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 )
 
-// CertificatePropertyType codes mirror trust-anchor-ids §6 + the MTC
-// draft's §8.1 extension. The 0/1 codepoints used here are best-effort
-// against an unstable spec; see PROJECT_PLAN §8 Risk 9.
+// CertificatePropertyType codes mirror the trust-anchor-ids
+// CertificateProperty registry (TAI §7). draft-04 removed the MTC-specific
+// additional_trust_anchor_ranges property; only trust_anchor_id remains.
 type CertificatePropertyType uint16
 
 const (
-	PropertyTrustAnchorID           CertificatePropertyType = 0
-	PropertyAdditionalTAnchorRanges CertificatePropertyType = 1
+	PropertyTrustAnchorID CertificatePropertyType = 0
 )
-
-// TrustAnchorRange is the §8.1 struct: a base ID plus an inclusive
-// [min, max] range of integers that may be appended to it.
-type TrustAnchorRange struct {
-	Base     TrustAnchorID
-	Min, Max uint64
-}
 
 // CertificateProperty is one entry in the property list.
 type CertificateProperty struct {
-	Type CertificatePropertyType
-	// Exactly one of these is populated.
+	Type          CertificatePropertyType
 	TrustAnchorID TrustAnchorID
-	Ranges        []TrustAnchorRange
 }
 
 // BuildPropertyList builds the TLS-presentation-language encoding of a
@@ -47,9 +37,7 @@ type CertificateProperty struct {
 //	    uint16 type
 //	    uint16 length-prefixed body
 //	      type=0 trust_anchor_id   →  raw binary representation
-//	                                   (see trust-anchor-ids §3, §6)
-//	      type=1 additional_ranges →  uint16 length-prefixed list of:
-//	                                    TrustAnchorRange = uint8 base‖uint64 min‖uint64 max
+//	                                   (see trust-anchor-ids §3, §7)
 func BuildPropertyList(props []CertificateProperty) ([]byte, error) {
 	if len(props) == 0 {
 		return nil, errors.New("cert: empty property list")
@@ -96,38 +84,10 @@ func encodeProperty(p CertificateProperty) ([]byte, error) {
 		if len(p.TrustAnchorID) > 0xff {
 			return nil, fmt.Errorf("cert: trust_anchor_id %d > 255 bytes", len(p.TrustAnchorID))
 		}
-		// Per trust-anchor-ids §6, the property body is the raw binary
+		// Per trust-anchor-ids §7, the property body is the raw binary
 		// representation of the trust anchor ID — no inner length prefix
 		// (the outer uint16 already bounds the body).
 		return append([]byte(nil), p.TrustAnchorID...), nil
-
-	case PropertyAdditionalTAnchorRanges:
-		if len(p.Ranges) == 0 {
-			return nil, errors.New("cert: additional_trust_anchor_ranges property has zero ranges")
-		}
-		var b cryptobyte.Builder
-		var rangesErr error
-		b.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) {
-			for _, r := range p.Ranges {
-				if len(r.Base) == 0 || len(r.Base) > 0xff {
-					rangesErr = fmt.Errorf("cert: range base length %d invalid", len(r.Base))
-					return
-				}
-				if r.Min > r.Max {
-					rangesErr = fmt.Errorf("cert: range min %d > max %d", r.Min, r.Max)
-					return
-				}
-				c.AddUint8LengthPrefixed(func(d *cryptobyte.Builder) {
-					d.AddBytes(r.Base)
-				})
-				c.AddUint64(r.Min)
-				c.AddUint64(r.Max)
-			}
-		})
-		if rangesErr != nil {
-			return nil, rangesErr
-		}
-		return b.Bytes()
 
 	default:
 		return nil, fmt.Errorf("cert: unknown property type %d", p.Type)
@@ -172,28 +132,6 @@ func ParsePropertyList(data []byte) ([]CertificateProperty, error) {
 		case PropertyTrustAnchorID:
 			// Body is the entire raw binary representation.
 			p.TrustAnchorID = TrustAnchorID(append([]byte(nil), body...))
-		case PropertyAdditionalTAnchorRanges:
-			var rangesBytes cryptobyte.String
-			if !body.ReadUint16LengthPrefixed(&rangesBytes) {
-				return nil, errors.New("cert: short additional_trust_anchor_ranges")
-			}
-			for !rangesBytes.Empty() {
-				var baseBytes cryptobyte.String
-				if !rangesBytes.ReadUint8LengthPrefixed(&baseBytes) {
-					return nil, errors.New("cert: short range base")
-				}
-				var min, max uint64
-				if !rangesBytes.ReadUint64(&min) || !rangesBytes.ReadUint64(&max) {
-					return nil, errors.New("cert: short range min/max")
-				}
-				p.Ranges = append(p.Ranges, TrustAnchorRange{
-					Base: TrustAnchorID(append([]byte(nil), baseBytes...)),
-					Min:  min, Max: max,
-				})
-			}
-			if !body.Empty() {
-				return nil, fmt.Errorf("cert: trailing bytes in property type %d", t)
-			}
 		default:
 			// Unknown property type: pass the body through unparsed but
 			// don't reject (extensibility).

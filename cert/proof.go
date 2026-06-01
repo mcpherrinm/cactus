@@ -3,6 +3,7 @@ package cert
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/letsencrypt/cactus/tlogx"
 	"golang.org/x/crypto/cryptobyte"
@@ -16,55 +17,60 @@ import (
 // the TLS presentation language requires it.
 type TrustAnchorID []byte
 
-// MTCSubtree mirrors the TLS-presentation struct from §5.4.1:
-//
-//	struct {
-//	    TrustAnchorID log_id;
-//	    uint64 start;
-//	    uint64 end;
-//	    HashValue hash;
-//	} MTCSubtree;
+// MTCSubtree is an internal carrier for the (log ID, [start, end),
+// subtree hash) tuple a cosigner signs. In draft-04 there is no
+// standalone MTCSubtree wire struct; these fields are folded into the
+// CosignedMessage (§5.3.1) produced by MarshalSignatureInput.
 type MTCSubtree struct {
 	LogID      TrustAnchorID
 	Start, End uint64
 	Hash       tlogx.Hash
 }
 
-// MarshalTLS returns the TLS-presentation encoding of the subtree.
-func (s *MTCSubtree) MarshalTLS() ([]byte, error) {
-	var b cryptobyte.Builder
-	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) {
-		c.AddBytes(s.LogID)
-	})
-	b.AddUint64(s.Start)
-	b.AddUint64(s.End)
-	b.AddBytes(s.Hash[:])
-	return b.Bytes()
+// OIDName renders a trust anchor ID as the ASCII OID name used in a
+// CosignedMessage's cosigner_name / log_origin fields (§5.3.1): the
+// string "oid/" followed by the trust anchor ID's full dotted-decimal
+// OID. cactus stores TrustAnchorID values as full dotted OIDs (e.g.
+// "1.3.6.1.4.1.44363.47.1.99"), so this is simply "oid/" + id, which
+// equals the spec's 16-byte "oid/1.3.6.1.4.1." prefix concatenated with
+// the relative trust anchor ID.
+func OIDName(id TrustAnchorID) string {
+	return "oid/" + string(id)
 }
 
-// MTCSubtreeSignatureInput is the §5.4.1 signing message:
+// MarshalSignatureInput returns the bytes a cosigner signs: the §5.3.1
+// CosignedMessage for the given subtree, with timestamp = 0 (the value
+// required for Merkle Tree Certificate proofs, §6.1):
 //
 //	struct {
-//	    uint8 label[16] = "mtc-subtree/v1\n\0";
-//	    TrustAnchorID cosigner_id;
-//	    MTCSubtree subtree;
-//	} MTCSubtreeSignatureInput;
-//
-// MarshalSignatureInput returns the bytes a cosigner signs.
+//	    uint8 label[12] = "subtree/v1\n\0";
+//	    opaque cosigner_name<1..2^8-1>;   // "oid/" + cosigner ID
+//	    uint64 timestamp;                  // 0 for MTC proofs
+//	    opaque log_origin<1..2^8-1>;       // "oid/" + log ID
+//	    uint64 start;
+//	    uint64 end;
+//	    HashValue subtree_hash;
+//	} CosignedMessage;
 func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byte, error) {
-	subtreeBytes, err := subtree.MarshalTLS()
-	if err != nil {
-		return nil, err
-	}
-	if len(SubtreeSignatureLabel) != 16 {
+	if len(SubtreeSignatureLabel) != 12 {
 		return nil, fmt.Errorf("internal: SubtreeSignatureLabel is %d bytes", len(SubtreeSignatureLabel))
+	}
+	cosignerName := []byte(OIDName(cosignerID))
+	logOrigin := []byte(OIDName(subtree.LogID))
+	if len(cosignerName) < 1 || len(cosignerName) > 0xff {
+		return nil, fmt.Errorf("cert: cosigner_name length %d out of range", len(cosignerName))
+	}
+	if len(logOrigin) < 1 || len(logOrigin) > 0xff {
+		return nil, fmt.Errorf("cert: log_origin length %d out of range", len(logOrigin))
 	}
 	var b cryptobyte.Builder
 	b.AddBytes([]byte(SubtreeSignatureLabel))
-	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) {
-		c.AddBytes(cosignerID)
-	})
-	b.AddBytes(subtreeBytes)
+	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(cosignerName) })
+	b.AddUint64(0) // timestamp
+	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(logOrigin) })
+	b.AddUint64(subtree.Start)
+	b.AddUint64(subtree.End)
+	b.AddBytes(subtree.Hash[:])
 	return b.Bytes()
 }
 
@@ -83,28 +89,65 @@ type MTCSignature struct {
 // X.509 BIT STRING with no ASN.1 wrapping:
 //
 //	struct {
-//	    uint64 start;
-//	    uint64 end;
+//	    MerkleTreeCertEntryExtension extensions<0..2^16-1>;
+//	    uint48 start;
+//	    uint48 end;
 //	    HashValue inclusion_proof<0..2^16-1>;
 //	    MTCSignature signatures<0..2^16-1>;
 //	} MTCProof;
 //
 // Per §6.1, `inclusion_proof<0..2^16-1>` is a length-prefixed byte
 // vector containing concatenated HashValues; the verifier slices into
-// HASH_SIZE pieces.
+// HASH_SIZE pieces. `extensions` MUST equal the log entry's extensions
+// (§5.2.1); `start`/`end` are 48-bit big-endian, capping the log index
+// at 2^48-1. The `signatures` vector MUST be sorted by cosigner_id
+// (shorter byte strings first, then lexicographically) with no
+// duplicate cosigner_id values.
 type MTCProof struct {
+	Extensions     []MerkleTreeCertEntryExtension
 	Start, End     uint64
 	InclusionProof []tlogx.Hash
 	Signatures     []MTCSignature
+}
+
+// maxUint48 is the largest value a uint48 field can hold.
+const maxUint48 = 1<<48 - 1
+
+func addUint48(b *cryptobyte.Builder, v uint64) {
+	b.AddBytes([]byte{
+		byte(v >> 40), byte(v >> 32), byte(v >> 24),
+		byte(v >> 16), byte(v >> 8), byte(v),
+	})
+}
+
+func readUint48(s *cryptobyte.String, v *uint64) bool {
+	var buf [6]byte
+	if !s.CopyBytes(buf[:]) {
+		return false
+	}
+	*v = uint64(buf[0])<<40 | uint64(buf[1])<<32 | uint64(buf[2])<<24 |
+		uint64(buf[3])<<16 | uint64(buf[4])<<8 | uint64(buf[5])
+	return true
 }
 
 // MarshalTLS encodes the proof in the on-wire format. The output is
 // what gets placed (verbatim, no further ASN.1) into the certificate's
 // signatureValue BIT STRING per §6.1.
 func (p *MTCProof) MarshalTLS() ([]byte, error) {
+	if p.Start > maxUint48 || p.End > maxUint48 {
+		return nil, fmt.Errorf("MTCProof: start/end exceed uint48 (%d, %d)", p.Start, p.End)
+	}
 	var b cryptobyte.Builder
-	b.AddUint64(p.Start)
-	b.AddUint64(p.End)
+
+	// extensions<0..2^16-1>: empty in cactus today, but always present.
+	extBytes, err := marshalEntryExtensions(p.Extensions)
+	if err != nil {
+		return nil, err
+	}
+	b.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(extBytes) })
+
+	addUint48(&b, p.Start)
+	addUint48(&b, p.End)
 
 	// inclusion_proof<0..2^16-1>: length prefix counts bytes (concatenated hashes).
 	var ipErr error
@@ -123,10 +166,20 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 	}
 
 	// signatures<0..2^16-1>: outer length-prefix wraps the concatenated
-	// MTCSignature encodings.
+	// MTCSignature encodings. §6.1 requires cosigner_id values to be
+	// unique and sorted (shorter byte strings first, then lexicographic).
+	sigs := append([]MTCSignature(nil), p.Signatures...)
+	sort.SliceStable(sigs, func(i, j int) bool {
+		return cosignerIDLess(sigs[i].CosignerID, sigs[j].CosignerID)
+	})
+	for i := 1; i < len(sigs); i++ {
+		if string(sigs[i].CosignerID) == string(sigs[i-1].CosignerID) {
+			return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %q", sigs[i].CosignerID)
+		}
+	}
 	var sigErr error
 	b.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) {
-		for i, s := range p.Signatures {
+		for i, s := range sigs {
 			if len(s.CosignerID) > 0xff {
 				sigErr = fmt.Errorf("signatures[%d]: cosigner_id %d > 255 bytes", i, len(s.CosignerID))
 				return
@@ -155,10 +208,21 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 func ParseMTCProof(data []byte) (*MTCProof, error) {
 	s := cryptobyte.String(data)
 	var p MTCProof
-	if !s.ReadUint64(&p.Start) {
+
+	var extBytes cryptobyte.String
+	if !s.ReadUint16LengthPrefixed(&extBytes) {
+		return nil, errors.New("MTCProof: short read extensions")
+	}
+	exts, err := parseEntryExtensions(extBytes)
+	if err != nil {
+		return nil, fmt.Errorf("MTCProof: %w", err)
+	}
+	p.Extensions = exts
+
+	if !readUint48(&s, &p.Start) {
 		return nil, errors.New("MTCProof: short read start")
 	}
-	if !s.ReadUint64(&p.End) {
+	if !readUint48(&s, &p.End) {
 		return nil, errors.New("MTCProof: short read end")
 	}
 
@@ -193,10 +257,29 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 			return nil, errors.New("MTCProof: short read signature")
 		}
 		sig.Signature = append([]byte(nil), sigData...)
+		if n := len(p.Signatures); n > 0 {
+			prev := p.Signatures[n-1].CosignerID
+			if string(prev) == string(sig.CosignerID) {
+				return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %q", sig.CosignerID)
+			}
+			if cosignerIDLess(sig.CosignerID, prev) {
+				return nil, errors.New("MTCProof: signatures not sorted by cosigner_id")
+			}
+		}
 		p.Signatures = append(p.Signatures, sig)
 	}
 	if !s.Empty() {
 		return nil, fmt.Errorf("MTCProof: %d trailing bytes", len(s))
 	}
 	return &p, nil
+}
+
+// cosignerIDLess orders cosigner_id byte strings as §6.1 requires:
+// shorter strings sort first; equal-length strings sort
+// lexicographically.
+func cosignerIDLess(a, b TrustAnchorID) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return string(a) < string(b)
 }

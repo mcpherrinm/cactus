@@ -149,7 +149,7 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 	if len(rawWithKeyID) < 5 {
 		t.Fatalf("sig too short: %d", len(rawWithKeyID))
 	}
-	// Verify the signature against MTCSubtreeSignatureInput.
+	// Verify the signature against CosignedMessage.
 	subtree := &cert.MTCSubtree{
 		LogID: ca.logID,
 		Start: subtreeStart, End: subtreeEnd, Hash: subtreeHash,

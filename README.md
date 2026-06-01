@@ -1,7 +1,7 @@
 # cactus
 
 A Go ACME server that issues **Merkle Tree certificates** per
-[draft-ietf-plants-merkle-tree-certs-03][draft], intended for
+[draft-ietf-plants-merkle-tree-certs-04][draft], intended for
 **testing environments only**.
 
 > ⚠ This is *not* a production CA. There is no fsync ladder, no
@@ -67,10 +67,10 @@ operate it, and where to look in the code.
 
 - **Witness-only cosigners** (§7.3). Mirror cosigners are in scope;
   pure witnesses are a future addition.
-- **Log pruning** (§5.6.1).
+- **Log pruning** (§5.2.3).
 - **Real DNS-01 challenges.** `auto-pass` and `http-01` are
   supported; DNS-01 is not.
-- **Revocation by index** (§7.5) beyond a stub list in config.
+- **Revoked ranges** (§7.5) beyond a stub list in config.
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full design and
 [TODO.md](TODO.md) for an iteration log.
@@ -154,7 +154,8 @@ lego --server http://localhost:14000/directory \
 ```
 
 Or hand-rolled with `cactus-cli` for inspection (run *after*
-issuing at least one cert; index 0 is the §5.3 null entry):
+issuing at least one cert; entries are §5.2.1 MerkleTreeCertEntry
+blobs):
 
 ```sh
 # After issuance, find the cert's index in the log:
@@ -216,7 +217,7 @@ The blocks below are the load-bearing ones.
 
 ```json
 "log": {
-  "id": "1.3.6.1.4.1.44363.47.1.99",
+  "number": 1,
   "shortname": "cactus-test",
   "hash": "sha256",
   "checkpoint_period_ms": 1000,
@@ -224,20 +225,25 @@ The blocks below are the load-bearing ones.
 }
 ```
 
-`id` is the log's trust anchor ID — the OID-shaped name in the §5.2
-issuer DN. `checkpoint_period_ms` is how often the sequencer flushes
-pooled entries and signs a new checkpoint; lower = lower issuance
-latency, more signatures per second.
+`number` is the issuance log's log number (1–65535, §5.2); the log ID
+is derived as `<ca_cosigner.id>.0.<number>` and the issuer DN is the
+CA ID. `checkpoint_period_ms` is how often the sequencer flushes pooled
+entries and signs a new checkpoint; lower = lower issuance latency, more
+signatures per second.
 
 ### `ca_cosigner`
 
 ```json
 "ca_cosigner": {
-  "id": "1.3.6.1.4.1.44363.47.1.99.ca",
+  "id": "1.3.6.1.4.1.44363.47.1.99",
   "algorithm": "ecdsa-p256-sha256",
   "seed_path": "keys/ca-cosigner.seed"
 }
 ```
+
+`id` is the **CA ID** (§5.1): draft-04 §5.4 requires the CA cosigner's
+ID to equal the CA ID, so this one value identifies the CA, seeds the
+issuer DN, and roots all derived log / landmark IDs.
 
 Use `ecdsa-p256-sha256` in default builds; `mldsa-44` and `mldsa-65`
 are available with `-tags mldsa`.
@@ -261,13 +267,14 @@ valid; for tests) or `http-01` (real fetch of
 ```json
 "landmarks": {
   "enabled": true,
-  "base_id": "1.3.6.1.4.1.44363.47.1.99.lm",
   "time_between_landmarks_ms": 3600000,
   "max_cert_lifetime_ms": 604800000,
   "landmark_url_path": "/landmarks"
 }
 ```
 
+Landmark trust anchor IDs are derived from the CA ID and log number
+(`CA-ID.1.logNumber.L`, §6.3.1) — there's no separate `base_id`.
 Defaults: 1-hour landmark cadence, 7-day max cert lifetime ⇒
 `max_active_landmarks = ceil(168) + 1 = 169` ⇒ ~10 KiB of relying
 party state per CA. See §6.3.1 of the draft.
@@ -282,8 +289,8 @@ party state per CA. See §6.3.1 of the draft.
   "algorithm": "ecdsa-p256-sha256",
   "upstream": {
     "tile_url": "https://upstream.example/log",
-    "log_id": "1.3.6.1.4.1.44363.47.1.99",
-    "ca_cosigner_id": "1.3.6.1.4.1.44363.47.1.99.ca",
+    "log_id": "1.3.6.1.4.1.44363.47.1.99.0.1",
+    "ca_cosigner_id": "1.3.6.1.4.1.44363.47.1.99",
     "ca_cosigner_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
     "poll_interval_ms": 1000
   },
@@ -420,7 +427,7 @@ The cornerstone tests:
 and [TODO.md][todo]). Working draft; APIs may shift to track the
 upstream IETF and c2sp specs.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-03.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
 [plan]: PROJECT_PLAN.md

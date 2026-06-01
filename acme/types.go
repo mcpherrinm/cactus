@@ -1,5 +1,5 @@
 // Package acme implements a minimal RFC 8555 ACME server with the §9
-// extensions of draft-ietf-plants-merkle-tree-certs-03 (PEM-with-properties
+// extensions of draft-ietf-plants-merkle-tree-certs-04 (PEM-with-properties
 // content type, alternate URL for landmark-relative cert).
 //
 // This is a test-grade implementation: auto-pass challenges, in-memory

@@ -45,8 +45,8 @@ type Counter interface{ Add(float64) }
 // SubtreeRequest carries the inputs for a single round of multi-mirror
 // cosignature collection.
 type SubtreeRequest struct {
-	// Subtree is the §5.4.1 MTCSubtree being signed (log_id, start,
-	// end, hash). The mirrors will sign MTCSubtreeSignatureInput for
+	// Subtree is the §5.3.1 MTCSubtree being signed (log_id, start,
+	// end, hash). The mirrors will sign CosignedMessage for
 	// these values.
 	Subtree *MTCSubtree
 	// CACheckpointBody is the bytes of a signed-note checkpoint the
@@ -218,7 +218,7 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		}
 		// Drop the §C.1 keyID prefix.
 		rawSig := raw[4:]
-		// Verify against MTCSubtreeSignatureInput.
+		// Verify against CosignedMessage.
 		msg, err := MarshalSignatureInput(m.Key.ID, subtree)
 		if err != nil {
 			return MTCSignature{}, err

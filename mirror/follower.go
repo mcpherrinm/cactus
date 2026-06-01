@@ -149,7 +149,7 @@ func (f *Follower) advance(ctx context.Context) error {
 		return fmt.Errorf("parse checkpoint: %w", err)
 	}
 
-	// 2) Verify the CA cosignature against MTCSubtreeSignatureInput
+	// 2) Verify the CA cosignature against CosignedMessage
 	// for [0, upstreamSize). If this fails, halt.
 	subtree := &cert.MTCSubtree{
 		LogID: f.cfg.Upstream.LogID,

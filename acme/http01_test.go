@@ -47,7 +47,7 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 	srv, _ := New(Config{
 		Issuer:        issuer,
 		ChallengeMode: ChallengeHTTP01,
@@ -203,7 +203,7 @@ func TestHTTP01ChallengeRejectsBadResponse(t *testing.T) {
 		Signer: s, FS: fs, FlushPeriod: 25 * time.Millisecond,
 	})
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 	srv, _ := New(Config{Issuer: issuer, ChallengeMode: ChallengeHTTP01})
 	hsrv := httptest.NewServer(srv.Handler())
 	defer hsrv.Close()

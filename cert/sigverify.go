@@ -12,9 +12,12 @@ import (
 )
 
 // SignatureAlgorithm identifies how to interpret an MTCSignature's
-// public key + signature bytes. Mirrors the §5.4.2 algorithm registry
-// — ML-DSA values are not yet implemented in the verifier; callers can
-// supply a custom verifier via VerifyMTCSignatureWith.
+// public key + signature bytes. draft-04 §5.3.3 no longer fixes an
+// algorithm registry — a cosigner's algorithm is a PKIX
+// AlgorithmIdentifier carried in the CA certificate's sigAlg (§5.5),
+// resolved out-of-band. These constants are a cactus-internal mapping
+// (TLS SignatureScheme code points) for the algorithms the verifier
+// implements; ML-DSA values require the optional `mldsa` build tag.
 type SignatureAlgorithm uint16
 
 const (
@@ -37,7 +40,7 @@ type CosignerKey struct {
 }
 
 // VerifyMTCSignature checks an MTCSignature.Signature against the
-// signing message (an MTCSubtreeSignatureInput per §5.4.1). The
+// signing message (an CosignedMessage per §5.3.1). The
 // caller supplies a CosignerKey carrying the algorithm + key bytes so
 // the cosigner ID is resolved out-of-band.
 //

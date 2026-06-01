@@ -1,5 +1,5 @@
 // Package landmark implements the landmark sequence from §6.3 of
-// draft-ietf-plants-merkle-tree-certs-03.
+// draft-ietf-plants-merkle-tree-certs-04.
 //
 // A landmark is a (number, treeSize, allocatedAt) triple. The
 // sequence starts at landmark 0 with treeSize 0, and grows by one
@@ -33,18 +33,27 @@ type Landmark struct {
 	AllocatedAt time.Time `json:"allocated_at"`
 }
 
-// TrustAnchorID returns the landmark's trust anchor ID per §6.3.1:
-// base_id with the landmark number appended as a final OID component.
-func (l Landmark) TrustAnchorID(base cert.TrustAnchorID) cert.TrustAnchorID {
-	// In v1 the trust anchor ID is the ASCII representation of the OID
-	// (per §5.2 "For initial experimentation"). Concatenate the number.
-	return cert.TrustAnchorID(fmt.Sprintf("%s.%d", string(base), l.Number))
+// TrustAnchorID returns the landmark's trust anchor ID per §6.3.1/§8.2:
+// CA-ID.1.logNumber.landmarkNumber.
+func (l Landmark) TrustAnchorID(caID cert.TrustAnchorID, logNumber uint16) cert.TrustAnchorID {
+	return cert.LandmarkID(caID, logNumber, l.Number)
+}
+
+// GroupID returns the single-log landmark group trust anchor ID per
+// §8.2.1: CA-ID.2.logNumber.landmarkNumber. The group contains the CA
+// ID plus each active landmark of the log.
+func (l Landmark) GroupID(caID cert.TrustAnchorID, logNumber uint16) cert.TrustAnchorID {
+	return cert.LandmarkGroupID(caID, logNumber, l.Number)
 }
 
 // Config configures the sequence allocator.
 type Config struct {
-	// BaseID is the OID arc for landmark trust anchor IDs (§6.3.1).
-	BaseID cert.TrustAnchorID
+	// CAID is the CA's CA ID (§5.1); landmark trust anchor IDs are
+	// derived from it and the log number (§6.3.1).
+	CAID cert.TrustAnchorID
+
+	// LogNumber is the issuance log's number (§5.2).
+	LogNumber uint16
 
 	// TimeBetweenLandmarks is the §6.3.2 interval. A new landmark is
 	// allocated at most once per such interval.
@@ -274,20 +283,15 @@ func (s *Sequence) LatestTreeSize() uint64 {
 }
 
 // MaxActive returns the §6.3.2 max_active_landmarks for this sequence.
-// Convenience accessor for callers that need the number to populate
-// CertificatePropertyList.additional_trust_anchor_ranges.
+// Convenience accessor for callers that need the number to populate a
+// landmark group's set of active landmarks.
 func (s *Sequence) MaxActive() int {
 	return s.cfg.MaxActive()
 }
 
-// BaseID returns the configured base_id (§6.3.1).
-func (s *Sequence) BaseID() interface{ String() string } {
-	// Return a tiny shim because cert.TrustAnchorID is in another
-	// package and embedding it here would create an import cycle for
-	// callers. Realistic callers already know the type.
-	return baseIDStringer(s.cfg.BaseID)
-}
+// CAID returns the CA ID the sequence's landmark trust anchor IDs are
+// derived from (§5.1).
+func (s *Sequence) CAID() cert.TrustAnchorID { return s.cfg.CAID }
 
-type baseIDStringer []byte
-
-func (b baseIDStringer) String() string { return string(b) }
+// LogNumber returns the issuance log number (§5.2).
+func (s *Sequence) LogNumber() uint16 { return s.cfg.LogNumber }

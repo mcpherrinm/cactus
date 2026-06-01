@@ -53,7 +53,6 @@ func TestRelyingPartyFastPath(t *testing.T) {
 	sgn, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	logID := cert.TrustAnchorID("32473.1")
 	cosigID := cert.TrustAnchorID("32473.1.ca")
-	baseLM := cert.TrustAnchorID("32473.1.lm")
 
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID: logID, CosignerID: cosigID,
@@ -63,11 +62,12 @@ func TestRelyingPartyFastPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	seq, err := landmark.New(landmark.Config{
-		BaseID:               baseLM,
+		CAID:                 logID,
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Millisecond,
 		MaxCertLifetime:      4 * time.Millisecond, // MaxActive = 5
 	}, fs, t0)
@@ -78,7 +78,7 @@ func TestRelyingPartyFastPath(t *testing.T) {
 	srv, _ := acme.New(acme.Config{
 		Issuer: issuer, ChallengeMode: acme.ChallengeAutoPass,
 		Landmarks: seq, SubtreeProof: l.SubtreeProof,
-		LogID: logID, LandmarkBaseID: baseLM,
+		LogID: logID, CAID: logID, LogNumber: 1,
 	})
 	hAcme := httptest.NewServer(srv.Handler())
 	defer hAcme.Close()
@@ -189,8 +189,12 @@ func TestRelyingPartyFastPath(t *testing.T) {
 		if len(proof.Signatures) != 0 {
 			t.Errorf("cert %d has %d signatures, want 0", i, len(proof.Signatures))
 		}
-		// The cert's serial is the entry index.
+		// draft-04 §6.1: serial = (log_number << 48) | index.
 		tbsContents, serial, err := cert.RebuildLogEntryFromTBS(tbs, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, index, err := cert.SplitSerial(serial)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +203,7 @@ func TestRelyingPartyFastPath(t *testing.T) {
 		leaf := cert.EntryHash(tbsContents)
 		gotHash, err := tlogx.EvaluateInclusionProof(
 			func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
-			proof.Start, proof.End, serial, leaf, proof.InclusionProof,
+			proof.Start, proof.End, index, leaf, proof.InclusionProof,
 		)
 		if err != nil {
 			t.Errorf("cert %d EvaluateInclusionProof: %v", i, err)

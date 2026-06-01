@@ -88,7 +88,8 @@ func TestHandlerCapsAtMaxActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
 		MaxCertLifetime:      3 * time.Hour, // MaxActive = 4
 	}

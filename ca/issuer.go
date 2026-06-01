@@ -29,26 +29,36 @@ type Issuer struct {
 	Validator *Validator
 	Log       LogAPI
 
-	// LogIDDN is the precomputed DER-encoded log ID Name (§5.2). It's
-	// used both as the TBSCertificateLogEntry.issuer and the
-	// TBSCertificate.issuer.
-	LogIDDN []byte
+	// CADN is the precomputed DER-encoded CA ID Name (§5.1). It's used
+	// both as the TBSCertificateLogEntry.issuer and the
+	// TBSCertificate.issuer (draft-04: the issuer is the CA ID, not the
+	// per-log ID).
+	CADN []byte
+
+	// LogNumber is this log's number (§5.2), used to compose serial
+	// numbers as (LogNumber << 48) | index (§6.1).
+	LogNumber uint16
 }
 
-// New returns an Issuer configured with the given log ID. logID is the
-// trust anchor ID's ASCII representation (e.g. "32473.1") — see §5.2.
-func New(log LogAPI, logID string) (*Issuer, error) {
+// New returns an Issuer configured with the given CA ID and log number.
+// caID is the trust anchor ID's ASCII representation (e.g.
+// "1.3.6.1.4.1.44363.47.1.99") — see §5.1. logNumber must be >= 1.
+func New(log LogAPI, caID string, logNumber uint16) (*Issuer, error) {
 	if log == nil {
 		return nil, errors.New("ca: log required")
 	}
-	dn, err := cert.BuildLogIDName(logID)
+	if logNumber == 0 {
+		return nil, errors.New("ca: log number must be >= 1")
+	}
+	dn, err := cert.BuildCAName(caID)
 	if err != nil {
-		return nil, fmt.Errorf("ca: log ID DN: %w", err)
+		return nil, fmt.Errorf("ca: CA ID DN: %w", err)
 	}
 	return &Issuer{
 		Validator: NewValidator(),
 		Log:       log,
-		LogIDDN:   dn,
+		CADN:      dn,
+		LogNumber: logNumber,
 	}, nil
 }
 
@@ -59,7 +69,7 @@ func (i *Issuer) Issue(ctx context.Context, csr *x509.CertificateRequest, order 
 	if err != nil {
 		return nil, fmt.Errorf("ca: validate: %w", err)
 	}
-	_, _, tbsContents, err := BuildLogEntry(v, i.LogIDDN)
+	_, _, tbsContents, err := BuildLogEntry(v, i.CADN)
 	if err != nil {
 		return nil, fmt.Errorf("ca: build log entry: %w", err)
 	}
@@ -82,7 +92,8 @@ func (i *Issuer) Issue(ctx context.Context, csr *x509.CertificateRequest, order 
 		return nil, errors.New("ca: log returned no cosigner signatures")
 	}
 
-	// Build MTCProof.
+	// Build MTCProof. extensions is empty (cactus emits no entry
+	// extensions), matching the log entry's empty extensions vector.
 	proof := &cert.MTCProof{
 		Start:          issued.Subtree.Start,
 		End:            issued.Subtree.End,
@@ -94,9 +105,15 @@ func (i *Issuer) Issue(ctx context.Context, csr *x509.CertificateRequest, order 
 		return nil, fmt.Errorf("ca: marshal proof: %w", err)
 	}
 
+	// serialNumber = (logNumber << 48) | index (§6.1).
+	serial, err := cert.ComposeSerial(i.LogNumber, idx)
+	if err != nil {
+		return nil, fmt.Errorf("ca: compose serial: %w", err)
+	}
+
 	derCert, err := assembleCertificate(certInputs{
-		serialNumber:         idx,
-		issuerDN:             i.LogIDDN,
+		serialNumber:         serial,
+		issuerDN:             i.CADN,
 		notBefore:            v.NotBefore,
 		notAfter:             v.NotAfter,
 		subjectDN:            v.Subject,

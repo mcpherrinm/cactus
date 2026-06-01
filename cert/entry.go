@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/letsencrypt/cactus/tlogx"
+	"golang.org/x/crypto/cryptobyte"
 )
 
-// TBSCertificateLogEntry is the §5.3 ASN.1 SEQUENCE that the log stores.
-// It mirrors the TBSCertificate structure of RFC 5280 with a few key
-// substitutions:
+// TBSCertificateLogEntry is the §5.2.1 ASN.1 SEQUENCE that the log
+// stores. It mirrors the TBSCertificate structure of RFC 5280 with a
+// few key substitutions:
 //
-//   - issuer is the log ID DN (§5.2);
+//   - issuer is the CA ID DN (§5.1);
 //   - subjectPublicKeyAlgorithm and subjectPublicKeyInfoHash replace
 //     subjectPublicKeyInfo;
 //   - signature/signatureValue are absent — they are conveyed via the
@@ -30,7 +31,7 @@ type TBSCertificateLogEntry struct {
 	Version int
 
 	// IssuerDN is the DER encoding of the Name (RFC 5280 §4.1.2.4) for
-	// the log ID, as built by BuildLogIDName.
+	// the CA ID, as built by BuildCAName.
 	IssuerDN []byte
 
 	NotBefore, NotAfter time.Time
@@ -53,7 +54,7 @@ type TBSCertificateLogEntry struct {
 	Extensions      []byte // DER of the Extensions SEQUENCE, nil if absent
 }
 
-// MerkleTreeCertEntryType matches the TLS-presentation enum from §5.3.
+// MerkleTreeCertEntryType matches the TLS-presentation enum from §5.2.1.
 type MerkleTreeCertEntryType uint16
 
 const (
@@ -61,26 +62,123 @@ const (
 	EntryTypeTBSCertEntry MerkleTreeCertEntryType = 1
 )
 
-// EncodeNullEntry returns the §5.3 MerkleTreeCertEntry serialization for
-// a null entry. Index 0 of every issuance log is a null entry.
-func EncodeNullEntry() []byte {
-	return []byte{0x00, 0x00}
+// MerkleTreeCertEntryExtensionType is the §5.2.1 entry-extension type
+// registry. No values are defined yet; the registry exists so future
+// drafts can add entry-level extension fields.
+type MerkleTreeCertEntryExtensionType uint16
+
+// MerkleTreeCertEntryExtension is one entry-level extension (§5.2.1):
+//
+//	struct {
+//	    MerkleTreeCertEntryExtensionType extension_type;
+//	    opaque extension_data<0..2^16-1>;
+//	} MerkleTreeCertEntryExtension;
+type MerkleTreeCertEntryExtension struct {
+	Type MerkleTreeCertEntryExtensionType
+	Data []byte
 }
 
-// EncodeTBSCertEntry returns MerkleTreeCertEntry { type=1, data } where
-// data is the contents octets of the TBSCertificateLogEntry DER (i.e.
-// the SEQUENCE's value, excluding identifier+length).
+// marshalEntryExtensions encodes the concatenated extensions of a
+// MerkleTreeCertEntry's `extensions<0..2^16-1>` vector body (i.e.
+// without the outer uint16 length prefix). §5.2.1 requires entries to
+// be sorted ascending by extension_type with no duplicate types.
+func marshalEntryExtensions(exts []MerkleTreeCertEntryExtension) ([]byte, error) {
+	for i := 1; i < len(exts); i++ {
+		if exts[i].Type < exts[i-1].Type {
+			return nil, fmt.Errorf("cert: entry extensions not sorted (type %d after %d)", exts[i].Type, exts[i-1].Type)
+		}
+		if exts[i].Type == exts[i-1].Type {
+			return nil, fmt.Errorf("cert: duplicate entry extension type %d", exts[i].Type)
+		}
+	}
+	var inner []byte
+	for _, e := range exts {
+		if len(e.Data) > 0xffff {
+			return nil, fmt.Errorf("cert: entry extension data %d > 65535 bytes", len(e.Data))
+		}
+		var eb cryptobyte.Builder
+		eb.AddUint16(uint16(e.Type))
+		eb.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(e.Data) })
+		raw, err := eb.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		inner = append(inner, raw...)
+	}
+	return inner, nil
+}
+
+// parseEntryExtensions decodes the body of an `extensions<0..2^16-1>`
+// vector (without the outer uint16 length prefix), enforcing the
+// §5.2.1 ascending-order + no-duplicates rules.
+func parseEntryExtensions(body cryptobyte.String) ([]MerkleTreeCertEntryExtension, error) {
+	var out []MerkleTreeCertEntryExtension
+	for !body.Empty() {
+		var t uint16
+		if !body.ReadUint16(&t) {
+			return nil, errors.New("short entry extension type")
+		}
+		var data cryptobyte.String
+		if !body.ReadUint16LengthPrefixed(&data) {
+			return nil, errors.New("short entry extension data")
+		}
+		if n := len(out); n > 0 {
+			if MerkleTreeCertEntryExtensionType(t) < out[n-1].Type {
+				return nil, fmt.Errorf("entry extensions out of order (type %d)", t)
+			}
+			if MerkleTreeCertEntryExtensionType(t) == out[n-1].Type {
+				return nil, fmt.Errorf("duplicate entry extension type %d", t)
+			}
+		}
+		out = append(out, MerkleTreeCertEntryExtension{
+			Type: MerkleTreeCertEntryExtensionType(t),
+			Data: append([]byte(nil), data...),
+		})
+	}
+	return out, nil
+}
+
+// encodeEntryExtensionsVector returns the full `extensions<0..2^16-1>`
+// vector (uint16 length prefix + body) for prepending to a
+// MerkleTreeCertEntry. cactus emits an empty vector today.
+func encodeEntryExtensionsVector(exts []MerkleTreeCertEntryExtension) ([]byte, error) {
+	body, err := marshalEntryExtensions(exts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 2+len(body))
+	out[0] = byte(len(body) >> 8)
+	out[1] = byte(len(body))
+	copy(out[2:], body)
+	return out, nil
+}
+
+// EncodeNullEntry returns the §5.2.1 MerkleTreeCertEntry serialization
+// for a null entry: an empty extensions vector followed by the
+// null_entry type. Any index MAY be a null entry (draft-04 relaxed the
+// earlier "index 0 must be null" rule).
+func EncodeNullEntry() []byte {
+	return []byte{0x00, 0x00, 0x00, 0x00} // empty extensions + type=null_entry
+}
+
+// EncodeTBSCertEntry returns MerkleTreeCertEntry { extensions={}, type=1,
+// data } where data is the contents octets of the TBSCertificateLogEntry
+// DER (i.e. the SEQUENCE's value, excluding identifier+length). cactus
+// always emits an empty extensions vector.
 func EncodeTBSCertEntry(tbsContents []byte) []byte {
-	out := make([]byte, 2+len(tbsContents))
-	out[0] = byte(EntryTypeTBSCertEntry >> 8)
-	out[1] = byte(EntryTypeTBSCertEntry)
-	copy(out[2:], tbsContents)
+	out := make([]byte, 4+len(tbsContents))
+	// extensions<0..2^16-1>: empty.
+	out[0], out[1] = 0x00, 0x00
+	// type = tbs_cert_entry (0x0001).
+	out[2] = byte(EntryTypeTBSCertEntry >> 8)
+	out[3] = byte(EntryTypeTBSCertEntry)
+	copy(out[4:], tbsContents)
 	return out
 }
 
 // MarshalContents returns the contents octets of the
 // TBSCertificateLogEntry's DER encoding (i.e. without the outer
-// SEQUENCE identifier+length). This is exactly the format §5.3 specifies
+// SEQUENCE identifier+length). This is exactly the format §5.2.1 specifies
 // goes into MerkleTreeCertEntry.tbs_cert_entry_data, and is what the
 // log's Merkle leaves cover.
 func (e *TBSCertificateLogEntry) MarshalContents() ([]byte, error) {
@@ -136,29 +234,44 @@ func (e *TBSCertificateLogEntry) MarshalDER() ([]byte, error) {
 	return wrapSequence(b.Bytes()), nil
 }
 
-// EntryHash implements the §7.2 single-pass hash:
+// EntryHash implements the §7.2 single-pass hash for a tbs_cert_entry
+// with an empty extensions vector (the only form cactus emits):
 //
-//	HASH(0x00 || 0x00 0x01 || tbsContents-with-SPKI-replaced-by-its-hash)
+//	HASH(0x00 || 0x00 0x00 || 0x00 0x01 || tbsContents-with-SPKI-replaced-by-its-hash)
 //
-// where tbsContents is the contents octets of TBSCertificateLogEntry
-// (i.e. as encoded by MarshalContents).
+// where the leading 0x00 is the RFC 9162 leaf prefix, 0x00 0x00 is the
+// empty MerkleTreeCertEntry.extensions vector (§5.2.1), 0x00 0x01 is the
+// tbs_cert_entry type, and tbsContents is the contents octets of
+// TBSCertificateLogEntry (as encoded by MarshalContents). Use
+// EntryHashExt to supply non-empty extensions.
 //
 // In the certificate-verification path, the verifier rebuilds
 // TBSCertificateLogEntry from the X.509 TBSCertificate by replacing the
-// SubjectPublicKeyInfo OCTET STRING-of-SPKI with hash-of-SPKI. We expose
-// the same hash here so issuance and verification can share the
-// implementation.
-//
-// Returns the leaf hash MTH({entry}) as defined in §2.1.1 of RFC 9162:
-// HASH(0x00 || MerkleTreeCertEntry).
+// SubjectPublicKeyInfo OCTET STRING-of-SPKI with hash-of-SPKI, and takes
+// the extensions from the MTCProof. We expose the same hash here so
+// issuance and verification can share the implementation.
 func EntryHash(tbsContents []byte) tlogx.Hash {
+	h, _ := EntryHashExt(nil, tbsContents)
+	return h
+}
+
+// EntryHashExt is EntryHash with an explicit extensions vector. The
+// extensions are written (as the §5.2.1 length-prefixed vector) between
+// the RFC 9162 leaf prefix and the entry type, matching the §7.2 verify
+// step "write the extensions field from the MTCProof to the hash".
+func EntryHashExt(exts []MerkleTreeCertEntryExtension, tbsContents []byte) (tlogx.Hash, error) {
+	extVec, err := encodeEntryExtensionsVector(exts)
+	if err != nil {
+		return tlogx.Hash{}, err
+	}
 	h := sha256.New()
 	h.Write([]byte{0x00})       // RFC 9162 leaf prefix
+	h.Write(extVec)             // MerkleTreeCertEntry.extensions<0..2^16-1>
 	h.Write([]byte{0x00, 0x01}) // MerkleTreeCertEntryType=tbs_cert_entry, big-endian uint16
 	h.Write(tbsContents)
 	var out tlogx.Hash
 	copy(out[:], h.Sum(nil))
-	return out
+	return out, nil
 }
 
 // SinglePassEntryHash implements the alternate single-pass procedure
@@ -188,6 +301,8 @@ func SinglePassEntryHash(preSPKI, spkiDER, postSPKI []byte, hashFn func() hash.H
 
 	// RFC 9162 leaf prefix.
 	hh.Write([]byte{0x00})
+	// MerkleTreeCertEntry.extensions<0..2^16-1>: empty in cactus.
+	hh.Write([]byte{0x00, 0x00})
 	// MerkleTreeCertEntryType = tbs_cert_entry (0x0001).
 	hh.Write([]byte{0x00, 0x01})
 

@@ -45,7 +45,8 @@ func TestLandmarkURLFormat(t *testing.T) {
 
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	seq, err := landmark.New(landmark.Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Millisecond,
 		MaxCertLifetime:      3 * time.Millisecond, // MaxActive = 4
 	}, fs, t0)

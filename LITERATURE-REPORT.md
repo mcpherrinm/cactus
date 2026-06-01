@@ -1,7 +1,7 @@
 # Cactus literature review
 
 **Date:** 2026-05-04. **Scope:** every normative reference in
-`draft-ietf-plants-merkle-tree-certs-03` §14.1, plus the draft itself.
+`draft-ietf-plants-merkle-tree-certs-04` §14.1, plus the draft itself.
 
 This is a snapshot review: per-spec relevance, findings, fixes that
 landed in this pass, and findings deferred for later. The 17 fetched
@@ -25,7 +25,7 @@ specs live in `specs/`.
 
 | Spec | Relevance | What cactus must honor |
 |---|---|---|
-| **draft-…-merkle-tree-certs-03** | Defines everything | Wire formats, OIDs, cert assembly, log/checkpoint signing inputs, ACME extension semantics, ASN.1 module |
+| **draft-…-merkle-tree-certs-04** | Defines everything | Wire formats, OIDs, cert assembly, log/checkpoint signing inputs, ACME extension semantics, ASN.1 module |
 | **RFC 8555** (ACME) | High | §6 request signing/nonces/URL/Content-Type, §7 directory/account/order/finalize/cert resources, §8.1/§8.3 challenges |
 | **RFC 9162** (CT v2) | High | §2.1.1 leaf+internal hash domain separators (`0x00`/`0x01`), §2.1.3/§2.1.4 inclusion+consistency proof algorithms (specialised by MTC §4) |
 | **RFC 5280** (PKIX) | High | §4.1 TBSCertificate fields, §4.1.2.5 UTCTime/GeneralizedTime cutoff at year 2050, §4.1.2.2 serialNumber positivity+length, §4.2 extension criticality, §4.1.2.7 SPKI |

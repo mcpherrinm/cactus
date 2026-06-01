@@ -182,7 +182,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 	}
 
 	// 3) Build an ACME stack on top of the CA log and issue a cert.
-	caIssuer, _ := ca.New(caLog, "test.log.1")
+	caIssuer, _ := ca.New(caLog, "test.log.1", 1)
 	acmeSrv, _ := acme.New(acme.Config{
 		Issuer: caIssuer, ChallengeMode: acme.ChallengeAutoPass,
 	})
@@ -230,7 +230,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 			t.Errorf("unrecognised cosigner: %q", s.CosignerID)
 			continue
 		}
-		// Verify against the same MTCSubtreeSignatureInput the mirror signed.
+		// Verify against the same CosignedMessage the mirror signed.
 		// The subtree hash is reconstructed via the inclusion proof; for
 		// brevity we take it directly from the cert's MTCProof.start/end
 		// + reconstructed hash.

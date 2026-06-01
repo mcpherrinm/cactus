@@ -12,7 +12,7 @@ import (
 )
 
 // buildSignedNote returns a c2sp signed-note for the checkpoint, using
-// the cosigner's signature over the §5.4.1 MTCSubtreeSignatureInput for
+// the cosigner's signature over the §5.3.1 CosignedMessage for
 // [0, size).
 //
 // Body lines (each terminated by \n):

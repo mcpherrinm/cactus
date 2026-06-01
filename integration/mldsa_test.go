@@ -45,7 +45,7 @@ func TestMLDSAIssuance(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer l.Stop()
-			issuer, _ := ca.New(l, "32473.1")
+			issuer, _ := ca.New(l, "32473.1", 1)
 			srv, _ := acme.New(acme.Config{
 				Issuer:        issuer,
 				ChallengeMode: acme.ChallengeAutoPass,

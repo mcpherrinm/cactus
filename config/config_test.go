@@ -20,14 +20,14 @@ func TestLoadValid(t *testing.T) {
 	const body = `{
 	"data_dir": "/tmp/cactus",
 	"log": {
-		"id": "1.3.6.1.4.1.44363.47.1.99",
+		"number": 1,
 		"shortname": "test",
 		"hash": "sha256",
 		"checkpoint_period_ms": 500,
 		"pool_size": 128
 	},
 	"ca_cosigner": {
-		"id": "1.3.6.1.4.1.44363.47.1.99.ca",
+		"id": "1.3.6.1.4.1.44363.47.1.99",
 		"algorithm": "ecdsa-p256-sha256",
 		"seed_path": "keys/ca.seed"
 	},
@@ -59,11 +59,11 @@ func TestValidationErrors(t *testing.T) {
 		name string
 		body string
 	}{
-		{"missing log.id", `{"data_dir":"/tmp","log":{"shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
-		{"bad challenge", `{"data_dir":"/tmp","log":{"id":"a","shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"nope"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
-		{"bad hash", `{"data_dir":"/tmp","log":{"id":"a","shortname":"x","hash":"sha512","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
-		{"bad algorithm", `{"data_dir":"/tmp","log":{"id":"a","shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"rsa","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
-		{"unknown field", `{"data_dir":"/tmp","unknown":1,"log":{"id":"a","shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
+		{"missing log.number", `{"data_dir":"/tmp","log":{"shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
+		{"bad challenge", `{"data_dir":"/tmp","log":{"number":1,"shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"nope"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
+		{"bad hash", `{"data_dir":"/tmp","log":{"number":1,"shortname":"x","hash":"sha512","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
+		{"bad algorithm", `{"data_dir":"/tmp","log":{"number":1,"shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"rsa","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
+		{"unknown field", `{"data_dir":"/tmp","unknown":1,"log":{"number":1,"shortname":"x","hash":"sha256","checkpoint_period_ms":1,"pool_size":1},"ca_cosigner":{"id":"a","algorithm":"ecdsa-p256-sha256","seed_path":"x"},"acme":{"listen":":1","challenge_mode":"auto-pass"},"monitoring":{"listen":":2"},"metrics":{"listen":":3"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
