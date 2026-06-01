@@ -49,9 +49,9 @@ func TestHashTileReadPath(t *testing.T) {
 	// Wait for one more flush so all entries are committed.
 	time.Sleep(100 * time.Millisecond)
 
-	// The full set is: index 0 (null entry) + n issued entries.
-	// Tree size therefore = n+1.
-	want := uint64(n + 1)
+	// The full set is the n issued entries. draft-04 §5.2.1 no longer
+	// reserves an index-0 null entry, so tree size = n.
+	want := uint64(n)
 
 	// Fetch the level-0 tile width=want.
 	url := fmt.Sprintf("%s/tile/%d/0/000.p/%d", s.tileBase, tilewriter.TileHeight, want)
@@ -69,24 +69,15 @@ func TestHashTileReadPath(t *testing.T) {
 			len(tileBytes), want, tlog.HashSize, int(want)*tlog.HashSize)
 	}
 
-	// The first hash should equal tlog.RecordHash(null_entry).
-	wantNull := tlog.RecordHash(cert.EncodeNullEntry())
-	var got tlog.Hash
-	copy(got[:], tileBytes[:tlog.HashSize])
-	if got != wantNull {
-		t.Errorf("hash[0] = %x, want %x (RecordHash of null_entry)", got[:], wantNull[:])
-	}
-
-	// Each subsequent hash should be tlog.RecordHash of the
-	// corresponding issued entry. Note: certs may be issued in any
-	// order under parallelism; here issuance is serial, so index i+1
-	// corresponds to entries[i].
+	// Each hash should be tlog.RecordHash of the corresponding issued
+	// entry. Issuance is serial here, so index i corresponds to
+	// entries[i] (the first issued cert is at index 0).
 	for i, e := range entries {
 		var h tlog.Hash
-		copy(h[:], tileBytes[(i+1)*tlog.HashSize:(i+2)*tlog.HashSize])
+		copy(h[:], tileBytes[i*tlog.HashSize:(i+1)*tlog.HashSize])
 		want := tlog.RecordHash(e)
 		if h != want {
-			t.Errorf("hash[%d] = %x, want %x", i+1, h[:], want[:])
+			t.Errorf("hash[%d] = %x, want %x", i, h[:], want[:])
 		}
 	}
 

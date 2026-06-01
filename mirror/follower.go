@@ -143,7 +143,7 @@ func (f *Follower) advance(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch checkpoint: %w", err)
 	}
-	keyName := "oid/" + string(f.cfg.Upstream.CACosignerID)
+	keyName := cert.OIDName(f.cfg.Upstream.CACosignerID)
 	upstreamSize, upstreamRoot, sigBytes, err := parseSignedNote(checkpoint, keyName)
 	if err != nil {
 		return fmt.Errorf("parse checkpoint: %w", err)
@@ -390,7 +390,7 @@ func (f *Follower) loadFromDisk() error {
 	if err != nil {
 		return err
 	}
-	keyName := "oid/" + string(f.cfg.Upstream.CACosignerID)
+	keyName := cert.OIDName(f.cfg.Upstream.CACosignerID)
 	_, root, _, err := parseSignedNote(cp, keyName)
 	if err != nil {
 		return err

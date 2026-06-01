@@ -78,16 +78,20 @@ func encodeProperty(p CertificateProperty) ([]byte, error) {
 		if len(p.TrustAnchorID) == 0 {
 			return nil, errors.New("cert: trust_anchor_id property has empty value")
 		}
-		// trust-anchor-ids §4.1: TrustAnchorID is opaque<1..2^8-1>, so a
-		// trust anchor ID is always ≤255 bytes regardless of where it
-		// appears.
-		if len(p.TrustAnchorID) > 0xff {
-			return nil, fmt.Errorf("cert: trust_anchor_id %d > 255 bytes", len(p.TrustAnchorID))
+		// Per trust-anchor-ids §7, the property body is the binary
+		// representation of the trust anchor ID (TAI §3) — the same
+		// encoding as MTCProof.cosigner_id, not the ASCII form — with no
+		// inner length prefix (the outer uint16 already bounds the body).
+		bin, err := p.TrustAnchorID.Binary()
+		if err != nil {
+			return nil, fmt.Errorf("cert: trust_anchor_id property: %w", err)
 		}
-		// Per trust-anchor-ids §7, the property body is the raw binary
-		// representation of the trust anchor ID — no inner length prefix
-		// (the outer uint16 already bounds the body).
-		return append([]byte(nil), p.TrustAnchorID...), nil
+		// trust-anchor-ids §4.1: TrustAnchorID is opaque<1..2^8-1>, so it
+		// is always ≤255 bytes regardless of where it appears.
+		if len(bin) > 0xff {
+			return nil, fmt.Errorf("cert: trust_anchor_id %d > 255 bytes", len(bin))
+		}
+		return bin, nil
 
 	default:
 		return nil, fmt.Errorf("cert: unknown property type %d", p.Type)
@@ -130,8 +134,13 @@ func ParsePropertyList(data []byte) ([]CertificateProperty, error) {
 		p := CertificateProperty{Type: CertificatePropertyType(t)}
 		switch p.Type {
 		case PropertyTrustAnchorID:
-			// Body is the entire raw binary representation.
-			p.TrustAnchorID = TrustAnchorID(append([]byte(nil), body...))
+			// Body is the binary representation (TAI §3); decode to the
+			// canonical relative ASCII form.
+			id, err := TrustAnchorIDFromBinary(body)
+			if err != nil {
+				return nil, fmt.Errorf("cert: trust_anchor_id property: %w", err)
+			}
+			p.TrustAnchorID = id
 		default:
 			// Unknown property type: pass the body through unparsed but
 			// don't reject (extensibility).

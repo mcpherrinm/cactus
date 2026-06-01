@@ -142,9 +142,11 @@ type signedSubtree struct {
 	sigs []cert.MTCSignature
 }
 
-// New constructs a Log and starts its sequencing goroutine. The first
-// entry of a fresh log is reserved as a null_entry (§5.3) and is
-// written before this returns.
+// New constructs a Log and starts its sequencing goroutine. A fresh log
+// starts empty; the first appended entry is assigned index 0. draft-04
+// §5.2.1 allows any index (including 0) to be a real entry and no longer
+// reserves index 0 as a null_entry — zero serial numbers are instead
+// prevented by the log number being >= 1 (§6.1).
 func New(ctx context.Context, cfg Config) (*Log, error) {
 	if cfg.Signer == nil {
 		return nil, errors.New("log: cfg.Signer required")
@@ -174,21 +176,14 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 		stopped: make(chan struct{}),
 	}
 
-	// Index 0 must be a null_entry (§5.3). If the log is empty, write it.
-	if tw.Size() == 0 {
-		_, err := tw.Append([][]byte{cert.EncodeNullEntry()})
-		if err != nil {
-			return nil, fmt.Errorf("log: write null entry: %w", err)
-		}
-	}
-
 	// Seed the committed checkpoint and dedup index from disk if present.
 	if err := l.loadCheckpoint(); err != nil {
 		return nil, err
 	}
 	if l.committed == nil {
-		// No prior signed checkpoint — sign the current state synchronously
-		// so Append/Wait have something to wait on after the null entry.
+		// No prior signed checkpoint — sign the current (empty) state
+		// synchronously so an initial checkpoint is published immediately
+		// and Append/Wait have something to wait on.
 		if err := l.flush(); err != nil {
 			return nil, fmt.Errorf("log: initial flush: %w", err)
 		}
@@ -213,8 +208,9 @@ func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64,
 	if idx, ok := l.dedup[idemKey]; ok {
 		return idx, nil
 	}
-	// Index assignment: current committed size + len(pool) + 1 (null_entry baseline absorbed).
-	// Actually: the next-assigned index is current treeSize (post-null) + queued.
+	// Index assignment: the next index is the current tree size plus the
+	// number of entries already queued in the pool. The first entry of a
+	// fresh log gets index 0 (draft-04 §5.2.1).
 	// But we don't know treeSize here without calling tw which is single-writer.
 	// We assign indices when the sequencer flushes; for now we just queue
 	// and return a "tentative" index based on queue position. That's fine
@@ -432,7 +428,7 @@ func (l *Log) flush() error {
 	// mirrors polling our /checkpoint can see and verify the new
 	// state before we ask them to sign.
 	var subs []signedSubtree
-	if newSize > prevSize && prevSize > 0 {
+	if newSize > prevSize {
 		covers := tlogx.FindSubtrees(prevSize, newSize)
 		for _, s := range covers {
 			h, err := subtreeHashFromTW(l.tw, s.Start, s.End)
@@ -623,7 +619,7 @@ func (l *Log) loadCheckpoint() error {
 // reconstructed §5.3.1 CosignedMessage for [0, size). Any
 // other sigs (mirrors) are not checked here.
 func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []parsedNoteSig) error {
-	cosignerKeyName := "oid/" + string(l.cfg.CosignerID)
+	cosignerKeyName := cert.OIDName(l.cfg.CosignerID)
 	wantKeyID := mtcCheckpointKeyID(cosignerKeyName)
 	var sig parsedNoteSig
 	found := false

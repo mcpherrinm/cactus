@@ -38,7 +38,7 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs,
 		FlushPeriod: 25 * time.Millisecond,
@@ -199,7 +199,7 @@ func TestHTTP01ChallengeRejectsBadResponse(t *testing.T) {
 	}
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	l, _ := cactuslog.New(context.Background(), cactuslog.Config{
-		LogID: cert.TrustAnchorID("32473.1"), CosignerID: cert.TrustAnchorID("32473.1.ca"),
+		LogID: cert.TrustAnchorID("32473.1"), CosignerID: cert.TrustAnchorID("32473.1"),
 		Signer: s, FS: fs, FlushPeriod: 25 * time.Millisecond,
 	})
 	defer l.Stop()

@@ -29,10 +29,10 @@ func TestMirrorRequesterCalledAndSigsEmbedded(t *testing.T) {
 	seed := bytes.Repeat([]byte{0x42}, signer.SeedSize)
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	logID := cert.TrustAnchorID("32473.1")
-	cosigID := cert.TrustAnchorID("32473.1.ca")
+	cosigID := cert.TrustAnchorID("32473.1")
 
 	var calls int64
-	fakeMirrorID := cert.TrustAnchorID("fake.mirror")
+	fakeMirrorID := cert.TrustAnchorID("32473.24")
 	requester := func(_ context.Context, st *cert.MTCSubtree, caSig cert.MTCSignature) ([]cert.MTCSignature, error) {
 		atomic.AddInt64(&calls, 1)
 		return []cert.MTCSignature{{
@@ -101,7 +101,7 @@ func TestMirrorRequesterErrorIsNonFatal(t *testing.T) {
 	fs, _ := storage.New(t.TempDir())
 	seed := bytes.Repeat([]byte{0x55}, signer.SeedSize)
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
-	cosigID := cert.TrustAnchorID("32473.1.ca")
+	cosigID := cert.TrustAnchorID("32473.1")
 
 	requester := func(_ context.Context, _ *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
 		return nil, &fakeErr{}

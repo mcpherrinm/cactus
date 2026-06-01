@@ -64,7 +64,7 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 		mSeed[i] = 0xCC
 	}
 	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
-	mirrorID := cert.TrustAnchorID("example.mirror.1")
+	mirrorID := cert.TrustAnchorID("32473.21")
 
 	srv, err := mirror.NewServer(mirror.ServerConfig{
 		Follower:                    follower,
@@ -138,7 +138,7 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 
 	// The body is one signature line: "— oid/<mirrorID> base64(keyID || sig)\n".
 	line := strings.TrimRight(string(respBody), "\n")
-	wantPrefix := "— oid/" + string(mirrorID) + " "
+	wantPrefix := "— " + cert.OIDName(mirrorID) + " "
 	if !strings.HasPrefix(line, wantPrefix) {
 		t.Fatalf("response missing expected prefix: %q", line)
 	}
@@ -191,7 +191,7 @@ func TestMirrorSignSubtreeRejectsStaleCheckpoint(t *testing.T) {
 	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
 	srv, _ := mirror.NewServer(mirror.ServerConfig{
 		Follower: follower, Signer: mSigner,
-		CosignerID: cert.TrustAnchorID("example.mirror.1"),
+		CosignerID: cert.TrustAnchorID("32473.21"),
 	})
 	hSrv := httptest.NewServer(srv.Handler())
 	defer hSrv.Close()
@@ -202,9 +202,9 @@ func TestMirrorSignSubtreeRejectsStaleCheckpoint(t *testing.T) {
 	// blank line in addition to the signed-note's own body/sigs
 	// delimiter (= `\n\n` after the body for zero-sig notes), so
 	// each note is `body\n\n\n` = 5 newlines.
-	subtreeNote := []byte("oid/" + string(ca.logID) + "\n0 1\n" +
+	subtreeNote := []byte(cert.OIDName(ca.logID) + "\n0 1\n" +
 		base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n\n\n")
-	bogusCP := []byte("oid/" + string(ca.logID) + "\n9999\n" +
+	bogusCP := []byte(cert.OIDName(ca.logID) + "\n9999\n" +
 		base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n\n\n")
 	body := append(append([]byte(nil), subtreeNote...), bogusCP...)
 
@@ -225,7 +225,7 @@ func buildSignSubtreeRequest(t *testing.T, logID cert.TrustAnchorID,
 	t.Helper()
 	var b bytes.Buffer
 	// Subtree note: origin / "<start> <end>" / b64(hash) / blank line.
-	b.WriteString("oid/" + string(logID) + "\n")
+	b.WriteString(cert.OIDName(logID) + "\n")
 	b.WriteString(fmt.Sprintf("%d %d\n", start, end))
 	b.WriteString(base64.StdEncoding.EncodeToString(subtreeHash[:]) + "\n")
 	b.WriteString("\n") // blank line between body and (zero) signatures

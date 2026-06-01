@@ -65,7 +65,7 @@ func bringUp(t *testing.T, dir string) *stack {
 		t.Fatal(err)
 	}
 	logID := cert.TrustAnchorID("32473.1")
-	cosignerID := cert.TrustAnchorID("32473.1.ca")
+	cosignerID := cert.TrustAnchorID("32473.1")
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID:       logID,
 		CosignerID:  cosignerID,
@@ -216,7 +216,7 @@ func TestCheckpointEndpoint(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.HasPrefix(string(body), "oid/32473.1\n") {
+	if !strings.HasPrefix(string(body), "oid/1.3.6.1.4.1.32473.1\n") {
 		t.Errorf("unexpected origin: %q", string(body))
 	}
 }

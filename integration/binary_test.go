@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/letsencrypt/cactus/cert"
 )
 
 // freePort asks the kernel for an unused TCP port, returns it (closed),
@@ -66,7 +69,7 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 			"pool_size":            16,
 		},
 		"ca_cosigner": map[string]any{
-			"id":        "1.3.6.1.4.1.44363.47.1.99",
+			"id":        "44363.47.1.99",
 			"algorithm": "ecdsa-p256-sha256",
 			"seed_path": "keys/ca-cosigner.seed",
 		},
@@ -153,7 +156,9 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 		t.Errorf("metrics body missing cactus_log_ instruments: %.200s", body)
 	}
 
-	// /checkpoint on the monitoring listener — there's an initial null-entry checkpoint.
+	// /checkpoint on the monitoring listener — a fresh log publishes an
+	// initial empty (size 0) checkpoint (draft-04 §5.2.1: no reserved
+	// null entry).
 	cpURL := fmt.Sprintf("http://127.0.0.1:%d/checkpoint", monPort)
 	resp3, err := http.Get(cpURL)
 	if err != nil {
@@ -162,6 +167,41 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	defer resp3.Body.Close()
 	if resp3.StatusCode != 200 {
 		t.Fatalf("/checkpoint status = %d", resp3.StatusCode)
+	}
+
+	// §5.5 / §7.1 / §7.2 end-to-end: fetch the CA certificate the server
+	// serves, derive a relying-party config from it, issue a real cert,
+	// and run full §7.2 verification (binary cosigner_id, re-derived
+	// cosigner_name/log_origin, cosignature check). Regression for the
+	// review findings.
+	caCertURL := fmt.Sprintf("http://127.0.0.1:%d/ca-certificate", monPort)
+	caResp, err := http.Get(caCertURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caBody := readAll(caResp.Body)
+	caResp.Body.Close()
+	if caResp.StatusCode != 200 {
+		t.Fatalf("/ca-certificate status = %d", caResp.StatusCode)
+	}
+	block, _ := pem.Decode([]byte(caBody))
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("/ca-certificate not a PEM CERTIFICATE: %q", caBody)
+	}
+	rpCfg, err := cert.ConfigFromCACertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ConfigFromCACertificate: %v", err)
+	}
+	if string(rpCfg.CAID) != "44363.47.1.99" {
+		t.Errorf("RP config CAID = %q, want 44363.47.1.99", rpCfg.CAID)
+	}
+	acmeBase := fmt.Sprintf("http://127.0.0.1:%d", acmePort)
+	certDER, err := acmeIssueOne(acmeBase, "ca-cert-smoke.test")
+	if err != nil {
+		t.Fatalf("issue cert: %v", err)
+	}
+	if err := cert.VerifyCertificate(certDER, rpCfg); err != nil {
+		t.Fatalf("VerifyCertificate against served CA cert: %v", err)
 	}
 
 	// Confirm the seed file got auto-created.

@@ -158,7 +158,13 @@ func certVerify(certPath, logURL string) {
 	if err != nil {
 		die("decode serial: %v", err)
 	}
-	leafHash := cert.EntryHash(tbsContents)
+	// §7.2 step 8.2: the MerkleTreeCertEntry's extensions come from the
+	// MTCProof, not the X.509 cert. Feed them into the leaf hash so a
+	// proof carrying entry extensions hashes correctly.
+	leafHash, err := cert.EntryHashExt(proof.Extensions, tbsContents)
+	if err != nil {
+		die("entry hash: %v", err)
+	}
 	got, err := tlogx.EvaluateInclusionProof(
 		func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
 		proof.Start, proof.End, index, leafHash, proof.InclusionProof,

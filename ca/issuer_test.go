@@ -54,7 +54,7 @@ func newTestLog(t *testing.T) (*cactuslog.Log, signer.Signer, cert.TrustAnchorID
 		t.Fatal(err)
 	}
 	logID := cert.TrustAnchorID("32473.1")
-	cosignerID := cert.TrustAnchorID("32473.1.ca")
+	cosignerID := cert.TrustAnchorID("32473.1")
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID:       logID,
 		CosignerID:  cosignerID,

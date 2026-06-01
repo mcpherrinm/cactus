@@ -40,8 +40,8 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 	// Build a one-shot landmark sequence in-process. Its "tree size"
 	// is the *current* checkpoint size, taken from the live log.
 	cp := s.log.CurrentCheckpoint()
-	if cp.Size < uint64(n+1) {
-		t.Fatalf("log size %d, want >= %d", cp.Size, n+1)
+	if cp.Size < uint64(n) {
+		t.Fatalf("log size %d, want >= %d", cp.Size, n)
 	}
 
 	dir := t.TempDir()

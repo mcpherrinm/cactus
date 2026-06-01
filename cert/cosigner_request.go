@@ -203,7 +203,7 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 
 	// Response: one or more signature lines starting with em-dash.
 	// We expect exactly one matching the configured mirror key.
-	wantKey := "oid/" + string(m.Key.ID)
+	wantKey := OIDName(m.Key.ID)
 	prefix := "— " + wantKey + " "
 	for _, line := range strings.Split(strings.TrimRight(string(respBody), "\n"), "\n") {
 		if !strings.HasPrefix(line, prefix) {
@@ -245,12 +245,12 @@ func buildSignSubtreeBody(req *SubtreeRequest) ([]byte, error) {
 	// Subtree note: <log origin>\n<start> <end>\n<base64 hash>\n\n
 	// followed by zero or more signature lines, then a blank line
 	// (§C.2 inter-section separator).
-	b.WriteString("oid/" + string(req.Subtree.LogID) + "\n")
+	b.WriteString(OIDName(req.Subtree.LogID) + "\n")
 	fmt.Fprintf(&b, "%d %d\n", req.Subtree.Start, req.Subtree.End)
 	b.WriteString(base64.StdEncoding.EncodeToString(req.Subtree.Hash[:]) + "\n")
 	b.WriteString("\n") // body/sigs delimiter
 	if req.CASignature != nil {
-		caKey := "oid/" + string(req.CACosignerID)
+		caKey := OIDName(req.CACosignerID)
 		// The wire signature blob must include a §C.1 keyID prefix.
 		keyID := mtcSubtreeKeyID(caKey)
 		blob := append(append([]byte(nil), keyID[:]...), req.CASignature.Signature...)
