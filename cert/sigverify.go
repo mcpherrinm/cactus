@@ -27,7 +27,16 @@ const (
 	AlgEd25519         SignatureAlgorithm = 0x0807
 	AlgMLDSA44         SignatureAlgorithm = 0x0904 // placeholder
 	AlgMLDSA65         SignatureAlgorithm = 0x0905 // placeholder
+	AlgMLDSA87         SignatureAlgorithm = 0x0906 // placeholder
 )
+
+// mldsaVerify verifies a pure ML-DSA (FIPS 204, empty context) signature.
+// It is installed by the `mldsa` build-tagged file (sigverify_mldsa.go);
+// in a build without that tag it stays nil and AlgMLDSA* verification
+// returns ErrUnsupportedAlgorithm. pub is the raw FIPS 204 public key
+// (as extracted from the cosigner SPKI), matching what signer.Signer
+// returns for ML-DSA keys.
+var mldsaVerify func(alg SignatureAlgorithm, pub, msg, sig []byte) error
 
 // CosignerKey describes a known cosigner.
 type CosignerKey struct {
@@ -44,9 +53,10 @@ type CosignerKey struct {
 // caller supplies a CosignerKey carrying the algorithm + key bytes so
 // the cosigner ID is resolved out-of-band.
 //
-// Only ECDSA-P256-SHA256, ECDSA-P384-SHA384, and Ed25519 are
-// implemented today. ML-DSA verification requires the optional `mldsa`
-// build tag; until then, AlgMLDSA* returns ErrUnsupportedAlgorithm.
+// ECDSA-P256-SHA256, ECDSA-P384-SHA384, and Ed25519 are always
+// implemented. ML-DSA-44/65/87 verification requires the optional
+// `mldsa` build tag; without it, AlgMLDSA* returns
+// ErrUnsupportedAlgorithm.
 func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte) error {
 	if string(sig.CosignerID) != string(key.ID) {
 		return fmt.Errorf("cert: cosigner ID mismatch: sig=%q key=%q", sig.CosignerID, key.ID)
@@ -64,8 +74,11 @@ func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte)
 			return errors.New("cert: ed25519 signature did not verify")
 		}
 		return nil
-	case AlgMLDSA44, AlgMLDSA65:
-		return ErrUnsupportedAlgorithm
+	case AlgMLDSA44, AlgMLDSA65, AlgMLDSA87:
+		if mldsaVerify == nil {
+			return ErrUnsupportedAlgorithm
+		}
+		return mldsaVerify(key.Algorithm, key.PublicKey, signedMessage, sig.Signature)
 	default:
 		return fmt.Errorf("cert: algorithm 0x%04x not recognised", uint16(key.Algorithm))
 	}

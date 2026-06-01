@@ -13,9 +13,9 @@ import (
 	"github.com/letsencrypt/cactus/log/tilewriter"
 )
 
-// TestHashTileReadPath confirms /tile/<H>/<L>/... serves bytes
-// compatible with golang.org/x/mod/sumdb/tlog: a level-0 tile of width
-// W has W concatenated 32-byte hashes, each equal to
+// TestHashTileReadPath confirms /tile/<L>/... (c2sp tlog-tiles layout)
+// serves bytes compatible with golang.org/x/mod/sumdb/tlog: a level-0
+// tile of width W has W concatenated 32-byte hashes, each equal to
 // tlog.RecordHash(entry_i) for i in [tileN*2^H, tileN*2^H + W).
 func TestHashTileReadPath(t *testing.T) {
 	s := bringUp(t, t.TempDir())
@@ -54,7 +54,7 @@ func TestHashTileReadPath(t *testing.T) {
 	want := uint64(n)
 
 	// Fetch the level-0 tile width=want.
-	url := fmt.Sprintf("%s/tile/%d/0/000.p/%d", s.tileBase, tilewriter.TileHeight, want)
+	url := fmt.Sprintf("%s/tile/0/000.p/%d", s.tileBase, want)
 	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"strings"
+	"strconv"
 
 	"github.com/letsencrypt/cactus/storage"
 	"golang.org/x/mod/sumdb/tlog"
@@ -147,7 +147,7 @@ func (w *TileWriter) persistAfterAppend(oldSize int64, newEntries [][]byte) erro
 	for _, t := range tiles {
 		data, err := tlog.ReadTileData(t, w.HashReader())
 		if err != nil {
-			return fmt.Errorf("ReadTileData %s: %w", t.Path(), err)
+			return fmt.Errorf("ReadTileData %s: %w", tilePath(t), err)
 		}
 		if err := w.fs.Put(tilePath(t), data, false); err != nil {
 			return fmt.Errorf("write %s: %w", tilePath(t), err)
@@ -268,29 +268,31 @@ func (w *TileWriter) readPartialDataTile(tileN int64, expectedRecords int64) ([]
 		tileN, expectedRecords)
 }
 
-// appendDataEntry encodes a length-prefixed entry into a data tile.
-// Format: uint24 length (3 bytes, big-endian) || entry bytes.
+// appendDataEntry encodes a length-prefixed entry into a data
+// ("entries") tile. Per c2sp tlog-tiles, "entry bundles are sequences of
+// big-endian uint16 length-prefixed log entries."
 func appendDataEntry(buf []byte, entry []byte) []byte {
-	if len(entry) > 0xffffff {
-		panic(fmt.Sprintf("tilewriter: entry too long (%d bytes)", len(entry)))
+	if len(entry) > 0xffff {
+		panic(fmt.Sprintf("tilewriter: entry too long for uint16 framing (%d bytes)", len(entry)))
 	}
-	out := append(buf, byte(len(entry)>>16), byte(len(entry)>>8), byte(len(entry)))
+	out := append(buf, byte(len(entry)>>8), byte(len(entry)))
 	return append(out, entry...)
 }
 
-// SplitDataTile parses a data tile into its individual entry payloads.
+// SplitDataTile parses a data ("entries") tile into its individual entry
+// payloads, using the c2sp tlog-tiles uint16 length-prefixed framing.
 func SplitDataTile(data []byte) ([][]byte, error) {
 	var out [][]byte
 	for len(data) > 0 {
-		if len(data) < 3 {
+		if len(data) < 2 {
 			return nil, fmt.Errorf("tilewriter: short data tile (%d bytes)", len(data))
 		}
-		n := int(data[0])<<16 | int(data[1])<<8 | int(data[2])
-		if 3+n > len(data) {
-			return nil, fmt.Errorf("tilewriter: truncated entry (%d > %d)", 3+n, len(data))
+		n := int(data[0])<<8 | int(data[1])
+		if 2+n > len(data) {
+			return nil, fmt.Errorf("tilewriter: truncated entry (%d > %d)", 2+n, len(data))
 		}
-		out = append(out, data[3:3+n])
-		data = data[3+n:]
+		out = append(out, data[2:2+n])
+		data = data[2+n:]
 	}
 	return out, nil
 }
@@ -310,21 +312,55 @@ func (h hashReader) ReadHashes(indexes []int64) ([]tlog.Hash, error) {
 	return out, nil
 }
 
-// tilePath returns the on-disk path for a hash tile, rooted under
-// "log/tile/...".
-func tilePath(t tlog.Tile) string {
-	// tlog.Tile.Path() returns "tile/H/L/NNN[.p/W]". Prepend "log/".
-	return "log/" + t.Path()
+// TilePath returns the c2sp tlog-tiles relative path for a tile: hash
+// tiles at "tile/<L>/<N>", entry (data, level -1) tiles at
+// "tile/entries/<N>", with a ".p/<W>" suffix for partial tiles. Unlike
+// golang.org/x/mod/sumdb/tlog's Tile.Path (which is the older Go checksum
+// database layout "tile/<H>/<L>/<N>" with a height segment and "data" for
+// level -1), this matches the convention the wider ecosystem and the
+// IETF reference tooling use. It carries no "log/" storage prefix.
+func TilePath(t tlog.Tile) string {
+	var level string
+	if t.L < 0 {
+		level = "entries"
+	} else {
+		level = strconv.Itoa(t.L)
+	}
+	p := "tile/" + level + "/" + formatTileIndex(t.N)
+	if t.W != 0 && t.W != 1<<uint(t.H) {
+		p += ".p/" + strconv.Itoa(t.W)
+	}
+	return p
 }
 
-// dataTilePath returns the on-disk path for a level=-1 data tile of
-// width recordsInTile (1..EntriesPerDataTile).
-func dataTilePath(tileN int64, recordsInTile int) string {
-	t := tlog.Tile{H: TileHeight, L: -1, N: tileN, W: recordsInTile}
-	// tlog.Tile.Path() uses "data" for level -1.
-	p := t.Path()
-	if !strings.HasPrefix(p, "tile/") {
-		panic("unexpected tlog.Tile.Path: " + p)
+// DataTilePath returns the c2sp tlog-tiles relative path
+// "tile/entries/<N>[.p/<W>]" for the data tile at index tileN holding
+// recordsInTile entries (a full tile of EntriesPerDataTile omits the .p
+// suffix).
+func DataTilePath(tileN int64, recordsInTile int) string {
+	return TilePath(tlog.Tile{H: TileHeight, L: -1, N: tileN, W: recordsInTile})
+}
+
+// formatTileIndex encodes a tile index N as c2sp tlog-tiles path
+// segments: zero-padded 3-digit groups, all but the last prefixed "x"
+// (e.g. 1234067 -> "x001/x234/067").
+func formatTileIndex(n int64) string {
+	s := fmt.Sprintf("%03d", n%1000)
+	for n >= 1000 {
+		n /= 1000
+		s = fmt.Sprintf("x%03d/%s", n%1000, s)
 	}
-	return "log/" + p
+	return s
+}
+
+// tilePath returns the on-disk storage path for a hash tile, rooted under
+// "log/".
+func tilePath(t tlog.Tile) string {
+	return "log/" + TilePath(t)
+}
+
+// dataTilePath returns the on-disk storage path for a level=-1 data tile
+// of width recordsInTile (1..EntriesPerDataTile).
+func dataTilePath(tileN int64, recordsInTile int) string {
+	return "log/" + DataTilePath(tileN, recordsInTile)
 }

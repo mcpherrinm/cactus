@@ -124,39 +124,10 @@ func parseCheckpointBody(body []byte) (uint64, tlogx.Hash, error) {
 	return size, root, nil
 }
 
-// buildDataTilePath mirrors tile/server's dataTilePath. Lives here
-// because the tile package's helper isn't exported.
+// buildDataTilePath returns the c2sp tlog-tiles entries-tile path,
+// delegating to the package helper so the test tracks the real layout.
 func buildDataTilePath(tileN int64, recordsInTile int) string {
-	prefix := "tile/" + strconv.Itoa(tilewriter.TileHeight) + "/data/"
-	if recordsInTile == tilewriter.EntriesPerDataTile {
-		return prefix + nnnPath(tileN)
-	}
-	return prefix + nnnPath(tileN) + ".p/" + strconv.Itoa(recordsInTile)
-}
-
-// nnnPath formats N in the standard 3-digit-segmented "NNN" tlog
-// encoding, matching tlog.Tile.Path.
-func nnnPath(n int64) string {
-	if n == 0 {
-		return "000"
-	}
-	var parts []string
-	for n > 0 {
-		parts = append([]string{padDigit(int(n % 1000))}, parts...)
-		n /= 1000
-	}
-	for i := 0; i < len(parts)-1; i++ {
-		parts[i] = "x" + parts[i]
-	}
-	return strings.Join(parts, "/")
-}
-
-func padDigit(n int) string {
-	s := strconv.Itoa(n)
-	for len(s) < 3 {
-		s = "0" + s
-	}
-	return s
+	return tilewriter.DataTilePath(tileN, recordsInTile)
 }
 
 // loadAllEntries fetches every data tile from `tileBase` up to a tree

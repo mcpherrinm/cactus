@@ -230,9 +230,43 @@ func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdenti
 			return CosignerKey{}, fmt.Errorf("cert: SPKI is not Ed25519 (%T)", pub)
 		}
 		return CosignerKey{ID: id, Algorithm: alg, PublicKey: []byte(edPub)}, nil
+	case AlgMLDSA44, AlgMLDSA65, AlgMLDSA87:
+		// crypto/x509 cannot parse ML-DSA SPKIs, and ML-DSA keys are the
+		// raw FIPS 204 key bytes carried in the SPKI BIT STRING. Extract
+		// that BIT STRING so VerifyMTCSignature (via the mldsa-tagged
+		// verifier) gets the same raw key encoding signer.Signer emits.
+		raw, err := rawKeyFromSPKI(spki)
+		if err != nil {
+			return CosignerKey{}, fmt.Errorf("cert: extract ML-DSA key: %w", err)
+		}
+		return CosignerKey{ID: id, Algorithm: alg, PublicKey: raw}, nil
 	default:
 		return CosignerKey{ID: id, Algorithm: alg, PublicKey: spki}, nil
 	}
+}
+
+// rawKeyFromSPKI extracts the subjectPublicKey BIT STRING contents from a
+// DER SubjectPublicKeyInfo (SEQUENCE { AlgorithmIdentifier, BIT STRING }).
+// Used for algorithms crypto/x509 cannot parse (ML-DSA), where the raw
+// key bytes are exactly the BIT STRING value.
+func rawKeyFromSPKI(spki []byte) ([]byte, error) {
+	var seq asn1.RawValue
+	if _, err := asn1.Unmarshal(spki, &seq); err != nil {
+		return nil, err
+	}
+	var alg asn1.RawValue
+	rest, err := asn1.Unmarshal(seq.Bytes, &alg) // skip AlgorithmIdentifier
+	if err != nil {
+		return nil, err
+	}
+	var bits asn1.BitString
+	if _, err := asn1.Unmarshal(rest, &bits); err != nil {
+		return nil, err
+	}
+	if bits.BitLength%8 != 0 {
+		return nil, fmt.Errorf("cert: SPKI key bit length %d not a whole number of bytes", bits.BitLength)
+	}
+	return bits.RightAlign(), nil
 }
 
 // PKIX signature algorithm OIDs cactus maps to its internal enum.
@@ -240,6 +274,10 @@ var (
 	oidSigECDSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
 	oidSigECDSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
 	oidSigEd25519     = asn1.ObjectIdentifier{1, 3, 101, 112}
+	// id-ml-dsa-44/65/87 (NIST FIPS 204), per RFC 9881.
+	oidSigMLDSA44 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 17}
+	oidSigMLDSA65 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}
+	oidSigMLDSA87 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 19}
 )
 
 func algFromSigAlgOID(oid asn1.ObjectIdentifier) (SignatureAlgorithm, error) {
@@ -250,6 +288,12 @@ func algFromSigAlgOID(oid asn1.ObjectIdentifier) (SignatureAlgorithm, error) {
 		return AlgECDSAP384SHA384, nil
 	case oid.Equal(oidSigEd25519):
 		return AlgEd25519, nil
+	case oid.Equal(oidSigMLDSA44):
+		return AlgMLDSA44, nil
+	case oid.Equal(oidSigMLDSA65):
+		return AlgMLDSA65, nil
+	case oid.Equal(oidSigMLDSA87):
+		return AlgMLDSA87, nil
 	default:
 		return AlgUnknown, fmt.Errorf("cert: unsupported CA cosigner sigAlg %v", oid)
 	}
@@ -266,6 +310,12 @@ func SigAlgOID(alg SignatureAlgorithm) (asn1.ObjectIdentifier, error) {
 		return oidSigECDSASHA384, nil
 	case AlgEd25519:
 		return oidSigEd25519, nil
+	case AlgMLDSA44:
+		return oidSigMLDSA44, nil
+	case AlgMLDSA65:
+		return oidSigMLDSA65, nil
+	case AlgMLDSA87:
+		return oidSigMLDSA87, nil
 	default:
 		return nil, fmt.Errorf("cert: no PKIX sigAlg OID for algorithm 0x%04x", uint16(alg))
 	}

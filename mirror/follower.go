@@ -10,8 +10,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -263,7 +261,7 @@ func (f *Follower) fetchEntries(ctx context.Context, from, to uint64) ([][]byte,
 		if (tileN+1)*ents > to {
 			recordsInTile = int(to - tileN*ents)
 		}
-		raw, err := f.httpGet(ctx, f.cfg.Upstream.TileURL+"/"+dataTilePath(int64(tileN), recordsInTile))
+		raw, err := f.httpGet(ctx, f.cfg.Upstream.TileURL+"/"+tilewriter.DataTilePath(int64(tileN), recordsInTile))
 		if err != nil {
 			return nil, err
 		}
@@ -284,39 +282,6 @@ func (f *Follower) fetchEntries(ctx context.Context, from, to uint64) ([][]byte,
 		}
 	}
 	return out, nil
-}
-
-// dataTilePath mirrors tile/server's path computation. Duplicated here
-// to avoid an import cycle into the tile package.
-func dataTilePath(tileN int64, recordsInTile int) string {
-	prefix := "tile/" + strconv.Itoa(tilewriter.TileHeight) + "/data/"
-	if recordsInTile == tilewriter.EntriesPerDataTile {
-		return prefix + nnnPath(tileN)
-	}
-	return prefix + nnnPath(tileN) + ".p/" + strconv.Itoa(recordsInTile)
-}
-
-func nnnPath(n int64) string {
-	if n == 0 {
-		return "000"
-	}
-	var parts []string
-	for n > 0 {
-		parts = append([]string{padDigit(int(n % 1000))}, parts...)
-		n /= 1000
-	}
-	for i := 0; i < len(parts)-1; i++ {
-		parts[i] = "x" + parts[i]
-	}
-	return strings.Join(parts, "/")
-}
-
-func padDigit(n int) string {
-	s := strconv.Itoa(n)
-	for len(s) < 3 {
-		s = "0" + s
-	}
-	return s
 }
 
 // haltf marks the follower halted, persists the marker, and returns an

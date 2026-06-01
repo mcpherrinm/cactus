@@ -140,8 +140,8 @@ The log is published as **tiles** ([c2sp.org/tlog-tiles]). For cactus,
 that means the read-path (HTTP) serves files at:
 
 - `/checkpoint` — a c2sp signed-note with the latest size + root.
-- `/tile/<H>/<L>/<NNN>[.p/<W>]` — Merkle hash tiles.
-- `/tile/<H>/data/<NNN>[.p/<W>]` — entry blobs (level -1).
+- `/tile/<L>/<NNN>[.p/<W>]` — Merkle hash tiles.
+- `/tile/entries/<NNN>[.p/<W>]` — entry blobs (the "data" tiles).
 - `/log/v1/entry/<index>` — fetch one entry by index.
 - `/subtree/<start>-<end>` — cached signed subtree blob.
 
