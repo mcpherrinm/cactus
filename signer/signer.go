@@ -2,7 +2,7 @@
 // (§5.5 of draft-ietf-plants-merkle-tree-certs-04) signs the
 // CosignedMessage defined in §5.3.1, and this package provides
 // the concrete ECDSA-P256-SHA256 implementation plus a stable interface
-// so other algorithms (Ed25519, ML-DSA-44/65/87) can be added later.
+// so other algorithms (ML-DSA-44/65/87) can be added later.
 package signer
 
 import (
@@ -11,7 +11,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -27,7 +26,6 @@ type Algorithm uint16
 const (
 	AlgECDSAP256SHA256 Algorithm = 0x0403
 	AlgECDSAP384SHA384 Algorithm = 0x0503
-	AlgEd25519         Algorithm = 0x0807
 	AlgMLDSA44         Algorithm = 0x0904
 	AlgMLDSA65         Algorithm = 0x0905
 	AlgMLDSA87         Algorithm = 0x0906
@@ -39,8 +37,6 @@ func (a Algorithm) String() string {
 		return "ecdsa-p256-sha256"
 	case AlgECDSAP384SHA384:
 		return "ecdsa-p384-sha384"
-	case AlgEd25519:
-		return "ed25519"
 	case AlgMLDSA44:
 		return "mldsa-44"
 	case AlgMLDSA65:
@@ -59,8 +55,6 @@ func ParseAlgorithm(name string) (Algorithm, error) {
 		return AlgECDSAP256SHA256, nil
 	case "ecdsa-p384-sha384":
 		return AlgECDSAP384SHA384, nil
-	case "ed25519":
-		return AlgEd25519, nil
 	case "mldsa-44":
 		return AlgMLDSA44, nil
 	case "mldsa-65":
@@ -77,7 +71,7 @@ func ParseAlgorithm(name string) (Algorithm, error) {
 type Signer interface {
 	Algorithm() Algorithm
 	// PublicKey returns the cosigner's public key in the algorithm's
-	// canonical wire format (e.g. SPKI for ECDSA, raw 32 bytes for Ed25519).
+	// canonical wire format (e.g. SPKI for ECDSA, raw FIPS 204 key for ML-DSA).
 	PublicKey() []byte
 	Sign(rand io.Reader, msg []byte) ([]byte, error)
 }
@@ -85,10 +79,13 @@ type Signer interface {
 // SeedSize is the recommended size for the per-cosigner seed file.
 const SeedSize = 32
 
-// hkdfInfo for the P-256 scalar derivation. Different algorithms use
+// hkdfInfo strings for ECDSA scalar derivation. Different algorithms use
 // distinct info strings so the same seed can derive multiple keys
 // without correlation.
-const hkdfInfoECDSAP256 = "cactus/v1/ecdsa-p256-sha256"
+const (
+	hkdfInfoECDSAP256 = "cactus/v1/ecdsa-p256-sha256"
+	hkdfInfoECDSAP384 = "cactus/v1/ecdsa-p384-sha384"
+)
 
 // extraConstructors is populated by build-tag-gated init() functions
 // (e.g. mldsa.go).
@@ -107,33 +104,41 @@ func FromSeed(alg Algorithm, seed []byte) (Signer, error) {
 	}
 	switch alg {
 	case AlgECDSAP256SHA256:
-		return newECDSAP256(seed)
+		return newECDSA(alg, elliptic.P256(), crypto.SHA256, hkdfInfoECDSAP256, seed)
+	case AlgECDSAP384SHA384:
+		return newECDSA(alg, elliptic.P384(), crypto.SHA384, hkdfInfoECDSAP384, seed)
 	}
 	if fn, ok := extraConstructors[alg]; ok {
 		return fn(seed)
 	}
-	return nil, fmt.Errorf("algorithm %s not implemented (rebuild with -tags mldsa for ML-DSA)", alg)
+	return nil, fmt.Errorf("algorithm %s not implemented (build with Go 1.27+ for ML-DSA)", alg)
 }
 
-type ecdsaP256 struct {
+// ecdsaSigner is the ECDSA cosigner for any NIST curve / hash pair cactus
+// supports (P-256/SHA-256 and P-384/SHA-384).
+type ecdsaSigner struct {
+	alg  Algorithm
 	priv *ecdsa.PrivateKey
 	spki []byte
+	hash crypto.Hash
 }
 
-func newECDSAP256(seed []byte) (*ecdsaP256, error) {
-	curve := elliptic.P256()
-	r := hkdf.New(sha256.New, seed, nil, []byte(hkdfInfoECDSAP256))
+// newECDSA deterministically derives an ECDSA signer for the given curve
+// and hash from a 32-byte seed via HKDF.
+func newECDSA(alg Algorithm, curve elliptic.Curve, hash crypto.Hash, info string, seed []byte) (*ecdsaSigner, error) {
+	r := hkdf.New(sha256.New, seed, nil, []byte(info))
 
 	// Sample a scalar in [1, N-1] using rejection sampling, drawing
-	// 32-byte chunks from the HKDF stream until one fits.
+	// curve-order-sized chunks from the HKDF stream until one fits.
 	n := curve.Params().N
+	byteLen := (n.BitLen() + 7) / 8
+	buf := make([]byte, byteLen)
 	var d *big.Int
 	for {
-		var buf [32]byte
-		if _, err := io.ReadFull(r, buf[:]); err != nil {
+		if _, err := io.ReadFull(r, buf); err != nil {
 			return nil, fmt.Errorf("hkdf: %w", err)
 		}
-		d = new(big.Int).SetBytes(buf[:])
+		d = new(big.Int).SetBytes(buf)
 		if d.Sign() > 0 && d.Cmp(n) < 0 {
 			break
 		}
@@ -142,32 +147,21 @@ func newECDSAP256(seed []byte) (*ecdsaP256, error) {
 	priv.PublicKey.Curve = curve
 	priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(d.Bytes())
 
-	spki, err := marshalP256SPKI(&priv.PublicKey)
+	spki, err := marshalPKIXPublicKey(&priv.PublicKey)
 	if err != nil {
 		return nil, err
 	}
-	return &ecdsaP256{priv: priv, spki: spki}, nil
+	return &ecdsaSigner{alg: alg, priv: priv, spki: spki, hash: hash}, nil
 }
 
-func (s *ecdsaP256) Algorithm() Algorithm { return AlgECDSAP256SHA256 }
-func (s *ecdsaP256) PublicKey() []byte    { return s.spki }
+func (s *ecdsaSigner) Algorithm() Algorithm { return s.alg }
+func (s *ecdsaSigner) PublicKey() []byte    { return s.spki }
 
-func (s *ecdsaP256) Sign(r io.Reader, msg []byte) ([]byte, error) {
+func (s *ecdsaSigner) Sign(r io.Reader, msg []byte) ([]byte, error) {
 	if r == nil {
 		r = rand.Reader
 	}
-	digest := sha256.Sum256(msg)
-	return s.priv.Sign(r, digest[:], crypto.SHA256)
-}
-
-// marshalP256SPKI returns the DER SubjectPublicKeyInfo for an ECDSA P-256
-// public key. It's small enough to inline rather than pull in
-// crypto/x509 just for this.
-func marshalP256SPKI(pub *ecdsa.PublicKey) ([]byte, error) {
-	if pub.Curve != elliptic.P256() {
-		return nil, errors.New("not a P-256 key")
-	}
-	// Use stdlib via crypto/x509 import would create a wider dep surface;
-	// however the simplest correct path *is* x509.MarshalPKIXPublicKey.
-	return marshalPKIXPublicKey(pub)
+	h := s.hash.New()
+	h.Write(msg)
+	return s.priv.Sign(r, h.Sum(nil), s.hash)
 }

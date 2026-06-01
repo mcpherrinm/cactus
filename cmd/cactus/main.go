@@ -107,12 +107,12 @@ func signerAlgToCertAlg(a signer.Algorithm) cert.SignatureAlgorithm {
 		return cert.AlgECDSAP256SHA256
 	case signer.AlgECDSAP384SHA384:
 		return cert.AlgECDSAP384SHA384
-	case signer.AlgEd25519:
-		return cert.AlgEd25519
 	case signer.AlgMLDSA44:
 		return cert.AlgMLDSA44
 	case signer.AlgMLDSA65:
 		return cert.AlgMLDSA65
+	case signer.AlgMLDSA87:
+		return cert.AlgMLDSA87
 	default:
 		return cert.AlgUnknown
 	}

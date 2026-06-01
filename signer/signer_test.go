@@ -3,14 +3,16 @@ package signer
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"path/filepath"
 	"testing"
 )
 
 func TestParseAlgorithm(t *testing.T) {
-	for _, name := range []string{"ecdsa-p256-sha256", "ecdsa-p384-sha384", "ed25519", "mldsa-44", "mldsa-65", "mldsa-87"} {
+	for _, name := range []string{"ecdsa-p256-sha256", "ecdsa-p384-sha384", "mldsa-44", "mldsa-65", "mldsa-87"} {
 		alg, err := ParseAlgorithm(name)
 		if err != nil {
 			t.Errorf("ParseAlgorithm(%q): %v", name, err)
@@ -67,6 +69,34 @@ func TestECDSAP256SignVerify(t *testing.T) {
 	}
 	pub := pubAny.(*ecdsa.PublicKey)
 	digest := sha256.Sum256(msg)
+	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
+		t.Errorf("signature failed to verify")
+	}
+}
+
+func TestECDSAP384SignVerify(t *testing.T) {
+	seed := bytes.Repeat([]byte{0xcd}, SeedSize)
+	s, err := FromSeed(AlgECDSAP384SHA384, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Algorithm() != AlgECDSAP384SHA384 {
+		t.Errorf("Algorithm() = %v, want ecdsa-p384-sha384", s.Algorithm())
+	}
+	msg := []byte("hello-mtc-p384")
+	sig, err := s.Sign(nil, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubAny, err := x509.ParsePKIXPublicKey(s.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := pubAny.(*ecdsa.PublicKey)
+	if pub.Curve != elliptic.P384() {
+		t.Fatalf("derived key curve = %s, want P-384", pub.Curve.Params().Name)
+	}
+	digest := sha512.Sum384(msg)
 	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
 		t.Errorf("signature failed to verify")
 	}
