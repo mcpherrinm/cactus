@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/tlogx"
@@ -38,7 +36,7 @@ func treeVerify(logURL string) {
 		if (tileN+1)*tilewriter.EntriesPerDataTile > signedSize {
 			recordsInThisTile = int(signedSize - tileN*tilewriter.EntriesPerDataTile)
 		}
-		tilePath := dataTilePath(int64(tileN), recordsInThisTile)
+		tilePath := tilewriter.DataTilePath(int64(tileN), recordsInThisTile)
 		raw, err := httpGet(logURL + "/" + tilePath)
 		if err != nil {
 			die("fetch %s: %v", tilePath, err)
@@ -137,7 +135,7 @@ func loadAllHashes(logURL string, size uint64) ([]tlog.Hash, [][]byte, error) {
 		if (tileN+1)*tilewriter.EntriesPerDataTile > size {
 			recordsInThisTile = int(size - tileN*tilewriter.EntriesPerDataTile)
 		}
-		raw, err := httpGet(logURL + "/" + dataTilePath(int64(tileN), recordsInThisTile))
+		raw, err := httpGet(logURL + "/" + tilewriter.DataTilePath(int64(tileN), recordsInThisTile))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -156,38 +154,6 @@ func loadAllHashes(logURL string, size uint64) ([]tlog.Hash, [][]byte, error) {
 		hashes = append(hashes, hs...)
 	}
 	return hashes, entries, nil
-}
-
-// dataTilePath mirrors tile/server's dataTilePath but uses TileHeight from tilewriter.
-func dataTilePath(tileN int64, recordsInTile int) string {
-	prefix := "tile/" + strconv.Itoa(tilewriter.TileHeight) + "/data/"
-	if recordsInTile == tilewriter.EntriesPerDataTile {
-		return prefix + nnnPath(tileN)
-	}
-	return prefix + nnnPath(tileN) + ".p/" + strconv.Itoa(recordsInTile)
-}
-
-func nnnPath(n int64) string {
-	if n == 0 {
-		return "000"
-	}
-	var parts []string
-	for n > 0 {
-		parts = append([]string{padDigit(int(n % 1000))}, parts...)
-		n /= 1000
-	}
-	for i := 0; i < len(parts)-1; i++ {
-		parts[i] = "x" + parts[i]
-	}
-	return strings.Join(parts, "/")
-}
-
-func padDigit(n int) string {
-	s := strconv.Itoa(n)
-	for len(s) < 3 {
-		s = "0" + s
-	}
-	return s
 }
 
 // hr wraps a slice as tlog.HashReader.

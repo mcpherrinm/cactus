@@ -11,10 +11,10 @@ $DATA_DIR/
 │   ├── state/
 │   │   └── treeSize              uint64 BE; source-of-truth for log size on reload
 │   ├── tile/
-│   │   ├── 8/0/...               level-0 hash tiles (height 8)
-│   │   ├── 8/0/000.p/<W>         partial tiles (W < 256)
-│   │   ├── 8/1/...               level-1 hash tiles
-│   │   └── 8/data/...            level=-1 data tiles (entry blobs)
+│   │   ├── 0/...                 level-0 hash tiles (c2sp tlog-tiles)
+│   │   ├── 0/000.p/<W>           partial tiles (W < 256)
+│   │   ├── 1/...                 level-1 hash tiles
+│   │   └── entries/...           entry ("data") tiles
 │   └── subtrees/
 │       └── <start>-<end>         per-subtree signature blob
 └── state/
@@ -31,7 +31,7 @@ $DATA_DIR/
   readers never see a half-written file.
 - `log/checkpoint` is the only file that gets rewritten in place
   (mutable), and the rename invariant covers it.
-- `log/tile/8/N/...` files are written exclusive (`O_EXCL`) once they
+- `log/tile/<L>/...` files are written exclusive (`O_EXCL`) once they
   reach the full width; partial widths (`*.p/<W>`) are append-only by
   width but each width has its own immutable file.
 
@@ -44,14 +44,14 @@ emits via `tlog.ReadTileData(t, hr)` — this matches the
 
 ## Data tile bytes
 
-Each data tile holds up to 256 entries, each encoded as:
+Each entries ("data") tile holds up to 256 entries, each encoded as:
 
 ```
-uint24 length (3 bytes, big-endian) || MerkleTreeCertEntry bytes
+uint16 length (2 bytes, big-endian) || MerkleTreeCertEntry bytes
 ```
 
-This is **not** a published spec — it is an internal cactus convention.
-A future tlog-tiles extension may pin a standard format; if so, we will
-adopt it.
+This is the [c2sp tlog-tiles] entry-bundle framing ("entry bundles are
+sequences of big-endian uint16 length-prefixed log entries"), matching
+the IETF reference tooling.
 
 [c2sp tlog-tiles]: https://c2sp.org/tlog-tiles

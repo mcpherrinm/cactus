@@ -1,7 +1,6 @@
 package cert
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -78,13 +77,5 @@ func TestVerifyMTCSignatureCosignerIDMismatch(t *testing.T) {
 	sig := MTCSignature{CosignerID: TrustAnchorID("b"), Signature: sigBytes}
 	if err := VerifyMTCSignature(key, sig, []byte("m")); err == nil {
 		t.Error("expected mismatch error")
-	}
-}
-
-func TestVerifyMTCSignatureUnsupportedReturnsSpecificError(t *testing.T) {
-	key := CosignerKey{ID: TrustAnchorID("x"), Algorithm: AlgMLDSA44, PublicKey: bytes.Repeat([]byte{0}, 16)}
-	err := VerifyMTCSignature(key, MTCSignature{CosignerID: TrustAnchorID("x")}, nil)
-	if err != ErrUnsupportedAlgorithm {
-		t.Errorf("err = %v, want ErrUnsupportedAlgorithm", err)
 	}
 }

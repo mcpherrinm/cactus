@@ -12,8 +12,10 @@ import (
 
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/log"
+	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
+	"golang.org/x/mod/sumdb/tlog"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *log.Log) {
@@ -109,19 +111,26 @@ func TestSubtreeEndpoint(t *testing.T) {
 	}
 }
 
-func TestNNNPath(t *testing.T) {
+// TestTilePath checks the c2sp tlog-tiles path layout: hash tiles at
+// tile/<L>/<N>, entry (data) tiles at tile/entries/<N>, with the
+// x-prefixed 3-digit index encoding and a .p/<W> partial suffix.
+func TestTilePath(t *testing.T) {
+	full := tilewriter.EntriesPerDataTile
 	cases := []struct {
-		n    int64
-		want string
+		got, want string
 	}{
-		{0, "000"},
-		{42, "042"},
-		{1000, "x001/000"},
-		{1234067, "x001/x234/067"},
+		{tilewriter.DataTilePath(0, full), "tile/entries/000"},
+		{tilewriter.DataTilePath(42, full), "tile/entries/042"},
+		{tilewriter.DataTilePath(1000, full), "tile/entries/x001/000"},
+		{tilewriter.DataTilePath(1234067, full), "tile/entries/x001/x234/067"},
+		{tilewriter.DataTilePath(0, 5), "tile/entries/000.p/5"},
+		{tilewriter.TilePath(tlog.Tile{H: tilewriter.TileHeight, L: 0, N: 0, W: full}), "tile/0/000"},
+		{tilewriter.TilePath(tlog.Tile{H: tilewriter.TileHeight, L: 1, N: 7, W: full}), "tile/1/007"},
+		{tilewriter.TilePath(tlog.Tile{H: tilewriter.TileHeight, L: 0, N: 0, W: 5}), "tile/0/000.p/5"},
 	}
 	for _, tc := range cases {
-		if got := nnnPath(tc.n, false); got != tc.want {
-			t.Errorf("nnnPath(%d) = %q, want %q", tc.n, got, tc.want)
+		if tc.got != tc.want {
+			t.Errorf("tile path = %q, want %q", tc.got, tc.want)
 		}
 	}
 }
