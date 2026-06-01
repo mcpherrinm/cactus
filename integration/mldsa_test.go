@@ -1,4 +1,4 @@
-//go:build mldsa
+//go:build go1.27
 
 package integration
 
@@ -22,7 +22,7 @@ import (
 // confirms the signer abstraction is plumbed correctly through the
 // log + cert + cosigner stack.
 func TestMLDSAIssuance(t *testing.T) {
-	for _, alg := range []signer.Algorithm{signer.AlgMLDSA44, signer.AlgMLDSA65} {
+	for _, alg := range []signer.Algorithm{signer.AlgMLDSA44, signer.AlgMLDSA65, signer.AlgMLDSA87} {
 		t.Run(alg.String(), func(t *testing.T) {
 			dir := t.TempDir()
 			fs, _ := storage.New(dir)

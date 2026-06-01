@@ -34,8 +34,7 @@ specs live in `specs/`.
 | **RFC 9110** (HTTP) | Medium | §10.2.3 Retry-After, §15.6.4 503, §12.5.1 Accept negotiation |
 | **FIPS 186-5** (DSS) | High | §6 ECDSA over P-256/P-384, Appendix A.2.1 rejection-sampled `k` |
 | **FIPS 180-4** (SHS) | High | §6.2 SHA-256 (used by Go stdlib via `crypto/sha256`) |
-| **RFC 8032** (EdDSA) | Medium | §5.1 PureEd25519 (32-byte SPKI raw, 64-byte sig, deterministic) |
-| **FIPS 204** (ML-DSA) | Medium (build-tagged) | §3.4 / Algorithm 2 pure-mode prefix, deterministic mode |
+| **FIPS 204** (ML-DSA) | Medium (Go 1.27+) | §3.4 / Algorithm 2 pure-mode prefix, deterministic mode |
 | **RFC 5912** (PKIX ASN.1) | Low | Source of `Validity`, `Name`, `Extensions`, `AlgorithmIdentifier` types imported by MTC §A.1 |
 | **draft-…-tls-trust-anchor-ids-03** | Medium | §3 binary representation of TrustAnchorID, §4.1 `opaque<1..2^8-1>` size cap, §6 CertificatePropertyList encoding |
 | **RFC 8446** (TLS 1.3) | Low | §3 presentation language is the wire-format basis MTC inherits |

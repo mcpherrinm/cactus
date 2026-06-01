@@ -1,4 +1,4 @@
-//go:build !mldsa
+//go:build !go1.27
 
 package cert
 
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// In a build without the `mldsa` tag, ML-DSA cosignatures cannot be
+// On a pre-1.27 toolchain (no crypto/mldsa), ML-DSA cosignatures cannot be
 // verified and VerifyMTCSignature reports the specific sentinel error.
 func TestVerifyMTCSignatureUnsupportedReturnsSpecificError(t *testing.T) {
 	for _, alg := range []SignatureAlgorithm{AlgMLDSA44, AlgMLDSA65, AlgMLDSA87} {

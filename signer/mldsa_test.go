@@ -1,4 +1,4 @@
-//go:build mldsa
+//go:build go1.27
 
 package signer
 
@@ -7,21 +7,25 @@ import (
 	"testing"
 )
 
-func TestMLDSA44SeedDeterministic(t *testing.T) {
-	seed := bytes.Repeat([]byte{0x42}, SeedSize)
-	a, err := FromSeed(AlgMLDSA44, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := FromSeed(AlgMLDSA44, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a.PublicKey(), b.PublicKey()) {
-		t.Errorf("derivation not deterministic")
-	}
-	if a.Algorithm() != AlgMLDSA44 {
-		t.Errorf("Algorithm() = %v, want MLDSA44", a.Algorithm())
+func TestMLDSASeedDeterministic(t *testing.T) {
+	for _, alg := range []Algorithm{AlgMLDSA44, AlgMLDSA65, AlgMLDSA87} {
+		t.Run(alg.String(), func(t *testing.T) {
+			seed := bytes.Repeat([]byte{0x42}, SeedSize)
+			a, err := FromSeed(alg, seed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := FromSeed(alg, seed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(a.PublicKey(), b.PublicKey()) {
+				t.Errorf("derivation not deterministic")
+			}
+			if a.Algorithm() != alg {
+				t.Errorf("Algorithm() = %v, want %v", a.Algorithm(), alg)
+			}
+		})
 	}
 }
 

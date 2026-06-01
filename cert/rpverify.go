@@ -1,9 +1,7 @@
 package cert
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/asn1"
 	"errors"
 	"fmt"
@@ -212,28 +210,18 @@ func checkMTCProofAlgID(der []byte) error {
 
 // cosignerKeyFromSPKI builds a CosignerKey for a CA cosigner from the CA
 // certificate's subjectPublicKeyInfo and the sigAlg OID. For ECDSA the
-// PublicKey is the SPKI DER (as VerifyMTCSignature expects); for Ed25519
-// it is the 32-byte raw key.
+// PublicKey is the SPKI DER (as VerifyMTCSignature expects); for ML-DSA
+// it is the raw FIPS 204 key.
 func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdentifier) (CosignerKey, error) {
 	alg, err := algFromSigAlgOID(sigAlg)
 	if err != nil {
 		return CosignerKey{}, err
 	}
 	switch alg {
-	case AlgEd25519:
-		pub, err := x509.ParsePKIXPublicKey(spki)
-		if err != nil {
-			return CosignerKey{}, fmt.Errorf("cert: parse Ed25519 SPKI: %w", err)
-		}
-		edPub, ok := pub.(ed25519.PublicKey)
-		if !ok {
-			return CosignerKey{}, fmt.Errorf("cert: SPKI is not Ed25519 (%T)", pub)
-		}
-		return CosignerKey{ID: id, Algorithm: alg, PublicKey: []byte(edPub)}, nil
 	case AlgMLDSA44, AlgMLDSA65, AlgMLDSA87:
 		// crypto/x509 cannot parse ML-DSA SPKIs, and ML-DSA keys are the
 		// raw FIPS 204 key bytes carried in the SPKI BIT STRING. Extract
-		// that BIT STRING so VerifyMTCSignature (via the mldsa-tagged
+		// that BIT STRING so VerifyMTCSignature (via the crypto/mldsa
 		// verifier) gets the same raw key encoding signer.Signer emits.
 		raw, err := rawKeyFromSPKI(spki)
 		if err != nil {
@@ -273,7 +261,6 @@ func rawKeyFromSPKI(spki []byte) ([]byte, error) {
 var (
 	oidSigECDSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
 	oidSigECDSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
-	oidSigEd25519     = asn1.ObjectIdentifier{1, 3, 101, 112}
 	// id-ml-dsa-44/65/87 (NIST FIPS 204), per RFC 9881.
 	oidSigMLDSA44 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 17}
 	oidSigMLDSA65 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}
@@ -286,8 +273,6 @@ func algFromSigAlgOID(oid asn1.ObjectIdentifier) (SignatureAlgorithm, error) {
 		return AlgECDSAP256SHA256, nil
 	case oid.Equal(oidSigECDSASHA384):
 		return AlgECDSAP384SHA384, nil
-	case oid.Equal(oidSigEd25519):
-		return AlgEd25519, nil
 	case oid.Equal(oidSigMLDSA44):
 		return AlgMLDSA44, nil
 	case oid.Equal(oidSigMLDSA65):
@@ -308,8 +293,6 @@ func SigAlgOID(alg SignatureAlgorithm) (asn1.ObjectIdentifier, error) {
 		return oidSigECDSASHA256, nil
 	case AlgECDSAP384SHA384:
 		return oidSigECDSASHA384, nil
-	case AlgEd25519:
-		return oidSigEd25519, nil
 	case AlgMLDSA44:
 		return oidSigMLDSA44, nil
 	case AlgMLDSA65:

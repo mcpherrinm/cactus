@@ -218,7 +218,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("ca_cosigner.id must be set")
 	}
 	switch c.CACosigner.Algorithm {
-	case "ecdsa-p256-sha256", "ecdsa-p384-sha384", "ed25519", "mldsa-44", "mldsa-65":
+	case "ecdsa-p256-sha256", "ecdsa-p384-sha384", "mldsa-44", "mldsa-65", "mldsa-87":
+		// ML-DSA algorithms validate here regardless of toolchain, but only
+		// produce a working signer when built with Go 1.27+ (where
+		// crypto/mldsa exists); on older toolchains signer.FromSeed reports
+		// the missing support at startup.
 	default:
 		return fmt.Errorf("ca_cosigner.algorithm %q not supported", c.CACosigner.Algorithm)
 	}

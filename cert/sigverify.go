@@ -2,7 +2,6 @@ package cert
 
 import (
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -24,7 +23,6 @@ const (
 	AlgUnknown         SignatureAlgorithm = 0
 	AlgECDSAP256SHA256 SignatureAlgorithm = 0x0403
 	AlgECDSAP384SHA384 SignatureAlgorithm = 0x0503
-	AlgEd25519         SignatureAlgorithm = 0x0807
 	AlgMLDSA44         SignatureAlgorithm = 0x0904 // placeholder
 	AlgMLDSA65         SignatureAlgorithm = 0x0905 // placeholder
 	AlgMLDSA87         SignatureAlgorithm = 0x0906 // placeholder
@@ -44,7 +42,7 @@ type CosignerKey struct {
 	Algorithm SignatureAlgorithm
 	// PublicKey is the algorithm-canonical key encoding:
 	//   - ECDSA: SPKI DER (parseable by x509.ParsePKIXPublicKey)
-	//   - Ed25519: 32 raw bytes
+	//   - ML-DSA: raw FIPS 204 public key bytes
 	PublicKey []byte
 }
 
@@ -53,9 +51,9 @@ type CosignerKey struct {
 // caller supplies a CosignerKey carrying the algorithm + key bytes so
 // the cosigner ID is resolved out-of-band.
 //
-// ECDSA-P256-SHA256, ECDSA-P384-SHA384, and Ed25519 are always
-// implemented. ML-DSA-44/65/87 verification requires the optional
-// `mldsa` build tag; without it, AlgMLDSA* returns
+// ECDSA-P256-SHA256 and ECDSA-P384-SHA384 are always implemented.
+// ML-DSA-44/65/87 verification requires a Go 1.27+ build (for the
+// built-in crypto/mldsa); on older toolchains AlgMLDSA* returns
 // ErrUnsupportedAlgorithm.
 func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte) error {
 	if string(sig.CosignerID) != string(key.ID) {
@@ -66,14 +64,6 @@ func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte)
 		return verifyECDSA(key.PublicKey, elliptic.P256(), signedMessage, sig.Signature, sha256Sum)
 	case AlgECDSAP384SHA384:
 		return verifyECDSA(key.PublicKey, elliptic.P384(), signedMessage, sig.Signature, sha384Sum)
-	case AlgEd25519:
-		if len(key.PublicKey) != ed25519.PublicKeySize {
-			return fmt.Errorf("cert: ed25519 key has %d bytes, want %d", len(key.PublicKey), ed25519.PublicKeySize)
-		}
-		if !ed25519.Verify(ed25519.PublicKey(key.PublicKey), signedMessage, sig.Signature) {
-			return errors.New("cert: ed25519 signature did not verify")
-		}
-		return nil
 	case AlgMLDSA44, AlgMLDSA65, AlgMLDSA87:
 		if mldsaVerify == nil {
 			return ErrUnsupportedAlgorithm
@@ -86,7 +76,7 @@ func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte)
 
 // ErrUnsupportedAlgorithm is returned when the verifier doesn't have
 // support for the cosigner's algorithm in the current build (e.g.
-// ML-DSA without the mldsa tag).
+// ML-DSA on a pre-1.27 toolchain).
 var ErrUnsupportedAlgorithm = errors.New("cert: signature algorithm not supported in this build")
 
 func verifyECDSA(spki []byte, wantCurve elliptic.Curve, msg, sig []byte, hashFn func([]byte) []byte) error {

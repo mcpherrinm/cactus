@@ -190,8 +190,11 @@ In cactus, the cosigner abstraction is in `signer/`:
 
 - `signer.Signer` — a one-method interface (`Sign(rand, msg) → sig`).
 - `signer.FromSeed(alg, seed)` — derives a key from a 32-byte seed
-  via HKDF. ECDSA-P256 in the default build; ML-DSA-44/65 with
-  `-tags mldsa`.
+  via HKDF. ECDSA-P256 and ECDSA-P384 on any toolchain; ML-DSA-44/65/87
+  on Go 1.27+, where Go's built-in `crypto/mldsa` (FIPS 204) is available.
+  The ML-DSA files carry a `//go:build go1.27` constraint, so they compile
+  in automatically — no build tag. Until Go 1.27 is released a `gotip`
+  1.27-devel toolchain satisfies the constraint (`gotip build ./...`).
 
 ## §6: Building the certificate
 

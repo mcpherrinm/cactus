@@ -52,8 +52,8 @@ operate it, and where to look in the code.
   `/landmarks` endpoint per §6.3.1, and switches the §9 alternate URL
   from a `503` stub to a real signature-less cert once a covering
   landmark exists.
-- Acts as a **CA cosigner** using ECDSA-P256 (or ML-DSA-44/65 if built
-  with `-tags mldsa`).
+- Acts as a **CA cosigner** using ECDSA-P256 or ECDSA-P384 (or
+  ML-DSA-44/65/87 when built with Go 1.27+).
 - Optionally **runs as a cosigning mirror** for an external upstream
   log ([tlog-mirror], [tlog-cosignature]). In mirror mode cactus
   follows an upstream via tlog-tiles, verifies consistency, and
@@ -245,8 +245,13 @@ signatures per second.
 ID to equal the CA ID, so this one value identifies the CA, seeds the
 issuer DN, and roots all derived log / landmark IDs.
 
-Use `ecdsa-p256-sha256` in default builds; `mldsa-44` and `mldsa-65`
-are available with `-tags mldsa`.
+Use `ecdsa-p256-sha256` or `ecdsa-p384-sha384` on any toolchain;
+`mldsa-44`, `mldsa-65`, and `mldsa-87` are available when built with
+Go 1.27+, which provides the built-in `crypto/mldsa` (until 1.27 ships, a
+`gotip` 1.27-devel toolchain works). ML-DSA support compiles in
+automatically via a `//go:build go1.27` constraint — no build tag. An
+`mldsa-*` algorithm in the config still validates on an older toolchain,
+but the server exits at startup explaining the Go 1.27 requirement.
 
 ### `acme`
 
@@ -374,7 +379,7 @@ cactus/
 ├── landmark/  §6.3 landmark sequence allocator + /landmarks handler
 ├── log/       issuance log (single-writer, signed checkpoints + subtrees)
 ├── mirror/    follower + sign-subtree HTTP server
-├── signer/    cosigner abstraction (ECDSA + optional ML-DSA via -tags mldsa)
+├── signer/    cosigner abstraction (ECDSA + ML-DSA on Go 1.27+)
 ├── storage/   on-disk K/V (atomic-rename writes)
 ├── tile/      read-path HTTP server (tlog-tiles compatible layout)
 ├── tlogx/     §4 subtree primitives extending x/mod/sumdb/tlog
@@ -393,8 +398,8 @@ to "verifiable bytes on disk".
 ## Tests
 
 ```sh
-go test -race -count=1 ./...                          # default build
-go test -tags mldsa -count=1 ./...                    # also ML-DSA cosigner
+go test -race -count=1 ./...                          # ECDSA cosigner (Go <1.27)
+gotip test -race -count=1 ./...                       # also ML-DSA cosigner (gotip 1.27-devel auto-enables it)
 go test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
 go test -fuzz=FuzzParseSignSubtreeRequest -fuzztime=30s ./mirror/...
 make integration                                       # `go test -race -count=1 -tags=integration ./integration/...`
