@@ -27,18 +27,14 @@ func TestPropertyListRoundTripStandalone(t *testing.T) {
 }
 
 func TestPropertyListRoundTripLandmark(t *testing.T) {
+	// draft-04 §8.2: a landmark-relative certificate's property list
+	// carries only the individual landmark's trust anchor ID
+	// (CA-ID.1.logNumber.L); the additional_trust_anchor_ranges property
+	// was removed.
 	props := []CertificateProperty{
 		{
 			Type:          PropertyTrustAnchorID,
-			TrustAnchorID: TrustAnchorID("32473.1.lm.42"),
-		},
-		{
-			Type: PropertyAdditionalTAnchorRanges,
-			Ranges: []TrustAnchorRange{{
-				Base: TrustAnchorID("32473.1.lm"),
-				Min:  42,
-				Max:  42 + 168, // max_active - 1 for 169-active
-			}},
+			TrustAnchorID: TrustAnchorID("32473.1.1.8.42"),
 		},
 	}
 	raw, err := BuildPropertyList(props)
@@ -57,21 +53,6 @@ func TestPropertyListRoundTripLandmark(t *testing.T) {
 func TestBuildPropertyListRejectsEmpty(t *testing.T) {
 	if _, err := BuildPropertyList(nil); err == nil {
 		t.Error("expected error for empty list")
-	}
-}
-
-func TestBuildPropertyListRejectsBadRange(t *testing.T) {
-	props := []CertificateProperty{
-		{
-			Type: PropertyAdditionalTAnchorRanges,
-			Ranges: []TrustAnchorRange{{
-				Base: TrustAnchorID("32473.1.lm"),
-				Min:  100, Max: 50, // inverted
-			}},
-		},
-	}
-	if _, err := BuildPropertyList(props); err == nil {
-		t.Error("expected error for inverted range")
 	}
 }
 

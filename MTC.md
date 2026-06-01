@@ -5,7 +5,7 @@ the parts of [draft-ietf-plants-merkle-tree-certs][draft] that you
 need to keep in your head while reading the code.
 
 It's deliberately thinner than the IETF draft. For anything you can't
-find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-03.txt`
+find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-04.txt`
 is the version cactus targets, and section numbers in this doc match
 that file.
 
@@ -114,15 +114,27 @@ In cactus, §4 lives in the `tlogx/` package:
 - `tlogx.GenerateInclusionProof` / `EvaluateInclusionProof` — §4.3.
 - `tlogx.GenerateConsistencyProof` / `VerifyConsistencyProof` — §4.4.
 
-## §5: The issuance log
+## §5: Certification authorities and issuance logs
+
+A CA has a single **CA ID** (§5.1), a trust anchor ID. Each issuance
+log it operates has a **log number** (1–65535); the log's ID is derived
+as `CA-ID.0.logNumber` (§5.2). cactus runs one log, configured by its
+`log.number`.
 
 The log is an append-only tree of `MerkleTreeCertEntry` structures.
-The first entry (index 0) is always a `null_entry`; this guarantees
-serial numbers are non-zero, sidestepping a stupid X.509 footgun.
+Each entry begins with an `extensions<0..2^16-1>` vector (empty in
+cactus) followed by a type. Any index MAY be a `null_entry`; draft-04
+dropped the draft-03 rule that index 0 must be null. Serial numbers are
+kept non-zero instead by requiring a non-zero log number (see §6).
 
 Each non-null entry is a `tbs_cert_entry`: the TBS-style fields of
 the cert with the public key replaced by `HASH(SubjectPublicKeyInfo)`.
-The cert's "issuer" is a special DN containing the log ID.
+The cert's "issuer" is a special DN containing the **CA ID** (§5.1).
+
+A CA's parameters are published in its CA certificate via a critical
+`id-pe-mtcCertificationAuthority` extension (§5.5) carrying the log hash
+algorithm, the CA cosigner's signature algorithm, and a `minSerial`;
+cactus encodes/decodes this in `cert/cacert.go`.
 
 The log is published as **tiles** ([c2sp.org/tlog-tiles]). For cactus,
 that means the read-path (HTTP) serves files at:
@@ -153,20 +165,26 @@ There are two kinds:
   Mirrors prove transparency: a misbehaving CA can't issue a cert
   that mirrors haven't seen.
 
-A cosigner's signature is over a structure called
-`MTCSubtreeSignatureInput` (§5.4.1):
+A cosigner's signature is over a structure called `CosignedMessage`
+(§5.3.1):
 
 ```
 struct {
-    uint8 label[16] = "mtc-subtree/v1\n\0";
-    TrustAnchorID cosigner_id;
-    MTCSubtree subtree;     // log_id, start, end, hash
-} MTCSubtreeSignatureInput;
+    uint8 label[12] = "subtree/v1\n\0";
+    opaque cosigner_name<1..2^8-1>;   // "oid/" + cosigner ID
+    uint64 timestamp;                  // 0 for MTC proofs
+    opaque log_origin<1..2^8-1>;       // "oid/" + log ID
+    uint64 start;
+    uint64 end;
+    HashValue subtree_hash;
+} CosignedMessage;
 ```
 
-The 16-byte label is domain separation: it ensures that a signature
-produced by some other protocol (which would not begin with this
-exact label) can never be replayed as an MTC subtree signature.
+The 12-byte label is domain separation (§12.8): it does not begin with
+the DER SEQUENCE tag `0x30`, so a subtree signature can never collide
+with a TBSCertificate / TBSCertList / OCSP signing input. The structure
+is compatible with the c2sp tlog-cosignature ML-DSA-44 construction.
+MTC proofs always use `timestamp = 0`.
 
 In cactus, the cosigner abstraction is in `signer/`:
 
@@ -186,16 +204,23 @@ In cactus, the cosigner abstraction is in `signer/`:
 
 ```
 struct {
-    uint64 start;
-    uint64 end;
+    MerkleTreeCertEntryExtension extensions<0..2^16-1>;
+    uint48 start;
+    uint48 end;
     HashValue inclusion_proof<0..2^16-1>;
     MTCSignature signatures<0..2^16-1>;
 } MTCProof;
 ```
 
-- `serialNumber` is the cert's index in the log. Hence index 0 is
-  reserved for the null entry: a serialNumber of 0 is forbidden by
-  RFC 5280 §4.1.2.2.
+- `extensions` mirrors the log entry's extensions (empty in cactus).
+- `start`/`end` are 48-bit, leaving room in the serial for the log
+  number.
+- `signatures` MUST be sorted by `cosigner_id` (shorter first, then
+  lexicographically) with no duplicates.
+- `serialNumber` is `(log_number << 48) | index` (§6.1). The non-zero
+  log number keeps the serial non-zero (RFC 5280 §4.1.2.2 forbids a
+  zero serial), and lets a relying party revoke whole logs by serial
+  range (§7.5).
 
 This MTCProof can carry **two flavors of cert**:
 
@@ -348,13 +373,16 @@ ACME is what the authenticating party (the cert holder) uses to
    server then includes a `CertificatePropertyList` alongside the
    PEM (cactus uses an adjacent `MTC PROPERTIES` PEM block; the
    trust-anchor-ids draft hasn't pinned the wire format yet). The
-   property list carries:
-   - `trust_anchor_id` — the log ID for standalone certs, or the
-     specific landmark's ID for landmark-relative certs.
-   - `additional_trust_anchor_ranges` — for landmark-relative
-     certs, the range of compatible landmark IDs (so a relying
-     party that supports a *newer* landmark can also accept this
-     cert).
+   property list carries a single:
+   - `trust_anchor_id` — the **CA ID** for standalone certs (§8.1), or
+     the specific landmark's ID `CA-ID.1.logNumber.L` for
+     landmark-relative certs (§8.2).
+
+   draft-04 removed the draft-03 `additional_trust_anchor_ranges`
+   property. A relying party instead advertises a **landmark group**
+   `CA-ID.2.logNumber.L` (§8.2.1) in its `trust_anchors`, signalling
+   support for the CA's standalone certs and all active landmarks at
+   once.
 3. **Alternate URL.** Per RFC 8555 §7.4.2, the `Link: <...>;
    rel="alternate"` header on the `/finalize` response points at
    the landmark-relative variant of the cert. Until a landmark
@@ -387,7 +415,7 @@ re-verified using the §7.2 procedure on the live log.
 
 ## Further reading
 
-- [draft-ietf-plants-merkle-tree-certs-03][draft] — the spec.
+- [draft-ietf-plants-merkle-tree-certs-04][draft] — the spec.
 - [c2sp tlog-tiles] — the read-path layout cactus uses.
 - [c2sp tlog-cosignature] — the cosigner signed-note format.
 - [c2sp tlog-mirror] — the mirror role.
@@ -395,7 +423,7 @@ re-verified using the §7.2 procedure on the live log.
 - [RFC 9162] — Certificate Transparency v2; the Merkle-tree
   conventions MTC builds on.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-03.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
 [c2sp.org/tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md

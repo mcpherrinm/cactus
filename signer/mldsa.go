@@ -61,6 +61,8 @@ func (s *mldsa44Signer) Algorithm() Algorithm { return AlgMLDSA44 }
 func (s *mldsa44Signer) PublicKey() []byte    { return s.pub }
 func (s *mldsa44Signer) Sign(_ io.Reader, msg []byte) ([]byte, error) {
 	sig := make([]byte, mldsa44.SignatureSize)
+	// draft-04 §5.3.3 / RFC 9881 §3: the ML-DSA context string MUST be
+	// empty (nil ctx) for Merkle Tree Certificate cosignatures.
 	if err := mldsa44.SignTo(s.priv, msg, nil, false, sig); err != nil {
 		return nil, err
 	}

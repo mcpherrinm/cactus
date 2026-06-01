@@ -35,7 +35,6 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	sgn, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	logID := cert.TrustAnchorID("32473.1")
 	cosigID := cert.TrustAnchorID("32473.1.ca")
-	baseLM := cert.TrustAnchorID("32473.1.lm")
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID: logID, CosignerID: cosigID,
 		Signer: sgn, FS: fs, FlushPeriod: 25 * time.Millisecond,
@@ -44,11 +43,12 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	seq, err := landmark.New(landmark.Config{
-		BaseID:               baseLM,
+		CAID:                 logID,
+		LogNumber:            1,
 		TimeBetweenLandmarks: 5 * time.Millisecond,
 		MaxCertLifetime:      20 * time.Millisecond, // MaxActive = 5
 	}, fs, t0)
@@ -57,12 +57,12 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	}
 
 	srv, _ := acme.New(acme.Config{
-		Issuer:         issuer,
-		ChallengeMode:  acme.ChallengeAutoPass,
-		Landmarks:      seq,
-		SubtreeProof:   l.SubtreeProof,
-		LogID:          logID,
-		LandmarkBaseID: baseLM,
+		Issuer:        issuer,
+		ChallengeMode: acme.ChallengeAutoPass,
+		Landmarks:     seq,
+		SubtreeProof:  l.SubtreeProof,
+		LogID:         logID,
+		CAID:          logID, LogNumber: 1,
 	})
 	hsrv := httptest.NewServer(srv.Handler())
 	defer hsrv.Close()
@@ -122,28 +122,17 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Expect: trust_anchor_id = "32473.1.lm.1" (landmark 1) +
-	// additional_trust_anchor_ranges base="32473.1.lm" min=1 max=1+5-1=5
-	if len(altProps) != 2 {
-		t.Fatalf("alt properties len = %d, want 2", len(altProps))
+	// draft-04 §8.2: a landmark-relative cert carries a single
+	// trust_anchor_id = the individual landmark ID CA-ID.1.logNumber.L.
+	// With CA ID "32473.1", log number 1, landmark 1 → "32473.1.1.1.1".
+	// The draft-03 additional_trust_anchor_ranges property was removed.
+	if len(altProps) != 1 {
+		t.Fatalf("alt properties len = %d, want 1", len(altProps))
 	}
 	if altProps[0].Type != cert.PropertyTrustAnchorID {
 		t.Errorf("altProps[0].Type = %d", altProps[0].Type)
 	}
-	if string(altProps[0].TrustAnchorID) != "32473.1.lm.1" {
-		t.Errorf("altProps[0].TrustAnchorID = %q, want 32473.1.lm.1", altProps[0].TrustAnchorID)
-	}
-	if altProps[1].Type != cert.PropertyAdditionalTAnchorRanges {
-		t.Errorf("altProps[1].Type = %d", altProps[1].Type)
-	}
-	if len(altProps[1].Ranges) != 1 {
-		t.Fatalf("altProps[1].Ranges len = %d", len(altProps[1].Ranges))
-	}
-	r := altProps[1].Ranges[0]
-	if string(r.Base) != "32473.1.lm" {
-		t.Errorf("range base = %q, want 32473.1.lm", r.Base)
-	}
-	if r.Min != 1 || r.Max != 5 {
-		t.Errorf("range = [%d, %d], want [1, 5]", r.Min, r.Max)
+	if string(altProps[0].TrustAnchorID) != "32473.1.1.1.1" {
+		t.Errorf("altProps[0].TrustAnchorID = %q, want 32473.1.1.1.1", altProps[0].TrustAnchorID)
 	}
 }

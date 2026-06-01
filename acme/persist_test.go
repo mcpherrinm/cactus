@@ -52,7 +52,7 @@ func TestRestartResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer1, _ := ca.New(l1, "32473.1")
+	issuer1, _ := ca.New(l1, "32473.1", 1)
 	srv1, _ := New(Config{Issuer: issuer1, ChallengeMode: ChallengeAutoPass})
 	if err := srv1.AttachStorage(fs); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestRestartResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l2.Stop()
-	issuer2, _ := ca.New(l2, "32473.1")
+	issuer2, _ := ca.New(l2, "32473.1", 1)
 	srv2, _ := New(Config{Issuer: issuer2, ChallengeMode: ChallengeAutoPass})
 	if err := srv2.AttachStorage(fs2); err != nil {
 		t.Fatal(err)

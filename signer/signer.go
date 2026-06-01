@@ -1,6 +1,6 @@
 // Package signer defines the cosigner signing abstraction. The CA cosigner
-// (§5.5 of draft-ietf-plants-merkle-tree-certs-03) signs the
-// MTCSubtreeSignatureInput defined in §5.4.1, and this package provides
+// (§5.5 of draft-ietf-plants-merkle-tree-certs-04) signs the
+// CosignedMessage defined in §5.3.1, and this package provides
 // the concrete ECDSA-P256-SHA256 implementation plus a stable interface
 // so other algorithms (Ed25519, ML-DSA-44/65/87) can be added later.
 package signer
@@ -73,7 +73,7 @@ func ParseAlgorithm(name string) (Algorithm, error) {
 }
 
 // Signer signs a message with a specific algorithm. Cactus passes the
-// already-prepared MTCSubtreeSignatureInput here.
+// already-prepared CosignedMessage here.
 type Signer interface {
 	Algorithm() Algorithm
 	// PublicKey returns the cosigner's public key in the algorithm's

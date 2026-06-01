@@ -46,7 +46,8 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := landmark.Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Millisecond,
 		MaxCertLifetime:      time.Hour,
 	}
@@ -79,22 +80,27 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// draft-04 §6.1: serial = (log_number << 48) | index.
+	_, index, err := cert.SplitSerial(serial)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Pick the §4.5 covering subtree of [0, lm.TreeSize) that
-	// contains `serial`.
+	// contains the entry index.
 	subtrees := seq.LandmarkSubtrees(lm)
 	if len(subtrees) == 0 {
 		t.Fatalf("landmark %+v has no subtrees", lm)
 	}
 	var chosenSubtree tlogx.Subtree
 	for _, st := range subtrees {
-		if serial >= st.Start && serial < st.End {
+		if index >= st.Start && index < st.End {
 			chosenSubtree = st
 			break
 		}
 	}
 	if chosenSubtree.End == 0 {
-		t.Fatalf("serial %d not in any landmark subtree %+v", serial, subtrees)
+		t.Fatalf("index %d not in any landmark subtree %+v", index, subtrees)
 	}
 
 	// Compute the subtree hash + inclusion proof from the live log's
@@ -111,7 +117,7 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	inclusionProof, err := tlogx.GenerateInclusionProof(
-		chosenSubtree.Start, chosenSubtree.End, serial, hr)
+		chosenSubtree.Start, chosenSubtree.End, index, hr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +160,7 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 	leafHash := cert.EntryHash(rebuildLogEntryContents(t, tbs, s.logIDDN))
 	got, err := tlogx.EvaluateInclusionProof(
 		func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
-		lmProof.Start, lmProof.End, serial, leafHash, lmProof.InclusionProof,
+		lmProof.Start, lmProof.End, index, leafHash, lmProof.InclusionProof,
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -11,14 +11,16 @@ import (
 
 func TestEncodeNullEntry(t *testing.T) {
 	got := EncodeNullEntry()
-	if !bytes.Equal(got, []byte{0x00, 0x00}) {
+	// §5.2.1: empty extensions vector (0x0000) + null_entry type (0x0000).
+	if !bytes.Equal(got, []byte{0x00, 0x00, 0x00, 0x00}) {
 		t.Errorf("EncodeNullEntry = %x", got)
 	}
 }
 
 func TestEncodeTBSCertEntry(t *testing.T) {
 	got := EncodeTBSCertEntry([]byte{0xAA, 0xBB})
-	want := []byte{0x00, 0x01, 0xAA, 0xBB}
+	// §5.2.1: empty extensions (0x0000) + tbs_cert_entry type (0x0001) + data.
+	want := []byte{0x00, 0x00, 0x00, 0x01, 0xAA, 0xBB}
 	if !bytes.Equal(got, want) {
 		t.Errorf("EncodeTBSCertEntry = %x, want %x", got, want)
 	}
@@ -28,18 +30,19 @@ func TestEntryHashShape(t *testing.T) {
 	tbsContents := []byte{0x01, 0x02, 0x03}
 	got := EntryHash(tbsContents)
 
-	// HASH(0x00 || 0x00 0x01 || tbsContents) per §7.2.
+	// HASH(0x00 || 0x00 0x00 || 0x00 0x01 || tbsContents) per §7.2:
+	// leaf prefix, empty extensions vector, tbs_cert_entry type, contents.
 	h := sha256.New()
-	h.Write([]byte{0x00, 0x00, 0x01, 0x01, 0x02, 0x03})
+	h.Write([]byte{0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03})
 	want := h.Sum(nil)
 	if !bytes.Equal(got[:], want) {
 		t.Errorf("EntryHash mismatch:\n got %x\nwant %x", got[:], want)
 	}
 }
 
-func TestBuildLogIDName(t *testing.T) {
+func TestBuildCAName(t *testing.T) {
 	logID := "32473.1"
-	der, err := BuildLogIDName(logID)
+	der, err := BuildCAName(logID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,11 +74,11 @@ func TestBuildLogIDName(t *testing.T) {
 }
 
 func TestMarshalDERIsParseable(t *testing.T) {
-	dn, err := BuildLogIDName("32473.1")
+	dn, err := BuildCAName("32473.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjectDN, err := BuildLogIDName("cactus.test/example")
+	subjectDN, err := BuildCAName("cactus.test/example")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 // Package log is the cactus issuance log: a tiled, single-writer
-// append-only log of MerkleTreeCertEntry blobs (per §5.3 of the draft)
+// append-only log of MerkleTreeCertEntry blobs (per §5.2.1 of the draft)
 // that periodically signs checkpoints and covering subtrees (§4.5,
-// §5.4.1) using a CA cosigner.
+// §5.3.1) using a CA cosigner.
 //
 // The public surface is the Log type, which exposes Append + Wait per
 // PROJECT_PLAN §6. Append assigns an index immediately; Wait blocks
@@ -620,7 +620,7 @@ func (l *Log) loadCheckpoint() error {
 
 // verifyLoadedCheckpointSig confirms that one of the signatures on the
 // loaded signed-note is from our configured CA cosigner over the
-// reconstructed §5.4.1 MTCSubtreeSignatureInput for [0, size). Any
+// reconstructed §5.3.1 CosignedMessage for [0, size). Any
 // other sigs (mirrors) are not checked here.
 func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []parsedNoteSig) error {
 	cosignerKeyName := "oid/" + string(l.cfg.CosignerID)

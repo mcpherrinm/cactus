@@ -83,10 +83,11 @@ func (u UpstreamConfig) PollInterval() time.Duration {
 }
 
 // LandmarkConfig configures the §6.3 landmark sequence + URL.
-// Disabled by default; set Enabled=true to opt in.
+// Disabled by default; set Enabled=true to opt in. In draft-04 landmark
+// trust anchor IDs are derived from the CA ID and log number
+// (CA-ID.1.logNumber.L), so there is no separate base_id parameter.
 type LandmarkConfig struct {
 	Enabled                bool   `json:"enabled"`
-	BaseID                 string `json:"base_id"`
 	TimeBetweenLandmarksMS int    `json:"time_between_landmarks_ms"`
 	MaxCertLifetimeMS      int    `json:"max_cert_lifetime_ms"`
 	URLPath                string `json:"landmark_url_path"`
@@ -103,7 +104,10 @@ func (l LandmarkConfig) MaxCertLifetime() time.Duration {
 }
 
 type LogConfig struct {
-	ID                 string `json:"id"`
+	// Number is the issuance log's log number (draft-04 §5.2), in
+	// [1, 65535]. The log ID is derived as CA-ID.0.Number; the CA ID is
+	// the CA cosigner's ID (ca_cosigner.id).
+	Number             uint16 `json:"number"`
 	ShortName          string `json:"shortname"`
 	Hash               string `json:"hash"`
 	CheckpointPeriodMS int    `json:"checkpoint_period_ms"`
@@ -195,8 +199,8 @@ func (c *Config) Validate() error {
 	if c.DataDir == "" {
 		return fmt.Errorf("data_dir must be set")
 	}
-	if c.Log.ID == "" {
-		return fmt.Errorf("log.id must be set")
+	if c.Log.Number == 0 {
+		return fmt.Errorf("log.number must be set and >= 1 (draft-04 §5.2)")
 	}
 	if c.Log.ShortName == "" {
 		return fmt.Errorf("log.shortname must be set")
@@ -221,9 +225,9 @@ func (c *Config) Validate() error {
 	if c.CACosigner.SeedPath == "" {
 		return fmt.Errorf("ca_cosigner.seed_path must be set")
 	}
-	if c.CACosigner.ID == c.Log.ID {
-		return fmt.Errorf("ca_cosigner.id %q must differ from log.id", c.CACosigner.ID)
-	}
+	// draft-04 §5.4: the CA cosigner ID is the CA ID. ca_cosigner.id is
+	// therefore the CA ID, and the log ID is derived from it as
+	// CA-ID.0.<log.number>.
 	if c.ACME.Listen == "" {
 		return fmt.Errorf("acme.listen must be set")
 	}
@@ -247,9 +251,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log_level %q invalid", c.LogLevel)
 	}
 	if c.Landmarks.Enabled {
-		if c.Landmarks.BaseID == "" {
-			return fmt.Errorf("landmarks.base_id must be set when landmarks.enabled")
-		}
 		if c.Landmarks.TimeBetweenLandmarksMS <= 0 {
 			return fmt.Errorf("landmarks.time_between_landmarks_ms must be > 0")
 		}
@@ -258,9 +259,6 @@ func (c *Config) Validate() error {
 		}
 		if c.Landmarks.URLPath == "" {
 			return fmt.Errorf("landmarks.landmark_url_path must be set")
-		}
-		if c.Landmarks.BaseID == c.Log.ID || c.Landmarks.BaseID == c.CACosigner.ID {
-			return fmt.Errorf("landmarks.base_id %q must differ from log.id and ca_cosigner.id", c.Landmarks.BaseID)
 		}
 	}
 	if len(c.CACosignerQuorum.Mirrors) > 0 {

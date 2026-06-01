@@ -153,14 +153,21 @@ func certVerify(certPath, logURL string) {
 	if err != nil {
 		die("rebuild log entry: %v", err)
 	}
+	// draft-04 §6.1: serial = (log_number << 48) | index.
+	logNumber, index, err := cert.SplitSerial(serial)
+	if err != nil {
+		die("decode serial: %v", err)
+	}
 	leafHash := cert.EntryHash(tbsContents)
 	got, err := tlogx.EvaluateInclusionProof(
 		func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
-		proof.Start, proof.End, serial, leafHash, proof.InclusionProof,
+		proof.Start, proof.End, index, leafHash, proof.InclusionProof,
 	)
 	if err != nil {
 		die("evaluate inclusion proof: %v", err)
 	}
+	fmt.Printf("log number:     %d\n", logNumber)
+	fmt.Printf("entry index:    %d\n", index)
 	fmt.Printf("subtree:        [%d, %d)\n", proof.Start, proof.End)
 	fmt.Printf("recomputed hash: %x\n", got[:])
 	fmt.Printf("signatures:      %d\n", len(proof.Signatures))

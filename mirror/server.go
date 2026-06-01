@@ -25,7 +25,7 @@ type ServerConfig struct {
 	// Follower owns the local mirror state.
 	Follower *Follower
 	// Signer is the mirror's own cosigner key (separate from the
-	// upstream CA's). Used to sign the §5.4.1 input.
+	// upstream CA's). Used to sign the §5.3.1 input.
 	Signer signer.Signer
 	// CosignerID is the mirror's trust anchor ID.
 	CosignerID cert.TrustAnchorID
@@ -165,7 +165,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5) Sign the §5.4.1 MTCSubtreeSignatureInput.
+	// 5) Sign the §5.3.1 CosignedMessage.
 	subtree := &cert.MTCSubtree{
 		LogID: s.cfg.Follower.cfg.Upstream.LogID,
 		Start: parsed.start, End: parsed.end, Hash: parsed.subtreeHash,
@@ -317,7 +317,7 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 }
 
 // verifyCAOnSubtree checks the upstream CA's signature on the subtree
-// note. The CA's signature is over the §5.4.1 MTCSubtreeSignatureInput
+// note. The CA's signature is over the §5.3.1 CosignedMessage
 // for [start, end), with hash = the requester's claimed hash.
 func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
 	wantKey := "oid/" + string(s.cfg.UpstreamCAKey.ID)
@@ -330,7 +330,7 @@ func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
 	}
 	rawSig := caSig.sigBytes[4:]
 
-	// The signed message is MTCSubtreeSignatureInput. We need the
+	// The signed message is CosignedMessage. We need the
 	// log_id, which is the upstream's log ID; we have it on Follower.
 	subtree := &cert.MTCSubtree{
 		LogID: s.cfg.Follower.cfg.Upstream.LogID,

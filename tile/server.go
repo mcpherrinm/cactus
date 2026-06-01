@@ -45,7 +45,7 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 //	GET /checkpoint            — latest signed note
 //	GET /tile/<H>/<L>/<NNN..>  — hash tiles
 //	GET /tile/data/<NNN..>     — data tiles (level -1)
-//	GET /log/v1/entry/<index>  — single entry blob (the §5.3 MerkleTreeCertEntry)
+//	GET /log/v1/entry/<index>  — single entry blob (the §5.2.1 MerkleTreeCertEntry)
 //	GET /subtree/<start>-<end> — cached signed subtree signature
 //	GET /landmarks             — §6.3.1 landmark list (only if WithLandmarks)
 func (s *Server) Handler() http.Handler {

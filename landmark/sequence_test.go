@@ -18,7 +18,8 @@ func newTestSeq(t *testing.T) (*Sequence, storage.FS, time.Time) {
 	}
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	cfg := Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
 		MaxCertLifetime:      7 * 24 * time.Hour,
 	}
@@ -126,7 +127,8 @@ func TestRestartResume(t *testing.T) {
 	fs, _ := storage.New(dir)
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	cfg := Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
 		MaxCertLifetime:      7 * 24 * time.Hour,
 	}
@@ -170,7 +172,8 @@ func TestRestartResume(t *testing.T) {
 // TestActiveDescending pins §6.3.1's ordering: most-recent-first, capped at MaxActive.
 func TestActiveDescending(t *testing.T) {
 	cfg := Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
 		MaxCertLifetime:      3 * time.Hour, // MaxActive = ceil(3) + 1 = 4
 	}
@@ -280,12 +283,17 @@ func TestLandmarkSubtrees(t *testing.T) {
 	}
 }
 
-// TestTrustAnchorID confirms §6.3.1's naming: base_id ‖ "." ‖ N.
+// TestTrustAnchorID confirms §6.3.1/§8.2 naming:
+// CA-ID ‖ 1 ‖ logNumber ‖ landmarkNumber.
 func TestTrustAnchorID(t *testing.T) {
 	l := Landmark{Number: 42}
-	got := l.TrustAnchorID(cert.TrustAnchorID("32473.1.lm"))
-	if string(got) != "32473.1.lm.42" {
-		t.Errorf("got %q, want %q", got, "32473.1.lm.42")
+	got := l.TrustAnchorID(cert.TrustAnchorID("32473.1"), 8)
+	if string(got) != "32473.1.1.8.42" {
+		t.Errorf("got %q, want %q", got, "32473.1.1.8.42")
+	}
+	group := l.GroupID(cert.TrustAnchorID("32473.1"), 8)
+	if string(group) != "32473.1.2.8.42" {
+		t.Errorf("group got %q, want %q", group, "32473.1.2.8.42")
 	}
 }
 

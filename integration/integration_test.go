@@ -76,7 +76,7 @@ func bringUp(t *testing.T, dir string) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := ca.New(l, "32473.1")
+	issuer, err := ca.New(l, "32473.1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func bringUp(t *testing.T, dir string) *stack {
 		log:      l,
 		issuer:   issuer,
 		signer:   s,
-		logIDDN:  issuer.LogIDDN,
+		logIDDN:  issuer.CADN,
 		close: func() {
 			hAcme.Close()
 			hTile.Close()
@@ -387,10 +387,15 @@ func verifyAgainstLog(der []byte, s *stack) error {
 	if err != nil {
 		return err
 	}
+	// draft-04 §6.1/§7.2: serial = (log_number << 48) | index.
+	_, index, err := cert.SplitSerial(serial)
+	if err != nil {
+		return err
+	}
 	leafHash := cert.EntryHash(tbsContents)
 	got, err := tlogx.EvaluateInclusionProof(
 		func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
-		proof.Start, proof.End, serial, leafHash, proof.InclusionProof,
+		proof.Start, proof.End, index, leafHash, proof.InclusionProof,
 	)
 	if err != nil {
 		return err

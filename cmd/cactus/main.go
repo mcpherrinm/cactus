@@ -178,12 +178,21 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// Metrics first so the log and ACME server can register.
 	m := metrics.New()
 
+	// draft-04 identity model: the CA cosigner ID is the CA ID (§5.4),
+	// and the issuance log ID is derived as CA-ID.0.<log.number> (§5.2).
+	caID := cert.TrustAnchorID(cfg.CACosigner.ID)
+	logID, err := cert.LogID(caID, cfg.Log.Number)
+	if err != nil {
+		return fmt.Errorf("derive log ID: %w", err)
+	}
+
 	// Optional landmark sequence (Phase 8). Built before the log so we
 	// can pass the OnFlush hook to log.Config.
 	var landmarkSeq *landmark.Sequence
 	if cfg.Landmarks.Enabled {
 		landmarkSeq, err = landmark.New(landmark.Config{
-			BaseID:               cert.TrustAnchorID(cfg.Landmarks.BaseID),
+			CAID:                 caID,
+			LogNumber:            cfg.Log.Number,
 			TimeBetweenLandmarks: cfg.Landmarks.TimeBetweenLandmarks(),
 			MaxCertLifetime:      cfg.Landmarks.MaxCertLifetime(),
 		}, fsRoot, time.Now())
@@ -191,7 +200,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("landmark sequence: %w", err)
 		}
 		logger.Info("landmarks enabled",
-			"base_id", cfg.Landmarks.BaseID,
+			"ca_id", string(caID),
+			"log_number", cfg.Log.Number,
 			"interval", cfg.Landmarks.TimeBetweenLandmarks(),
 			"max_active", landmarkSeq.MaxActive())
 	}
@@ -201,8 +211,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// forward-declare via a pointer the closure captures.
 	var l *cactuslog.Log
 	logCfg := cactuslog.Config{
-		LogID:       cert.TrustAnchorID(cfg.Log.ID),
-		CosignerID:  cert.TrustAnchorID(cfg.CACosigner.ID),
+		LogID:       logID,
+		CosignerID:  caID,
 		Signer:      sgn,
 		FS:          fsRoot,
 		FlushPeriod: cfg.Log.CheckpointPeriod(),
@@ -297,7 +307,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	logger.Info("log ready", "size", l.CurrentCheckpoint().Size)
 
 	// CA issuer.
-	issuer, err := ca.New(l, cfg.Log.ID)
+	issuer, err := ca.New(l, cfg.CACosigner.ID, cfg.Log.Number)
 	if err != nil {
 		return fmt.Errorf("issuer: %w", err)
 	}
@@ -309,12 +319,13 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		ChallengeMode:  acme.ChallengeMode(cfg.ACME.ChallengeMode),
 		Logger:         logger,
 		OrdersByStatus: m.ACMEOrdersVec(),
-		LogID:          cert.TrustAnchorID(cfg.Log.ID),
+		LogID:          logID,
+		CAID:           caID,
 	}
 	if landmarkSeq != nil {
 		acmeCfg.Landmarks = landmarkSeq
 		acmeCfg.SubtreeProof = l.SubtreeProof
-		acmeCfg.LandmarkBaseID = cert.TrustAnchorID(cfg.Landmarks.BaseID)
+		acmeCfg.LogNumber = cfg.Log.Number
 	}
 	acmeSrv, err := acme.New(acmeCfg)
 	if err != nil {

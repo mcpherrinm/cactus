@@ -15,8 +15,8 @@ import (
 // We walk the DER recursively and verify each TLV length encoding is
 // the shortest legal form per X.690 §10.1 (DER restriction).
 func TestTBSEntryIsDER(t *testing.T) {
-	dn, _ := BuildLogIDName("32473.1")
-	subject, _ := BuildLogIDName("cactus.test/example")
+	dn, _ := BuildCAName("32473.1")
+	subject, _ := BuildCAName("cactus.test/example")
 	algID := []byte{
 		0x30, 0x13,
 		0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
@@ -59,8 +59,8 @@ func TestTBSEntryIsDER(t *testing.T) {
 // DN to push the outer length over 0xFFFF, so the 2-byte long-form
 // length is exercised and validated.
 func TestTBSEntryIsDERLongForm(t *testing.T) {
-	dn, _ := BuildLogIDName("32473.1")
-	bigSubject, _ := BuildLogIDName(strings.Repeat("a", 70_000))
+	dn, _ := BuildCAName("32473.1")
+	bigSubject, _ := BuildCAName(strings.Repeat("a", 70_000))
 	algID := []byte{
 		0x30, 0x13,
 		0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,

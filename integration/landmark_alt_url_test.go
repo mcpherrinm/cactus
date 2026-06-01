@@ -51,13 +51,14 @@ func TestAltURLServesLandmarkRelativeCert(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Stop()
-	issuer, _ := ca.New(l, "32473.1")
+	issuer, _ := ca.New(l, "32473.1", 1)
 
 	// Build a landmark sequence in the same data dir. Time interval
 	// is 1ms so we can append immediately in tests.
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	seq, err := landmark.New(landmark.Config{
-		BaseID:               cert.TrustAnchorID("32473.1.lm"),
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
 		TimeBetweenLandmarks: time.Millisecond,
 		MaxCertLifetime:      time.Hour,
 	}, fs, t0)
@@ -154,14 +155,18 @@ func TestAltURLServesLandmarkRelativeCert(t *testing.T) {
 		if len(proof.Signatures) != 0 {
 			t.Errorf("cert %d landmark variant has %d signatures, want 0", i, len(proof.Signatures))
 		}
-		tbsContents, serial, err := cert.RebuildLogEntryFromTBS(tbs, issuer.LogIDDN)
+		tbsContents, serial, err := cert.RebuildLogEntryFromTBS(tbs, issuer.CADN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, index, err := cert.SplitSerial(serial)
 		if err != nil {
 			t.Fatal(err)
 		}
 		leaf := cert.EntryHash(tbsContents)
 		got, err := tlogx.EvaluateInclusionProof(
 			func(b []byte) tlogx.Hash { return tlogx.Hash(sha256.Sum256(b)) },
-			proof.Start, proof.End, serial, leaf, proof.InclusionProof,
+			proof.Start, proof.End, index, leaf, proof.InclusionProof,
 		)
 		if err != nil {
 			t.Errorf("cert %d EvaluateInclusionProof: %v", i, err)
@@ -169,7 +174,7 @@ func TestAltURLServesLandmarkRelativeCert(t *testing.T) {
 		}
 		// The hash must equal what the live log returns for that
 		// subtree — that's the relying-party invariant.
-		want, _, err := l.SubtreeProof(proof.Start, proof.End, serial)
+		want, _, err := l.SubtreeProof(proof.Start, proof.End, index)
 		if err != nil {
 			t.Fatal(err)
 		}

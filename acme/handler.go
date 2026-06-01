@@ -69,11 +69,14 @@ type Config struct {
 	// application/pem-certificate-chain-with-properties).
 	LogID cert.TrustAnchorID
 
-	// LandmarkBaseID is the base trust anchor ID for the landmark
-	// sequence (§6.3.1's base_id). Required whenever Landmarks is
-	// set, used in the landmark cert's `trust_anchor_id` and
-	// `additional_trust_anchor_ranges` properties.
-	LandmarkBaseID cert.TrustAnchorID
+	// CAID is the CA's CA ID (§5.1). Required whenever Landmarks is set;
+	// landmark trust anchor IDs are derived from it and LogNumber
+	// (CA-ID.1.logNumber.L, §6.3.1).
+	CAID cert.TrustAnchorID
+
+	// LogNumber is the issuance log's number (§5.2). Required whenever
+	// Landmarks is set.
+	LogNumber uint16
 }
 
 // Server is the ACME HTTP server.
@@ -900,14 +903,20 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Link", `<`+s.urlFor("/cert/"+id+"/alternate")+`>;rel="alternate"`)
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
-		// Standalone cert: just the trust_anchor_id property naming the log.
+		// Standalone cert: the trust_anchor_id property naming the CA
+		// (draft-04 §8.1: a standalone certificate's trust anchor ID is
+		// the CA ID). Fall back to LogID when CAID is unset.
+		taID := s.cfg.CAID
+		if len(taID) == 0 {
+			taID = s.cfg.LogID
+		}
 		props := []cert.CertificateProperty{{
 			Type:          cert.PropertyTrustAnchorID,
-			TrustAnchorID: s.cfg.LogID,
+			TrustAnchorID: taID,
 		}}
-		// If LogID isn't configured, fall back to plain PEM rather
-		// than emitting an empty list (which BuildPropertyList rejects).
-		if len(s.cfg.LogID) == 0 {
+		// If neither is configured, fall back to plain PEM rather than
+		// emitting an empty list (which BuildPropertyList rejects).
+		if len(taID) == 0 {
 			pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 			return
 		}
@@ -953,7 +962,8 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.issueNonce(w)
 
-	// Pull the serial out of the standalone cert; that's the log index.
+	// Pull the serial out of the standalone cert and split off the log
+	// index: draft-04 §6.1, serial = (log_number << 48) | index.
 	tbs, _, _, err := cert.SplitCertificate(standalone)
 	if err != nil {
 		http.Error(w, "split cert: "+err.Error(), http.StatusInternalServerError)
@@ -964,24 +974,29 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "decode TBS: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_, index, err := cert.SplitSerial(serial)
+	if err != nil {
+		http.Error(w, "decode serial: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if s.cfg.Landmarks == nil || s.cfg.SubtreeProof == nil {
 		s.serveAltStub(w)
 		return
 	}
 
-	lm, ok := s.cfg.Landmarks.ContainingIndex(serial)
+	lm, ok := s.cfg.Landmarks.ContainingIndex(index)
 	if !ok {
 		s.serveAltStub(w)
 		return
 	}
 
 	// Pick the §4.5 covering subtree of [prev_treeSize, lm.TreeSize)
-	// that contains `serial`.
+	// that contains the entry index.
 	subtrees := s.cfg.Landmarks.LandmarkSubtrees(lm)
 	var chosen tlogx.Subtree
 	for _, st := range subtrees {
-		if serial >= st.Start && serial < st.End {
+		if index >= st.Start && index < st.End {
 			chosen = st
 			break
 		}
@@ -993,7 +1008,7 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subtreeHash, proof, err := s.cfg.SubtreeProof(chosen.Start, chosen.End, serial)
+	subtreeHash, proof, err := s.cfg.SubtreeProof(chosen.Start, chosen.End, index)
 	if err != nil {
 		http.Error(w, "subtree proof: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1013,22 +1028,12 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
-		// Landmark-relative property list per PROJECT_PLAN §8.5:
-		// trust_anchor_id = the specific landmark's TA ID; plus
-		// additional_trust_anchor_ranges covering [N, N+max_active-1]
-		// with base = sequence base_id.
-		maxActive := uint64(s.cfg.Landmarks.MaxActive())
-		if maxActive < 1 {
-			maxActive = 1
-		}
-		base := s.cfg.LandmarkBaseID
+		// draft-04 §8.2: a landmark-relative certificate's trust anchor
+		// ID is the individual landmark ID (CA-ID.1.logNumber.L). The
+		// draft-03 additional_trust_anchor_ranges property was removed;
+		// relying parties advertise a landmark group (§8.2.1) instead.
 		props := []cert.CertificateProperty{
-			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lm.TrustAnchorID(base)},
-			{Type: cert.PropertyAdditionalTAnchorRanges, Ranges: []cert.TrustAnchorRange{{
-				Base: base,
-				Min:  lm.Number,
-				Max:  lm.Number + maxActive - 1,
-			}}},
+			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lm.TrustAnchorID(s.cfg.CAID, s.cfg.LogNumber)},
 		}
 		pl, err := cert.BuildPropertyList(props)
 		if err != nil {
