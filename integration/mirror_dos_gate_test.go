@@ -53,7 +53,7 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	// Mirror with the gate ON.
 	mSeed := bytes.Repeat([]byte{0xDE}, signer.SeedSize)
 	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
-	mirrorID := cert.TrustAnchorID("dos.mirror")
+	mirrorID := cert.TrustAnchorID("32473.23")
 	srv, err := mirror.NewServer(mirror.ServerConfig{
 		Follower:                    follower,
 		Signer:                      mSigner,
@@ -145,7 +145,7 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	if resp3.StatusCode != 200 {
 		t.Fatalf("valid-CA-sig: status = %d, body=%s", resp3.StatusCode, body3)
 	}
-	if !strings.Contains(string(body3), "oid/"+string(mirrorID)) {
+	if !strings.Contains(string(body3), cert.OIDName(mirrorID)) {
 		t.Errorf("valid-CA-sig: response missing mirror sig line: %q", body3)
 	}
 }
@@ -161,12 +161,12 @@ func buildSignSubtreeRequestWithCASig(
 	cpBody []byte, proof []tlogx.Hash,
 ) []byte {
 	t.Helper()
-	caKey := "oid/" + string(caCosignerID)
+	caKey := cert.OIDName(caCosignerID)
 	keyID := mtcSubtreeKeyIDInline(caKey)
 	blob := append(append([]byte(nil), keyID[:]...), caSig...)
 
 	var b bytes.Buffer
-	b.WriteString("oid/" + string(logID) + "\n")
+	b.WriteString(cert.OIDName(logID) + "\n")
 	fmt.Fprintf(&b, "%d %d\n", start, end)
 	b.WriteString(base64.StdEncoding.EncodeToString(subtreeHash[:]) + "\n")
 	b.WriteString("\n") // body/sigs delimiter

@@ -103,7 +103,7 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 	mCfg := standardConfig(mDataDir, mAcmePort, mMonPort, mMetricsPort)
 	mCfg["mirror"] = map[string]any{
 		"enabled":                         true,
-		"cosigner_id":                     "1.3.6.1.4.1.44363.47.2.1.mirror",
+		"cosigner_id":                     "44363.47.2.1",
 		"seed_path":                       "keys/mirror-cosigner.seed",
 		"algorithm":                       "ecdsa-p256-sha256",
 		"sign_subtree_listen":             fmt.Sprintf("127.0.0.1:%d", mSignPort),
@@ -114,8 +114,8 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 			// draft-04 §5.2: the upstream log ID is the CA ID with the
 			// log number appended (CA-ID.0.1); the CA cosigner ID is the
 			// CA ID (§5.4).
-			"log_id":              "1.3.6.1.4.1.44363.47.1.99.0.1",
-			"ca_cosigner_id":      "1.3.6.1.4.1.44363.47.1.99",
+			"log_id":              "44363.47.1.99.0.1",
+			"ca_cosigner_id":      "44363.47.1.99",
 			"ca_cosigner_key_pem": string(pubPEM),
 			"poll_interval_ms":    100,
 		},
@@ -199,7 +199,7 @@ func standardConfig(dataDir string, acmePort, monPort, metricsPort int) map[stri
 			"pool_size":            16,
 		},
 		"ca_cosigner": map[string]any{
-			"id":        "1.3.6.1.4.1.44363.47.1.99",
+			"id":        "44363.47.1.99",
 			"algorithm": "ecdsa-p256-sha256",
 			"seed_path": "keys/ca-cosigner.seed",
 		},

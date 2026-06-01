@@ -32,7 +32,7 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	logID := cert.TrustAnchorID("32473.1")
-	cosignerID := cert.TrustAnchorID("32473.1.ca")
+	cosignerID := cert.TrustAnchorID("32473.1")
 	l, err := New(context.Background(), Config{
 		LogID:       logID,
 		CosignerID:  cosignerID,
@@ -58,8 +58,8 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 	}
 
 	cp := l.CurrentCheckpoint()
-	if cp.Size < 2 {
-		t.Fatalf("expected size >= 2 (null + entry), got %d", cp.Size)
+	if cp.Size < 1 {
+		t.Fatalf("expected size >= 1 (one entry), got %d", cp.Size)
 	}
 
 	// Parse the signed note: 3 body lines, blank line, 1 signature line.
@@ -72,8 +72,8 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 	if len(bodyLines) != 3 {
 		t.Fatalf("expected 3 body lines, got %d", len(bodyLines))
 	}
-	if bodyLines[0] != "oid/"+string(logID) {
-		t.Errorf("origin = %q, want %q", bodyLines[0], "oid/"+string(logID))
+	if bodyLines[0] != cert.OIDName(logID) {
+		t.Errorf("origin = %q, want %q", bodyLines[0], cert.OIDName(logID))
 	}
 
 	// Signature line: "— <key> <base64(keyID(4) || sig)>".
@@ -91,8 +91,8 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Fatalf("malformed sig line: %q", sigLine)
 	}
 	sigKeyName := sigParts[0]
-	if sigKeyName != "oid/"+string(cosignerID) {
-		t.Errorf("sig key = %q, want %q", sigKeyName, "oid/"+string(cosignerID))
+	if sigKeyName != cert.OIDName(cosignerID) {
+		t.Errorf("sig key = %q, want %q", sigKeyName, cert.OIDName(cosignerID))
 	}
 	sigBytes, err := base64.StdEncoding.DecodeString(sigParts[1])
 	if err != nil {
@@ -102,7 +102,7 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Fatalf("sig too short: %d bytes", len(sigBytes))
 	}
 	// First 4 bytes are the §C.1 keyID; rest is the raw signature.
-	wantKeyID := MTCCheckpointKeyID("oid/" + string(cosignerID))
+	wantKeyID := MTCCheckpointKeyID(cert.OIDName(cosignerID))
 	if !bytes.Equal(sigBytes[:4], wantKeyID[:]) {
 		t.Errorf("keyID mismatch: got %x, want %x", sigBytes[:4], wantKeyID)
 	}

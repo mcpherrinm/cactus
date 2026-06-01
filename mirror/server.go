@@ -184,7 +184,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	// 6) Emit the signature line per [tlog-cosignature]: em-dash,
 	// key name, base64(keyID || signature). Use the §C.1 subtree key
 	// ID derivation: SHA-256(keyName || 0x0A || 0xFF || "mtc-subtree/v1")[:4].
-	keyName := "oid/" + string(s.cfg.CosignerID)
+	keyName := cert.OIDName(s.cfg.CosignerID)
 	keyID := subtreeKeyID(keyName)
 	sigWithID := append(append([]byte(nil), keyID[:]...), sig...)
 	line := fmt.Sprintf("%s %s %s\n", emDash, keyName, base64.StdEncoding.EncodeToString(sigWithID))
@@ -320,7 +320,7 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 // note. The CA's signature is over the §5.3.1 CosignedMessage
 // for [start, end), with hash = the requester's claimed hash.
 func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
-	wantKey := "oid/" + string(s.cfg.UpstreamCAKey.ID)
+	wantKey := cert.OIDName(s.cfg.UpstreamCAKey.ID)
 	caSig, ok := p.subtreeNote.signatureFor(wantKey)
 	if !ok {
 		return fmt.Errorf("subtree note missing %q signature", wantKey)

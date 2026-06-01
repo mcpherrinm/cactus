@@ -52,7 +52,7 @@ func TestRelyingPartyFastPath(t *testing.T) {
 	}
 	sgn, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	logID := cert.TrustAnchorID("32473.1")
-	cosigID := cert.TrustAnchorID("32473.1.ca")
+	cosigID := cert.TrustAnchorID("32473.1")
 
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID: logID, CosignerID: cosigID,

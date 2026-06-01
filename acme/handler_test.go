@@ -38,7 +38,7 @@ func newTestStack(t *testing.T) (*httptest.Server, *Server) {
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs,
 		FlushPeriod: 25 * time.Millisecond,

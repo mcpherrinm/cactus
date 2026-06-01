@@ -1,10 +1,29 @@
 package cert
 
 import (
+	"bytes"
 	"encoding/pem"
 	"reflect"
 	"testing"
 )
+
+// TestPropertyTrustAnchorIDBodyIsBinary pins TAI §7: the trust_anchor_id
+// property body is the trust anchor ID's binary representation, not its
+// ASCII form. (Regression for review finding 1.)
+func TestPropertyTrustAnchorIDBodyIsBinary(t *testing.T) {
+	raw, err := BuildPropertyList([]CertificateProperty{
+		{Type: PropertyTrustAnchorID, TrustAnchorID: TrustAnchorID("32473.1")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte{0x81, 0xfd, 0x59, 0x01}) {
+		t.Errorf("property list %x missing binary trust anchor ID 81fd5901", raw)
+	}
+	if bytes.Contains(raw, []byte("32473.1")) {
+		t.Error("property list contains ASCII trust anchor ID; TAI §7 requires binary")
+	}
+}
 
 func TestPropertyListRoundTripStandalone(t *testing.T) {
 	props := []CertificateProperty{

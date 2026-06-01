@@ -34,7 +34,7 @@ func TestMetricsCountersMove(t *testing.T) {
 	m := metrics.New()
 	l, err := cactuslog.New(context.Background(), cactuslog.Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs,
 		FlushPeriod: 25 * time.Millisecond,

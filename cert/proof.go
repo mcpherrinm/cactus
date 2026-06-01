@@ -11,10 +11,12 @@ import (
 
 // TrustAnchorID is the TrustAnchorID value from
 // draft-ietf-tls-trust-anchor-ids §4.1, encoded on the wire as
-// `opaque TrustAnchorID<1..2^8-1>`. Cactus uses the relative-OID-as-
-// ASCII representation for v1 (e.g. "32473.1"); the binary
-// representation defined by the trust-anchor-ids draft is used wherever
-// the TLS presentation language requires it.
+// `opaque TrustAnchorID<1..2^8-1>`. cactus stores it in its canonical
+// relative-OID ASCII form (e.g. "32473.1"); see trustanchorid.go for
+// the DN, "oid/" name, and binary (wire) representations derived from
+// it. On the wire (MTCProof.cosigner_id, §6.1) the binary form from
+// TrustAnchorID.Binary is used; in memory cactus keeps the relative
+// ASCII so cosigner IDs compare and log identically everywhere else.
 type TrustAnchorID []byte
 
 // MTCSubtree is an internal carrier for the (log ID, [start, end),
@@ -29,13 +31,13 @@ type MTCSubtree struct {
 
 // OIDName renders a trust anchor ID as the ASCII OID name used in a
 // CosignedMessage's cosigner_name / log_origin fields (§5.3.1): the
-// string "oid/" followed by the trust anchor ID's full dotted-decimal
-// OID. cactus stores TrustAnchorID values as full dotted OIDs (e.g.
-// "1.3.6.1.4.1.44363.47.1.99"), so this is simply "oid/" + id, which
-// equals the spec's 16-byte "oid/1.3.6.1.4.1." prefix concatenated with
-// the relative trust anchor ID.
+// 16-byte ASCII string "oid/1.3.6.1.4.1." followed by the trust anchor
+// ID's relative dotted-decimal ASCII representation. cactus stores
+// TrustAnchorID values in their canonical relative form (e.g.
+// "32473.1"), so this re-attaches the fixed 1.3.6.1.4.1 base: the
+// example trust anchor ID 32473.1 yields "oid/1.3.6.1.4.1.32473.1".
 func OIDName(id TrustAnchorID) string {
-	return "oid/" + string(id)
+	return OIDNamePrefix + TrustAnchorOIDBase + "." + string(id)
 }
 
 // MarshalSignatureInput returns the bytes a cosigner signs: the §5.3.1
@@ -44,9 +46,9 @@ func OIDName(id TrustAnchorID) string {
 //
 //	struct {
 //	    uint8 label[12] = "subtree/v1\n\0";
-//	    opaque cosigner_name<1..2^8-1>;   // "oid/" + cosigner ID
+//	    opaque cosigner_name<1..2^8-1>;   // OIDName(cosigner ID)
 //	    uint64 timestamp;                  // 0 for MTC proofs
-//	    opaque log_origin<1..2^8-1>;       // "oid/" + log ID
+//	    opaque log_origin<1..2^8-1>;       // OIDName(log ID)
 //	    uint64 start;
 //	    uint64 end;
 //	    HashValue subtree_hash;
@@ -166,39 +168,43 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 	}
 
 	// signatures<0..2^16-1>: outer length-prefix wraps the concatenated
-	// MTCSignature encodings. §6.1 requires cosigner_id values to be
-	// unique and sorted (shorter byte strings first, then lexicographic).
-	sigs := append([]MTCSignature(nil), p.Signatures...)
-	sort.SliceStable(sigs, func(i, j int) bool {
-		return cosignerIDLess(sigs[i].CosignerID, sigs[j].CosignerID)
+	// MTCSignature encodings. Per §6.1 each cosigner_id is the trust
+	// anchor ID's *binary* representation (TAI §3), and the list MUST be
+	// sorted by cosigner_id (shorter byte strings first, then
+	// lexicographic) with no duplicates. We convert the in-memory
+	// (relative-ASCII) IDs to binary, then sort/dedup on those bytes.
+	type wireSig struct {
+		id  []byte // binary cosigner_id
+		sig []byte
+	}
+	wsigs := make([]wireSig, 0, len(p.Signatures))
+	for _, s := range p.Signatures {
+		bin, err := s.CosignerID.Binary()
+		if err != nil {
+			return nil, fmt.Errorf("MTCProof: cosigner_id %q: %w", s.CosignerID, err)
+		}
+		if len(bin) < 1 || len(bin) > 0xff {
+			return nil, fmt.Errorf("MTCProof: cosigner_id binary length %d out of range [1,255]", len(bin))
+		}
+		if len(s.Signature) > 0xffff {
+			return nil, fmt.Errorf("MTCProof: signature %d > 65535 bytes", len(s.Signature))
+		}
+		wsigs = append(wsigs, wireSig{id: bin, sig: s.Signature})
+	}
+	sort.SliceStable(wsigs, func(i, j int) bool {
+		return cosignerIDLess(wsigs[i].id, wsigs[j].id)
 	})
-	for i := 1; i < len(sigs); i++ {
-		if string(sigs[i].CosignerID) == string(sigs[i-1].CosignerID) {
-			return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %q", sigs[i].CosignerID)
+	for i := 1; i < len(wsigs); i++ {
+		if string(wsigs[i].id) == string(wsigs[i-1].id) {
+			return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %x", wsigs[i].id)
 		}
 	}
-	var sigErr error
 	b.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) {
-		for i, s := range sigs {
-			if len(s.CosignerID) > 0xff {
-				sigErr = fmt.Errorf("signatures[%d]: cosigner_id %d > 255 bytes", i, len(s.CosignerID))
-				return
-			}
-			if len(s.Signature) > 0xffff {
-				sigErr = fmt.Errorf("signatures[%d]: signature %d > 65535 bytes", i, len(s.Signature))
-				return
-			}
-			c.AddUint8LengthPrefixed(func(d *cryptobyte.Builder) {
-				d.AddBytes(s.CosignerID)
-			})
-			c.AddUint16LengthPrefixed(func(d *cryptobyte.Builder) {
-				d.AddBytes(s.Signature)
-			})
+		for _, s := range wsigs {
+			c.AddUint8LengthPrefixed(func(d *cryptobyte.Builder) { d.AddBytes(s.id) })
+			c.AddUint16LengthPrefixed(func(d *cryptobyte.Builder) { d.AddBytes(s.sig) })
 		}
 	})
-	if sigErr != nil {
-		return nil, sigErr
-	}
 	return b.Bytes()
 }
 
@@ -245,28 +251,40 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 	if !s.ReadUint16LengthPrefixed(&sigBytes) {
 		return nil, errors.New("MTCProof: short read signatures")
 	}
+	var prevBin []byte
 	for len(sigBytes) > 0 {
-		var sig MTCSignature
 		var idBytes cryptobyte.String
 		if !sigBytes.ReadUint8LengthPrefixed(&idBytes) {
 			return nil, errors.New("MTCProof: short read cosigner_id")
 		}
-		sig.CosignerID = append([]byte(nil), idBytes...)
+		if len(idBytes) == 0 {
+			return nil, errors.New("MTCProof: empty cosigner_id")
+		}
+		// §6.1 ordering/uniqueness is checked over the binary cosigner_id
+		// bytes as read from the wire.
+		if prevBin != nil {
+			if string(prevBin) == string(idBytes) {
+				return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %x", []byte(idBytes))
+			}
+			if cosignerIDLess(idBytes, prevBin) {
+				return nil, errors.New("MTCProof: signatures not sorted by cosigner_id")
+			}
+		}
+		prevBin = append([]byte(nil), idBytes...)
+		// Decode the binary cosigner_id back to the canonical relative
+		// ASCII so it compares against configured cosigner IDs.
+		id, err := TrustAnchorIDFromBinary(idBytes)
+		if err != nil {
+			return nil, fmt.Errorf("MTCProof: %w", err)
+		}
 		var sigData cryptobyte.String
 		if !sigBytes.ReadUint16LengthPrefixed(&sigData) {
 			return nil, errors.New("MTCProof: short read signature")
 		}
-		sig.Signature = append([]byte(nil), sigData...)
-		if n := len(p.Signatures); n > 0 {
-			prev := p.Signatures[n-1].CosignerID
-			if string(prev) == string(sig.CosignerID) {
-				return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %q", sig.CosignerID)
-			}
-			if cosignerIDLess(sig.CosignerID, prev) {
-				return nil, errors.New("MTCProof: signatures not sorted by cosigner_id")
-			}
-		}
-		p.Signatures = append(p.Signatures, sig)
+		p.Signatures = append(p.Signatures, MTCSignature{
+			CosignerID: id,
+			Signature:  append([]byte(nil), sigData...),
+		})
 	}
 	if !s.Empty() {
 		return nil, fmt.Errorf("MTCProof: %d trailing bytes", len(s))
@@ -276,8 +294,8 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 
 // cosignerIDLess orders cosigner_id byte strings as §6.1 requires:
 // shorter strings sort first; equal-length strings sort
-// lexicographically.
-func cosignerIDLess(a, b TrustAnchorID) bool {
+// lexicographically. It operates on the binary cosigner_id bytes.
+func cosignerIDLess(a, b []byte) bool {
 	if len(a) != len(b) {
 		return len(a) < len(b)
 	}

@@ -40,7 +40,7 @@ func TestCLITreeShow(t *testing.T) {
 		t.Fatalf("cactus-cli tree show: %v\nout=%s", err, out)
 	}
 	str := string(out)
-	for _, want := range []string{"origin: oid/32473.1", "size:", "root:"} {
+	for _, want := range []string{"origin: oid/1.3.6.1.4.1.32473.1", "size:", "root:"} {
 		if !strings.Contains(str, want) {
 			t.Errorf("output missing %q:\n%s", want, str)
 		}
@@ -108,8 +108,9 @@ func TestCLIProve(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := buildCLI(t)
-	// Index 1 is the entry we just issued (index 0 is the null entry).
-	out, err := exec.Command(bin, "prove", s.tileBase, "1").CombinedOutput()
+	// Index 0 is the entry we just issued (draft-04 §5.2.1: no reserved
+	// null entry, so the first issued cert is at index 0).
+	out, err := exec.Command(bin, "prove", s.tileBase, "0").CombinedOutput()
 	if err != nil {
 		t.Fatalf("cactus-cli prove: %v\nout=%s", err, out)
 	}
@@ -117,11 +118,11 @@ func TestCLIProve(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("parse JSON: %v\nout=%s", err, out)
 	}
-	if got.Index != 1 {
-		t.Errorf("Index = %d, want 1", got.Index)
+	if got.Index != 0 {
+		t.Errorf("Index = %d, want 0", got.Index)
 	}
-	if got.TreeSize < 2 {
-		t.Errorf("TreeSize = %d, want >= 2", got.TreeSize)
+	if got.TreeSize < 1 {
+		t.Errorf("TreeSize = %d, want >= 1", got.TreeSize)
 	}
 	if len(got.Root) != 64 || len(got.LeafHash) != 64 {
 		t.Fatalf("hex hashes wrong length: root=%d leaf=%d", len(got.Root), len(got.LeafHash))

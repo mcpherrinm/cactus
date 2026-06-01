@@ -24,8 +24,9 @@ func TestCosignedMessageLayout(t *testing.T) {
 	// §5.3.1 CosignedMessage layout:
 	//   label[12] || u8 len||cosigner_name || u64 timestamp ||
 	//   u8 len||log_origin || u64 start || u64 end || hash[32].
-	cosignerName := "oid/" + string(cosigner)
-	logOrigin := "oid/" + string(st.LogID)
+	// Names are "oid/1.3.6.1.4.1." + relative ID (OIDName).
+	cosignerName := OIDName(cosigner)
+	logOrigin := OIDName(st.LogID)
 	var want []byte
 	want = append(want, []byte(SubtreeSignatureLabel)...)
 	want = append(want, byte(len(cosignerName)))
@@ -45,11 +46,11 @@ func TestCosignedMessageLayout(t *testing.T) {
 
 func TestMarshalSignatureInputLayout(t *testing.T) {
 	st := &MTCSubtree{
-		LogID: TrustAnchorID("LogX"),
+		LogID: TrustAnchorID("32473.7"),
 		Start: 1, End: 2,
 		Hash: tlogx.Hash{0x01, 0x02},
 	}
-	cosigner := TrustAnchorID("CosY")
+	cosigner := TrustAnchorID("32473.8")
 	got, err := MarshalSignatureInput(cosigner, st)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +63,7 @@ func TestMarshalSignatureInputLayout(t *testing.T) {
 	if string(got[:12]) != SubtreeSignatureLabel {
 		t.Errorf("label = %q, want %q", got[:12], SubtreeSignatureLabel)
 	}
-	wantName := "oid/" + string(cosigner)
+	wantName := OIDName(cosigner)
 	if got[12] != byte(len(wantName)) {
 		t.Errorf("cosigner_name length prefix = %d, want %d", got[12], len(wantName))
 	}
@@ -76,8 +77,8 @@ func TestMTCProofRoundTrip(t *testing.T) {
 			{0x01}, {0x02}, {0x03}, {0x04}, {0x05},
 		},
 		Signatures: []MTCSignature{
-			{CosignerID: TrustAnchorID("ca-1"), Signature: bytes.Repeat([]byte{0xaa}, 70)},
-			{CosignerID: TrustAnchorID("witness-1"), Signature: bytes.Repeat([]byte{0xbb}, 71)},
+			{CosignerID: TrustAnchorID("32473.1"), Signature: bytes.Repeat([]byte{0xaa}, 70)},
+			{CosignerID: TrustAnchorID("32473.10"), Signature: bytes.Repeat([]byte{0xbb}, 71)},
 		},
 	}
 	enc, err := proof.MarshalTLS()
@@ -123,6 +124,100 @@ func TestMTCProofRejectsTrailingBytes(t *testing.T) {
 	enc = append(enc, 0x00)
 	if _, err := ParseMTCProof(enc); err == nil {
 		t.Error("ParseMTCProof: expected error for trailing bytes")
+	}
+}
+
+// TestMTCProofCosignerIDIsBinary pins §6.1: the cosigner_id field on the
+// wire is the trust anchor ID's binary representation, not ASCII, and the
+// in-memory CosignerID round-trips to the canonical relative form.
+// (Regression for review finding 1.)
+func TestMTCProofCosignerIDIsBinary(t *testing.T) {
+	p := &MTCProof{
+		Start: 0, End: 1,
+		InclusionProof: []tlogx.Hash{{}},
+		Signatures: []MTCSignature{
+			{CosignerID: TrustAnchorID("32473.1"), Signature: []byte{0xAA, 0xBB}},
+		},
+	}
+	enc, err := p.MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// cosigner_id is uint8-length-prefixed: 0x04 then the 4 binary octets.
+	if want := []byte{0x04, 0x81, 0xfd, 0x59, 0x01}; !bytes.Contains(enc, want) {
+		t.Errorf("MTCProof %x missing binary cosigner_id field %x", enc, want)
+	}
+	if bytes.Contains(enc, []byte("32473.1")) {
+		t.Error("MTCProof bytes contain ASCII cosigner_id; §6.1 requires binary")
+	}
+	dec, err := ParseMTCProof(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(dec.Signatures[0].CosignerID) != "32473.1" {
+		t.Errorf("parsed CosignerID = %q, want 32473.1", dec.Signatures[0].CosignerID)
+	}
+}
+
+// TestMTCProofSignaturesSortedByBinary pins the §6.1 ordering: signatures
+// are sorted by the *binary* cosigner_id (shorter first, then
+// lexicographic), which can differ from ASCII order. "32473.2" (4 binary
+// octets) must sort before "32473.130" (5 binary octets) even though
+// "32473.130" < "32473.2" as ASCII.
+func TestMTCProofSignaturesSortedByBinary(t *testing.T) {
+	p := &MTCProof{
+		Start: 0, End: 1,
+		Signatures: []MTCSignature{
+			{CosignerID: TrustAnchorID("32473.130"), Signature: []byte{0x01}},
+			{CosignerID: TrustAnchorID("32473.2"), Signature: []byte{0x02}},
+		},
+	}
+	enc, err := p.MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := ParseMTCProof(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(dec.Signatures[0].CosignerID) != "32473.2" ||
+		string(dec.Signatures[1].CosignerID) != "32473.130" {
+		t.Errorf("order = [%q %q], want [32473.2 32473.130]",
+			dec.Signatures[0].CosignerID, dec.Signatures[1].CosignerID)
+	}
+}
+
+// TestMTCProofExtensionsRoundTrip + TestEntryHashExtSensitiveToExtensions
+// pin that the MerkleTreeCertEntry extensions are carried in the MTCProof
+// and feed the leaf hash (§7.2 step 8.2). (Regression for review finding 5.)
+func TestMTCProofExtensionsRoundTrip(t *testing.T) {
+	p := &MTCProof{
+		Extensions:     []MerkleTreeCertEntryExtension{{Type: 5, Data: []byte{0xde, 0xad}}},
+		Start:          1,
+		End:            2,
+		InclusionProof: []tlogx.Hash{{0x09}},
+	}
+	enc, err := p.MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := ParseMTCProof(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(dec.Extensions, p.Extensions) {
+		t.Errorf("Extensions round trip: got %+v want %+v", dec.Extensions, p.Extensions)
+	}
+}
+
+func TestEntryHashExtSensitiveToExtensions(t *testing.T) {
+	tbs := []byte{0x01, 0x02, 0x03}
+	withExt, err := EntryHashExt([]MerkleTreeCertEntryExtension{{Type: 1, Data: []byte{0xff}}}, tbs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if EntryHash(tbs) == withExt {
+		t.Error("EntryHashExt ignored extensions: hash unchanged")
 	}
 }
 

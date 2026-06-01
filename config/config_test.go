@@ -27,7 +27,7 @@ func TestLoadValid(t *testing.T) {
 		"pool_size": 128
 	},
 	"ca_cosigner": {
-		"id": "1.3.6.1.4.1.44363.47.1.99",
+		"id": "44363.47.1.99",
 		"algorithm": "ecdsa-p256-sha256",
 		"seed_path": "keys/ca.seed"
 	},

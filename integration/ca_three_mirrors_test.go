@@ -49,7 +49,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 		seed[0] = byte(0x10 + i)
 		s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 		mks[i].signer = s
-		mks[i].id = cert.TrustAnchorID(fmt.Sprintf("test.mirror.%d", i+1))
+		mks[i].id = cert.TrustAnchorID(fmt.Sprintf("32473.%d", 30+i+1))
 	}
 
 	// 1) Bring up the CA log + tile server.
@@ -63,8 +63,8 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 		caSeed[i] = 0x00
 	}
 	caSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, caSeed)
-	logID := cert.TrustAnchorID("test.log.1")
-	caCosigID := cert.TrustAnchorID("test.log.1.ca")
+	logID := cert.TrustAnchorID("32473.5")
+	caCosigID := cert.TrustAnchorID("32473.5")
 
 	// We'll build the MirrorRequester closure with closures over caLog
 	// + mks. caLog must be assigned before the closure can use it,
@@ -182,7 +182,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 	}
 
 	// 3) Build an ACME stack on top of the CA log and issue a cert.
-	caIssuer, _ := ca.New(caLog, "test.log.1", 1)
+	caIssuer, _ := ca.New(caLog, "32473.5", 1)
 	acmeSrv, _ := acme.New(acme.Config{
 		Issuer: caIssuer, ChallengeMode: acme.ChallengeAutoPass,
 	})

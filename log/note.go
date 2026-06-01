@@ -29,8 +29,8 @@ func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
 	if len(logID) == 0 {
 		return nil, errors.New("buildSignedNote: empty logID")
 	}
-	origin := "oid/" + string(logID)
-	cosigner := "oid/" + string(cosignerID)
+	origin := cert.OIDName(logID)
+	cosigner := cert.OIDName(cosignerID)
 	body := fmt.Sprintf("%s\n%d\n%s\n",
 		origin, size,
 		base64.StdEncoding.EncodeToString(root[:]))
@@ -72,7 +72,7 @@ func parseSignedNoteFull(data []byte, logID cert.TrustAnchorID) (uint64, tlogx.H
 	if len(lines) != 3 {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: %d body lines, want 3", len(lines))
 	}
-	wantOrigin := "oid/" + string(logID)
+	wantOrigin := cert.OIDName(logID)
 	if lines[0] != wantOrigin {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: origin %q != %q", lines[0], wantOrigin)
 	}

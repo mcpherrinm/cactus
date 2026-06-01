@@ -186,6 +186,15 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("derive log ID: %w", err)
 	}
 
+	// §5.5 CA certificate: the artifact a relying party configures from
+	// (§7.1). Built once at startup and served at /ca-certificate on the
+	// monitoring listener so peers can derive trust via
+	// cert.ConfigFromCACertificate.
+	caCertPEM, err := buildCACertPEM(caID, sgn)
+	if err != nil {
+		return fmt.Errorf("build CA certificate: %w", err)
+	}
+
 	// Optional landmark sequence (Phase 8). Built before the log so we
 	// can pass the OnFlush hook to log.Config.
 	var landmarkSeq *landmark.Sequence
@@ -358,9 +367,15 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	if landmarkSeq != nil {
 		tileSrv = tileSrv.WithLandmarks(landmarkSeq)
 	}
+	monMux := http.NewServeMux()
+	monMux.HandleFunc("/ca-certificate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pem-certificate-chain")
+		_, _ = w.Write(caCertPEM)
+	})
+	monMux.Handle("/", tileSrv.Handler())
 	monitoringHTTP := &http.Server{
 		Addr:              cfg.Monitoring.Listen,
-		Handler:           logging.Middleware(logger)(tileSrv.Handler()),
+		Handler:           logging.Middleware(logger)(monMux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -602,4 +617,30 @@ func metricsListenIsLoopback(addr string) bool {
 func die(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "cactus: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// buildCACertPEM builds the §5.5 CA certificate (an unsigned cert,
+// RFC 9925) representing this CA, as a PEM CERTIFICATE block. A relying
+// party derives its configuration from it via cert.ConfigFromCACertificate
+// (§7.1). minSerial is 0: cactus does not prune, so no serials are
+// initially revoked.
+func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) {
+	sigAlg, err := cert.SigAlgOID(cert.SignatureAlgorithm(sgn.Algorithm()))
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	der, err := cert.BuildCACertificate(cert.CACertificateInput{
+		CAID:         caID,
+		CosignerSPKI: sgn.PublicKey(),
+		LogHash:      cert.OIDDigestSHA256,
+		SigAlg:       sigAlg,
+		MinSerial:    0,
+		NotBefore:    now.Add(-time.Hour),
+		NotAfter:     now.AddDate(10, 0, 0),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }

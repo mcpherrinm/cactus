@@ -27,7 +27,7 @@ func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {
 	}
 	l, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs,
 		FlushPeriod: 25 * time.Millisecond,
@@ -39,14 +39,24 @@ func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {
 	return l, s, fs
 }
 
-func TestLogStartsWithNullEntry(t *testing.T) {
+// TestLogStartsEmptyAndFirstEntryIsIndexZero pins draft-04 §5.2.1: a
+// fresh log starts empty (no reserved index-0 null_entry), and the first
+// appended entry is assigned index 0. (Regression for review finding 3.)
+func TestLogStartsEmptyAndFirstEntryIsIndexZero(t *testing.T) {
 	l, _, _ := newTestLog(t)
-	if got := l.tw.Size(); got != 1 {
-		t.Errorf("tw.Size = %d, want 1 (null entry)", got)
+	if got := l.tw.Size(); got != 0 {
+		t.Errorf("tw.Size = %d, want 0 (empty log, no reserved null entry)", got)
 	}
-	cp := l.CurrentCheckpoint()
-	if cp.Size != 1 {
-		t.Errorf("Checkpoint.Size = %d, want 1", cp.Size)
+	if cp := l.CurrentCheckpoint(); cp.Size != 0 {
+		t.Errorf("Checkpoint.Size = %d, want 0", cp.Size)
+	}
+	tbs := []byte{0xCA, 0xFE}
+	idx, err := l.Append(context.Background(), cert.EncodeTBSCertEntry(tbs), sha256.Sum256(tbs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != 0 {
+		t.Errorf("first entry index = %d, want 0", idx)
 	}
 }
 
@@ -160,7 +170,7 @@ func TestSignedNoteRoundTrip(t *testing.T) {
 	root := tlogx.Hash{0xab, 0xcd, 0xef}
 	nb, err := buildSignedNote(
 		cert.TrustAnchorID("32473.1"),
-		cert.TrustAnchorID("32473.1.ca"),
+		cert.TrustAnchorID("32473.1"),
 		42, root, []byte("signature"),
 	)
 	if err != nil {
@@ -189,7 +199,7 @@ func TestLogReloadAfterRestart(t *testing.T) {
 
 	l1, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs,
 		FlushPeriod: 20 * time.Millisecond,
@@ -215,7 +225,7 @@ func TestLogReloadAfterRestart(t *testing.T) {
 	fs2, _ := storage.New(dir)
 	l2, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
-		CosignerID:  cert.TrustAnchorID("32473.1.ca"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
 		Signer:      s,
 		FS:          fs2,
 		FlushPeriod: 20 * time.Millisecond,

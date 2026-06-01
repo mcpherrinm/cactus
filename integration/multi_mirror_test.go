@@ -71,7 +71,7 @@ func TestMultiMirrorQuorum(t *testing.T) {
 		seed := make([]byte, signer.SeedSize)
 		seed[0] = byte(i + 1)
 		s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
-		id := cert.TrustAnchorID(fmt.Sprintf("example.mirror.%d", i+1))
+		id := cert.TrustAnchorID(fmt.Sprintf("32473.%d", 40+i+1))
 		srv, err := mirror.NewServer(mirror.ServerConfig{
 			Follower: f, Signer: s, CosignerID: id,
 		})
@@ -203,7 +203,7 @@ func TestMultiMirrorQuorumNotMet(t *testing.T) {
 
 	seed := make([]byte, signer.SeedSize)
 	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
-	id := cert.TrustAnchorID("only.mirror")
+	id := cert.TrustAnchorID("32473.22")
 	srv, _ := mirror.NewServer(mirror.ServerConfig{Follower: f, Signer: s, CosignerID: id})
 	hSrv := httptest.NewServer(srv.Handler())
 	defer hSrv.Close()
