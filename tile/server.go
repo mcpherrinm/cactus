@@ -8,6 +8,7 @@
 package tile
 
 import (
+	_ "embed"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -19,6 +20,13 @@ import (
 	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/storage"
 )
+
+// indexHTML is the self-contained browser UI served at the log root. It
+// is pure HTML/CSS/JS with no dependencies and uses only relative URLs,
+// so it works under any log-number prefix.
+//
+//go:embed index.html
+var indexHTML []byte
 
 // Server is the read-path HTTP handler.
 type Server struct {
@@ -42,6 +50,7 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 
 // Handler returns the HTTP handler. Routes:
 //
+//	GET /                      — browser UI (index.html)
 //	GET /checkpoint            — latest signed note
 //	GET /tile/<L>/<NNN..>      — hash tiles (c2sp tlog-tiles)
 //	GET /tile/entries/<NNN..>  — entry (data) tiles (c2sp tlog-tiles)
@@ -50,6 +59,7 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 //	GET /landmarks             — §6.3.1 landmark list (only if WithLandmarks)
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /checkpoint", s.handleCheckpoint)
 	mux.HandleFunc("GET /tile/", s.handleTile)
 	mux.HandleFunc("GET /log/v1/entry/{index}", s.handleEntry)
@@ -59,6 +69,12 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("HEAD /landmarks", s.landmarks.Handler())
 	}
 	return mux
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, max-age=0")
+	w.Write(indexHTML)
 }
 
 func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {

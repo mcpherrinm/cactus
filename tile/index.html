@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<!--
+  cactus issuance-log browser. Served at the log root (e.g. /<log number>/)
+  by tile/server.go via go:embed. Pure HTML/CSS/JS, no dependencies. All
+  fetches use relative URLs, so the page works under any log-number prefix.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cactus issuance log</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2029; --fg: #d6dde6; --muted: #8794a3;
+    --accent: #5cc8a8; --accent2: #7aa2f7; --border: #2a323d; --warn: #e0af68;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 0 0 .75rem; color: var(--accent); }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  .sub { color: var(--muted); margin: 0 0 1.5rem; word-break: break-all; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+  }
+  .grid { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; }
+  .grid dt { color: var(--muted); }
+  .grid dd { margin: 0; word-break: break-all; }
+  .big { font-size: 1.8rem; font-weight: 600; color: var(--accent); }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  button, input, select {
+    font: inherit; background: #11161d; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: .4rem .6rem;
+  }
+  button { cursor: pointer; background: #232c38; }
+  button:hover { border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .row label { color: var(--muted); }
+  input[type=number] { width: 7rem; }
+  .tiles { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .75rem; }
+  .tile {
+    font-family: ui-monospace, monospace; font-size: 12px; padding: .3rem .5rem;
+    border: 1px solid var(--border); border-radius: 6px; background: #11161d;
+    cursor: pointer; color: var(--accent2);
+  }
+  .tile:hover { border-color: var(--accent2); }
+  .tile.partial { color: var(--warn); border-style: dashed; }
+  .out {
+    margin-top: .9rem; background: #0b0f14; border: 1px solid var(--border);
+    border-radius: 6px; padding: .75rem; overflow-x: auto;
+    font-family: ui-monospace, monospace; font-size: 12px; white-space: pre;
+  }
+  .hash { display: grid; grid-template-columns: 3.5rem 1fr; gap: .25rem .75rem; }
+  .hash .i { color: var(--muted); text-align: right; }
+  .err { color: #f7768e; }
+  .ok { color: var(--accent); }
+  .note { color: var(--muted); font-size: 12px; margin-top: .5rem; }
+  .hint { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>cactus issuance log</h1>
+  <p class="sub" id="origin">loading…</p>
+
+  <div class="panel">
+    <h2>Checkpoint</h2>
+    <dl class="grid">
+      <dt>Tree size</dt><dd><span class="big" id="size">—</span> <span class="hint">entries</span></dd>
+      <dt>Tree height</dt><dd id="height">—</dd>
+      <dt>Root hash</dt><dd class="mono" id="root">—</dd>
+      <dt>Resource</dt><dd><a id="cplink" href="checkpoint">checkpoint</a> · <a id="lmlink" href="landmarks">landmarks</a> · <a href="../ca-certificate">ca-certificate</a></dd>
+    </dl>
+    <div class="row" style="margin-top:.75rem">
+      <button id="refresh">Refresh</button>
+      <span id="cpstatus" class="hint"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Tile browser</h2>
+    <p class="hint">Hash tiles hold up to 256 × 32-byte node hashes; the rightmost
+      tile at each level may be partial (<code>.p/&lt;width&gt;</code>). Level&nbsp;0 holds
+      leaf hashes; entry (data) tiles hold the log entries themselves.</p>
+
+    <div id="level0"></div>
+    <div id="entries0"></div>
+
+    <div class="row" style="margin-top:1rem">
+      <label>Level</label>
+      <select id="mlevel">
+        <option value="0">0 (leaves)</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="entries">entries (data)</option>
+      </select>
+      <label>Index</label><input type="number" id="mindex" min="0" value="0">
+      <label>Width</label><input type="number" id="mwidth" min="1" max="256" placeholder="full (256)">
+      <button id="mfetch">Fetch tile</button>
+    </div>
+    <div id="tileout" class="out" style="display:none"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Entry viewer</h2>
+    <div class="row">
+      <label>Index</label><input type="number" id="eindex" min="0" value="0">
+      <button id="efetch">Fetch entry</button>
+      <span class="hint">GET <code>log/v1/entry/&lt;index&gt;</code> — one MerkleTreeCertEntry blob</span>
+    </div>
+    <div id="entryout" class="out" style="display:none"></div>
+  </div>
+
+  <p class="note">cactus monitoring read-path · tlog-tiles layout. This is a test
+    server; see the threat model before trusting anything here.</p>
+</div>
+
+<script>
+"use strict";
+const TILE_W = 256; // 1 << TileHeight(8)
+
+const $ = (id) => document.getElementById(id);
+const hex = (bytes) => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+const esc = (s) => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+// Mirrors tilewriter.formatTileIndex: last 3 digits, then "x"-prefixed
+// 3-digit groups for higher-order digits.
+function formatTileIndex(n) {
+  let s = String(n % 1000).padStart(3, "0");
+  n = Math.floor(n / 1000);
+  while (n > 0) {
+    s = "x" + String(n % 1000).padStart(3, "0") + "/" + s;
+    n = Math.floor(n / 1000);
+  }
+  return s;
+}
+
+// Build a tile URL relative to the log root. level is a number or "entries".
+function tileURL(level, index, width) {
+  let p = "tile/" + level + "/" + formatTileIndex(index);
+  if (width && width !== TILE_W) p += ".p/" + width;
+  return p;
+}
+
+let treeSize = 0;
+
+async function loadCheckpoint() {
+  $("cpstatus").textContent = "fetching…";
+  $("cpstatus").className = "hint";
+  try {
+    const r = await fetch("checkpoint", { cache: "no-store" });
+    if (r.status === 503) {
+      $("origin").textContent = "(no checkpoint yet — the log is empty)";
+      $("cpstatus").textContent = "no checkpoint yet";
+      return;
+    }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const text = await r.text();
+    // signed-note body: origin \n size \n base64(root) \n  (then blank + sig lines)
+    const lines = text.split("\n");
+    const origin = lines[0] || "";
+    treeSize = parseInt(lines[1] || "0", 10);
+    const root = lines[2] || "";
+    $("origin").textContent = origin;
+    $("size").textContent = treeSize.toLocaleString();
+    $("height").textContent = treeSize === 0 ? "0" : Math.ceil(Math.log2(treeSize)) + " levels";
+    $("root").textContent = root;
+    $("cpstatus").innerHTML = '<span class="ok">updated ' + new Date().toLocaleTimeString() + "</span>";
+    renderTileLists();
+  } catch (e) {
+    $("cpstatus").innerHTML = '<span class="err">checkpoint error: ' + esc(String(e.message)) + "</span>";
+  }
+}
+
+function tileChip(level, index, width) {
+  const partial = width !== TILE_W;
+  const el = document.createElement("span");
+  el.className = "tile" + (partial ? " partial" : "");
+  el.textContent = (level === "entries" ? "e" : level) + "/" + index + (partial ? " (" + width + ")" : "");
+  el.title = tileURL(level, index, width);
+  el.onclick = () => fetchTile(level, index, partial ? width : null);
+  return el;
+}
+
+// Render the level-0 hash tiles and entry tiles implied by the tree size.
+function renderTileLists() {
+  for (const [containerId, level, label] of [
+    ["level0", "0", "Level-0 hash tiles"],
+    ["entries0", "entries", "Entry (data) tiles"],
+  ]) {
+    const box = $(containerId);
+    box.innerHTML = "";
+    if (treeSize === 0) continue;
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.style.marginTop = ".5rem";
+    h.textContent = label + ":";
+    box.appendChild(h);
+    const tiles = document.createElement("div");
+    tiles.className = "tiles";
+    const full = Math.floor(treeSize / TILE_W);
+    const rem = treeSize % TILE_W;
+    const MAX = 64;
+    const total = full + (rem ? 1 : 0);
+    for (let i = 0; i < Math.min(full, MAX); i++) tiles.appendChild(tileChip(level, i, TILE_W));
+    if (rem && full < MAX) tiles.appendChild(tileChip(level, full, rem));
+    if (total > MAX) {
+      const more = document.createElement("span");
+      more.className = "hint";
+      more.textContent = "+" + (total - MAX) + " more (use manual fetch)";
+      tiles.appendChild(more);
+    }
+    box.appendChild(tiles);
+  }
+}
+
+async function fetchTile(level, index, width) {
+  const out = $("tileout");
+  out.style.display = "block";
+  const url = tileURL(level, index, width);
+  out.textContent = "GET " + url + " …";
+  try {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) { out.innerHTML = '<span class="err">GET ' + esc(url) + " → HTTP " + r.status + "</span>"; return; }
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (level === "entries") renderEntriesTile(out, url, buf);
+    else renderHashTile(out, url, buf);
+  } catch (e) {
+    out.innerHTML = '<span class="err">' + esc(String(e.message)) + "</span>";
+  }
+}
+
+function renderHashTile(out, url, buf) {
+  const n = Math.floor(buf.length / 32);
+  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" +
+    buf.length + " bytes · " + n + " node hash" + (n === 1 ? "" : "es") + "\n\n";
+  html += '<div class="hash">';
+  for (let i = 0; i < n; i++) {
+    html += '<span class="i">' + i + '</span><span>' + hex(buf.subarray(i * 32, i * 32 + 32)) + "</span>";
+  }
+  html += "</div>";
+  if (buf.length % 32 !== 0) html += '\n<span class="err">note: length not a multiple of 32</span>';
+  out.innerHTML = html;
+}
+
+// Entry (data) tiles are uint16-big-endian length-prefixed entries.
+function renderEntriesTile(out, url, buf) {
+  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" + buf.length + " bytes\n\n";
+  let pos = 0, i = 0;
+  try {
+    while (pos + 2 <= buf.length) {
+      const len = (buf[pos] << 8) | buf[pos + 1];
+      pos += 2;
+      const body = buf.subarray(pos, pos + len);
+      pos += len;
+      const preview = hex(body.subarray(0, 32));
+      html += "entry " + i + ": " + len + " bytes  " + preview + (len > 32 ? "…" : "") + "\n";
+      i++;
+    }
+    html = html.replace("\n\n", "\n" + i + " entr" + (i === 1 ? "y" : "ies") + "\n\n");
+  } catch (e) {
+    html += '<span class="err">decode error: ' + esc(String(e.message)) + "</span>";
+  }
+  out.innerHTML = html;
+}
+
+async function fetchEntry() {
+  const idx = parseInt($("eindex").value, 10) || 0;
+  const out = $("entryout");
+  out.style.display = "block";
+  const url = "log/v1/entry/" + idx;
+  out.textContent = "GET " + url + " …";
+  try {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) { out.innerHTML = '<span class="err">GET ' + esc(url) + " → HTTP " + r.status + "</span>"; return; }
+    const buf = new Uint8Array(await r.arrayBuffer());
+    out.innerHTML = '<span class="ok">GET ' + esc(url) + "</span>\n" +
+      buf.length + " bytes (MerkleTreeCertEntry)\n\n" + hex(buf).replace(/(.{64})/g, "$1\n");
+  } catch (e) {
+    out.innerHTML = '<span class="err">' + esc(String(e.message)) + "</span>";
+  }
+}
+
+// Hide the landmarks link if the endpoint isn't enabled.
+fetch("landmarks", { method: "HEAD" }).then(r => {
+  if (!r.ok) $("lmlink").style.display = "none";
+}).catch(() => { $("lmlink").style.display = "none"; });
+
+$("refresh").onclick = loadCheckpoint;
+$("mfetch").onclick = () => {
+  const level = $("mlevel").value;
+  const index = parseInt($("mindex").value, 10) || 0;
+  const wraw = parseInt($("mwidth").value, 10);
+  fetchTile(level, index, Number.isFinite(wraw) ? wraw : null);
+};
+$("efetch").onclick = fetchEntry;
+loadCheckpoint();
+</script>
+</body>
+</html>

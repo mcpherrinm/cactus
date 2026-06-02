@@ -383,6 +383,11 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// tile/checkpoint/landmark routes under "/<log number>/".
 	logPrefix := "/" + strconv.Itoa(int(cfg.Log.Number))
 	monMux.Handle(logPrefix+"/", http.StripPrefix(logPrefix, tileSrv.Handler()))
+	// The monitoring base is the CA prefix; redirect it to the (single)
+	// log's browser UI so the bare root lands somewhere useful.
+	monMux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, logPrefix+"/", http.StatusFound)
+	})
 	monitoringHTTP := &http.Server{
 		Addr:              cfg.Monitoring.Listen,
 		Handler:           logging.Middleware(logger)(monMux),
