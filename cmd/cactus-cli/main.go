@@ -330,9 +330,9 @@ func formatSAN(der []byte) string {
 }
 
 // certVerify performs the §7.2 verification: decode MTCProof, recompute
-// leaf, evaluate inclusion proof, compare to checkpoint root (when the
-// inclusion proof's subtree is the whole tree) or to the signed
-// subtree if cached.
+// leaf, evaluate the inclusion proof, and check the cosigner signatures
+// carried in the cert. The signatures travel inside the cert, so this
+// needs only the standard read path (the checkpoint).
 func certVerify(certPath, logURL string) {
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
@@ -379,14 +379,25 @@ func certVerify(certPath, logURL string) {
 	fmt.Printf("recomputed hash: %x\n", got[:])
 	fmt.Printf("signatures:      %d\n", len(proof.Signatures))
 
-	// Cross-check against the live log: fetch the cached signed subtree.
-	subtreePath := fmt.Sprintf("%s/subtree/%d-%d", logURL, proof.Start, proof.End)
-	body, err := httpGet(subtreePath)
+	// Cross-check against the live log using only the standard read path:
+	// fetch the checkpoint. When the proof's subtree is the whole tree, the
+	// recomputed hash must equal the published root. For a partial subtree
+	// the cosigner signatures carried in the cert (proof.Signatures) are
+	// what vouch for it — there is no standard endpoint serving a per-subtree
+	// signature — so we only report the live size.
+	cp, err := httpGet(logURL + "/checkpoint")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not fetch signed subtree: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not fetch checkpoint: %v\n", err)
+	} else if size, root, _, perr := parseSignedNoteFlat(cp); perr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not parse checkpoint: %v\n", perr)
+	} else if proof.Start == 0 && proof.End == size {
+		if got != tlogx.Hash(root) {
+			die("recomputed hash %x != checkpoint root %x", got[:], root[:])
+		}
+		fmt.Printf("checkpoint root: %x (matches; subtree is the whole tree)\n", root[:])
 	} else {
-		fmt.Printf("subtree signature: %d bytes (cosigner=%q)\n",
-			len(body), parseCosignerName(body))
+		fmt.Printf("checkpoint size: %d (subtree [%d, %d) is partial; vouched by in-cert signatures)\n",
+			size, proof.Start, proof.End)
 	}
 	fmt.Println("OK")
 }
@@ -432,17 +443,6 @@ func parseSignedNoteFlat(data []byte) (uint64, [32]byte, string, error) {
 	var root [32]byte
 	copy(root[:], rb)
 	return size, root, lines[0], nil
-}
-
-func parseCosignerName(data []byte) string {
-	if len(data) < 1 {
-		return ""
-	}
-	idLen := int(data[0])
-	if 1+idLen > len(data) {
-		return ""
-	}
-	return string(data[1 : 1+idLen])
 }
 
 func min(a, b int) int {

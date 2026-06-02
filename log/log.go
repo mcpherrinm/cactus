@@ -13,7 +13,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -471,11 +470,10 @@ func (l *Log) flush() error {
 	}
 
 	// `subs` holds only the subtrees freshly minted for this flush's
-	// range. Those are the ones we persist here and the only ones we
-	// kick mirror collection off for; carried-forward subtrees were
-	// already persisted and already had their collection started in the
+	// range. Those are the only ones we kick mirror collection off for;
+	// carried-forward subtrees already had their collection started in the
 	// flush that minted them.
-	if err := l.persistCheckpoint(newSize, rootCp, signedNote, subs); err != nil {
+	if err := l.persistCheckpoint(signedNote); err != nil {
 		return fmt.Errorf("flush persist: %w", err)
 	}
 
@@ -564,7 +562,6 @@ func (l *Log) collectMirrorSigs(subs []signedSubtree, signedNote []byte, atSize 
 				cs := &l.committed.subtrees[j]
 				if cs.subtree.Start == st.Start && cs.subtree.End == st.End {
 					cs.sigs = append(cs.sigs, mirrorSigs...)
-					_ = l.persistOneSubtree(*cs)
 					close(l.notify)
 					l.notify = make(chan struct{})
 					break
@@ -596,37 +593,12 @@ func (l *Log) signSubtree(st *cert.MTCSubtree) (cert.MTCSignature, error) {
 	}, nil
 }
 
-func (l *Log) persistCheckpoint(size uint64, root tlogx.Hash,
-	signedNote []byte, subs []signedSubtree) error {
-	// Signed note: latest checkpoint, mutable, atomic rename.
-	if err := l.cfg.FS.Put("log/checkpoint", signedNote, false); err != nil {
-		return err
-	}
-	// Per-subtree files in log/subtrees/<start>-<end>.
-	for _, s := range subs {
-		if err := l.persistOneSubtree(s); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// persistOneSubtree writes one subtree-signature file using the
-// `uint8 count` || repeated `(uint8 id_len, id, uint16 sig_len, sig)`
-// layout.
-func (l *Log) persistOneSubtree(s signedSubtree) error {
-	var buf []byte
-	buf = append(buf, byte(len(s.sigs)))
-	for _, sig := range s.sigs {
-		buf = append(buf, byte(len(sig.CosignerID)))
-		buf = append(buf, sig.CosignerID...)
-		var sl [2]byte
-		binary.BigEndian.PutUint16(sl[:], uint16(len(sig.Signature)))
-		buf = append(buf, sl[:]...)
-		buf = append(buf, sig.Signature...)
-	}
-	path := fmt.Sprintf("log/subtrees/%d-%d", s.subtree.Start, s.subtree.End)
-	return l.cfg.FS.Put(path, buf, false)
+// persistCheckpoint writes the latest signed note (mutable, atomic
+// rename). The covering subtrees' cosigner signatures are kept only in
+// memory — they travel inside issued certs (the MTCProof), so there is
+// no need to persist them to disk.
+func (l *Log) persistCheckpoint(signedNote []byte) error {
+	return l.cfg.FS.Put("log/checkpoint", signedNote, false)
 }
 
 // loadCheckpoint reads any previously-written checkpoint to seed

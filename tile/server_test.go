@@ -3,7 +3,6 @@ package tile
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,29 +83,6 @@ func TestAppJSEndpoint(t *testing.T) {
 	}
 }
 
-func TestSubtreeEndpoint(t *testing.T) {
-	srv, l := newTestServer(t)
-	// Append one entry so a covering subtree gets signed.
-	entry := cert.EncodeTBSCertEntry([]byte("x"))
-	idem := sha256.Sum256(entry)
-	idx, _ := l.Append(context.Background(), entry, idem)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	iss, err := l.Wait(ctx, idx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	name := uint64s(iss.Subtree.Start) + "-" + uint64s(iss.Subtree.End)
-	resp, err := http.Get(srv.URL + "/subtree/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("status = %d", resp.StatusCode)
-	}
-}
-
 // TestTilePath checks the c2sp tlog-tiles path layout: hash tiles at
 // tile/<L>/<N>, entry (data) tiles at tile/entries/<N>, with the
 // x-prefixed 3-digit index encoding and a .p/<W> partial suffix.
@@ -129,16 +105,4 @@ func TestTilePath(t *testing.T) {
 			t.Errorf("tile path = %q, want %q", tc.got, tc.want)
 		}
 	}
-}
-
-func uint64s(n uint64) string {
-	if n == 0 {
-		return "0"
-	}
-	var s string
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	return s
 }

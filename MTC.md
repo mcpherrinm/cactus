@@ -143,15 +143,15 @@ that means the read-path (HTTP) serves files at:
 - `/tile/entries/<NNN>[.p/<W>]` — entry blobs (the "data" tiles). A single
   entry is read by fetching its data tile and splitting out the entry at its
   position within the tile; there is no per-entry endpoint.
-- `/subtree/<name>` — cached signed subtree blob (the name is the
-  `start-end` storage key).
 
 Cactus's `log/` and `tile/` packages own this. The log is a
 single-writer affair: one goroutine ticks every `flush_period_ms`,
 appends pooled entries to the tilewriter, signs the new checkpoint
-+ covering subtrees, and writes everything to disk via temp-file +
-rename. The "lock" against multiple writers is documentation, not
-fcntl — see `docs/threat-model.md`.
++ covering subtrees, and writes the checkpoint and tiles to disk via
+temp-file + rename. The covering-subtree cosigner signatures are kept
+only in memory — they travel inside issued certs (the MTCProof), so
+they are not separately published. The "lock" against multiple writers
+is documentation, not fcntl — see `docs/threat-model.md`.
 
 ### Cosigners
 
