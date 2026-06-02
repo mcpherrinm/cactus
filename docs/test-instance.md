@@ -106,15 +106,12 @@ lego --server http://localhost:14000/directory \
 ```
 
 The order's `certificate` URL is the **standalone** cert (CA + witness
-cosignatures). The `Link: …; rel="alternate"` header on the finalize and
-certificate responses points at the **landmark-relative** variant
-(`/cert/{id}/alternate`), which is signature-free and verifies against
-predistributed landmark subtree hashes. Both cert URLs are POST-as-GET
-resources (RFC 8555 §6.3), so an ACME client — not a plain `curl` —
-retrieves them; the alternate returns `503 + Retry-After` until a
-covering landmark exists. With `time_between_landmarks_ms: 60000` a
-covering landmark appears within ~a minute of issuance; lower it for
-snappier testing (at the cost of more active landmarks).
+cosignatures). It is a POST-as-GET resource (RFC 8555 §6.3), so an ACME
+client — not a plain `curl` — retrieves it. The ACME API only serves the
+standalone form; the signature-free **landmark-relative** variant (which
+verifies against predistributed landmark subtree hashes) is produced
+out-of-band from the log with `cactus-cli cert landmark-relative` once a
+covering landmark exists (see below).
 
 ## Verifying against the log
 

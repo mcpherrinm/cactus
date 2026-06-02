@@ -1,6 +1,8 @@
 // Package acme implements a minimal RFC 8555 ACME server with the §9
-// extensions of draft-ietf-plants-merkle-tree-certs-04 (PEM-with-properties
-// content type, alternate URL for landmark-relative cert).
+// extensions of draft-ietf-plants-merkle-tree-certs-04 (the
+// PEM-with-properties content type). It issues standalone Merkle Tree
+// certificates; the landmark-relative form is produced out-of-band from
+// the log (see cmd/cactus-cli) rather than over the ACME API.
 //
 // This is a test-grade implementation: auto-pass challenges, in-memory
 // nonces, single CA cosigner.

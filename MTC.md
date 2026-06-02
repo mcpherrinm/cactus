@@ -321,14 +321,15 @@ In cactus:
 - `cert.BuildLandmarkRelativeCert` re-uses the existing standalone
   cert's TBS (so subject, validity, SPKI all match) and replaces
   only the signature value with a landmark MTCProof.
-- `acme.Server`'s alternate URL `(/cert/<id>/alternate)` returns a
-  `503 + Retry-After` until a covering landmark exists, then
-  returns the real landmark-relative cert.
+- `cmd/cactus-cli cert landmark-relative` derives the landmark-relative
+  cert from a standalone cert plus the log's tiles, once a covering
+  landmark exists. The ACME API itself only serves standalone certs.
 
 The relying-party side is exercised by
-`integration/TestRelyingPartyFastPath`: the test simulates an RP
-that has only `/landmarks` and the tile-served subtree hashes, then
-verifies a landmark-relative cert without consulting any cosigner key.
+`integration/TestCLICertLandmarkRelative`: it converts a standalone cert
+to landmark-relative form via `cactus-cli` and verifies it against the
+live log (signature-free, the inclusion proof reconstructs the log's
+subtree hash) without consulting any cosigner key.
 
 ## §7.2: Verifying a certificate
 
@@ -376,23 +377,27 @@ ACME is what the authenticating party (the cert holder) uses to
    `Accept: application/pem-certificate-chain-with-properties`. The
    server then includes a `CertificatePropertyList` alongside the
    PEM (cactus uses an adjacent `MTC PROPERTIES` PEM block; the
-   trust-anchor-ids draft hasn't pinned the wire format yet). The
-   property list carries a single:
-   - `trust_anchor_id` — the **CA ID** for standalone certs (§8.1), or
-     the specific landmark's ID `CA-ID.1.logNumber.L` for
-     landmark-relative certs (§8.2).
+   trust-anchor-ids draft hasn't pinned the wire format yet). For the
+   standalone certs the ACME API issues, the property list carries a
+   single `trust_anchor_id` — the **CA ID** (§8.1).
 
-   A relying party advertises a **landmark group**
-   `CA-ID.2.logNumber.L` (§8.2.1) in its `trust_anchors`, signalling
-   support for the CA's standalone certs and all active landmarks at
-   once.
-3. **Alternate URL.** Per RFC 8555 §7.4.2, the `Link: <...>;
-   rel="alternate"` header on the `/finalize` response points at
-   the landmark-relative variant of the cert. Until a landmark
-   covers the entry, that URL returns `503 + Retry-After`.
+   (The landmark-relative form, whose `trust_anchor_id` is the specific
+   landmark's ID `CA-ID.1.logNumber.L` per §8.2, is produced out-of-band
+   with `cactus-cli cert landmark-relative`, not over ACME. A relying
+   party advertises a **landmark group** `CA-ID.2.logNumber.L` (§8.2.1)
+   in its `trust_anchors` to accept the CA's standalone certs and all
+   active landmarks at once.)
 
-Cactus implements all of the above in `acme/` plus the
-property-list builder in `cert/properties.go`.
+Cactus implements the above in `acme/` plus the property-list builder
+in `cert/properties.go`.
+
+> **Note.** Earlier revisions also exposed the landmark-relative cert
+> over ACME as a `rel="alternate"` URL (RFC 8555 §7.4.2) that returned
+> `503 + Retry-After` until a covering landmark existed. That was
+> removed: ACME clients (e.g. lego, via `go-retryablehttp`) follow the
+> alternate link immediately and honour the `Retry-After` on the 503,
+> stalling issuance for the full interval. The landmark-relative form is
+> now obtained from the log with `cactus-cli` instead.
 
 ## Cactus implementation map
 

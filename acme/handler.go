@@ -21,9 +21,7 @@ import (
 
 	"github.com/letsencrypt/cactus/ca"
 	"github.com/letsencrypt/cactus/cert"
-	"github.com/letsencrypt/cactus/landmark"
 	cactusmetrics "github.com/letsencrypt/cactus/metrics"
-	"github.com/letsencrypt/cactus/tlogx"
 )
 
 // ChallengeMode controls how challenges are validated.
@@ -52,31 +50,15 @@ type Config struct {
 	// "invalid" on failure. Optional.
 	OrdersByStatus cactusmetrics.CounterVec
 
-	// Landmarks, if non-nil, enables the alternate-URL
-	// switchover: GET /cert/{id}/alternate returns a real
-	// landmark-relative cert once a covering landmark exists.
-	// Otherwise the alternate URL keeps the §9-permitted 503 stub.
-	Landmarks *landmark.Sequence
-
-	// SubtreeProof, if set, is used to compute inclusion proofs for
-	// landmark-relative cert assembly. Must be set whenever
-	// Landmarks is. Typically `(*log.Log).SubtreeProof`.
-	SubtreeProof func(start, end, index uint64) (tlogx.Hash, []tlogx.Hash, error)
-
-	// LogID is the issuance log's trust anchor ID (§5.2). Required
-	// only when Landmarks is set (and for the standalone-cert
-	// `trust_anchor_id` property emitted in
-	// application/pem-certificate-chain-with-properties).
+	// LogID is the issuance log's trust anchor ID (§5.2). Used as the
+	// fallback for the standalone-cert `trust_anchor_id` property
+	// emitted in application/pem-certificate-chain-with-properties when
+	// CAID is unset.
 	LogID cert.TrustAnchorID
 
-	// CAID is the CA's CA ID (§5.1). Required whenever Landmarks is set;
-	// landmark trust anchor IDs are derived from it and LogNumber
-	// (CA-ID.1.logNumber.L, §6.3.1).
+	// CAID is the CA's CA ID (§5.1). Emitted as the standalone cert's
+	// `trust_anchor_id` property (draft-04 §8.1).
 	CAID cert.TrustAnchorID
-
-	// LogNumber is the issuance log's number (§5.2). Required whenever
-	// Landmarks is set.
-	LogNumber uint16
 }
 
 // Server is the ACME HTTP server.
@@ -130,7 +112,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /order/{id}", s.handleOrder)
 	mux.HandleFunc("POST /finalize/{id}", s.handleFinalize)
 	mux.HandleFunc("POST /cert/{id}", s.handleCert)
-	mux.HandleFunc("POST /cert/{id}/alternate", s.handleCertAlternate)
 	return mux
 }
 
@@ -975,7 +956,6 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", loc)
 	s.issueNonce(w)
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Link", `<`+s.urlFor("/cert/"+certID+"/alternate")+`>;rel="alternate"`)
 	_ = json.NewEncoder(w).Encode(s.orderJSON(o))
 }
 
@@ -1005,7 +985,6 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.issueNonce(w)
 	accept := r.Header.Get("Accept")
-	w.Header().Set("Link", `<`+s.urlFor("/cert/"+id+"/alternate")+`>;rel="alternate"`)
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
 		// Standalone cert: the trust_anchor_id property naming the CA
@@ -1035,126 +1014,6 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/pem-certificate-chain")
 	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-}
-
-// handleCertAlternate returns the landmark-relative cert for
-// the given cert id, falling back to 503 + Retry-After (the
-// §9-permitted stub) when a covering landmark hasn't been allocated yet
-// or when landmark mode is disabled.
-func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	parsed, acct, err := s.readJWS(r, true)
-	if err != nil {
-		s.writeJWSError(w, err)
-		return
-	}
-	if !EmptyPayloadOK(parsed.Payload) {
-		s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:malformed",
-			"cert download must be POST-as-GET (empty payload)")
-		return
-	}
-	s.state.mu.Lock()
-	standalone, ok := s.certs[id]
-	s.state.mu.Unlock()
-	if !ok {
-		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no certificate")
-		return
-	}
-	if !s.certBelongsToAccount(id, acct.ID) {
-		s.problem(w, http.StatusUnauthorized, "urn:ietf:params:acme:error:unauthorized",
-			"certificate does not belong to this account")
-		return
-	}
-	s.issueNonce(w)
-
-	// Pull the serial out of the standalone cert and split off the log
-	// index: draft-04 §6.1, serial = (log_number << 48) | index.
-	tbs, _, _, err := cert.SplitCertificate(standalone)
-	if err != nil {
-		http.Error(w, "split cert: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_, serial, err := cert.RebuildLogEntryFromTBS(tbs, nil)
-	if err != nil {
-		http.Error(w, "decode TBS: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_, index, err := cert.SplitSerial(serial)
-	if err != nil {
-		http.Error(w, "decode serial: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if s.cfg.Landmarks == nil || s.cfg.SubtreeProof == nil {
-		s.serveAltStub(w)
-		return
-	}
-
-	lm, ok := s.cfg.Landmarks.ContainingIndex(index)
-	if !ok {
-		s.serveAltStub(w)
-		return
-	}
-
-	// Pick the §4.5 covering subtree of [prev_treeSize, lm.TreeSize)
-	// that contains the entry index.
-	subtrees := s.cfg.Landmarks.LandmarkSubtrees(lm)
-	var chosen tlogx.Subtree
-	for _, st := range subtrees {
-		if index >= st.Start && index < st.End {
-			chosen = st
-			break
-		}
-	}
-	if chosen.End == 0 {
-		// Inconsistent state: ContainingIndex said yes but no covering
-		// subtree contains the index. Treat as not-yet-available.
-		s.serveAltStub(w)
-		return
-	}
-
-	subtreeHash, proof, err := s.cfg.SubtreeProof(chosen.Start, chosen.End, index)
-	if err != nil {
-		http.Error(w, "subtree proof: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	mtcSubtree := cert.MTCSubtree{
-		LogID: s.cfg.LogID,
-		Start: chosen.Start, End: chosen.End,
-		Hash: subtreeHash,
-	}
-	der, err := cert.BuildLandmarkRelativeCert(standalone, s.cfg.LogID, mtcSubtree, proof)
-	if err != nil {
-		http.Error(w, "build landmark cert: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	accept := r.Header.Get("Accept")
-	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
-		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
-		// draft-04 §8.2: a landmark-relative certificate's trust anchor
-		// ID is the individual landmark ID (CA-ID.1.logNumber.L).
-		// Relying parties advertise a landmark group (§8.2.1) instead.
-		props := []cert.CertificateProperty{
-			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lm.TrustAnchorID(s.cfg.CAID, s.cfg.LogNumber)},
-		}
-		pl, err := cert.BuildPropertyList(props)
-		if err != nil {
-			http.Error(w, "build properties: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Write(cert.EncodePEMWithProperties(der, pl))
-		return
-	}
-	w.Header().Set("Content-Type", "application/pem-certificate-chain")
-	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-}
-
-// serveAltStub is the §9-permitted "not yet available" response.
-func (s *Server) serveAltStub(w http.ResponseWriter) {
-	w.Header().Set("Retry-After", "3600")
-	http.Error(w, "landmark-relative certificate not yet available", http.StatusServiceUnavailable)
 }
 
 // certBelongsToAccount returns true if the cert with the given id is

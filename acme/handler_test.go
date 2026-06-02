@@ -265,13 +265,6 @@ func TestEndToEndIssuance(t *testing.T) {
 		t.Errorf("suspiciously short cert: %d bytes", len(block.Bytes))
 	}
 
-	// 8. Alternate URL returns 503 + Retry-After.
-	altURL := strings.TrimSuffix(ord2.Certificate, "/cert") + "/cert/" + lastSegment(ord2.Certificate) + "/alternate"
-	resp, _ = postAsGet(t, base, altURL, acctKey, kid, "")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Logf("alternate URL: status=%d (expected 503)", resp.StatusCode)
-	}
-
 	_ = orderURL
 	_ = ord
 }

@@ -105,8 +105,6 @@ func TestCLICertLandmarkRelative(t *testing.T) {
 	srv, _ := acme.New(acme.Config{
 		Issuer:        issuer,
 		ChallengeMode: acme.ChallengeAutoPass,
-		Landmarks:     seq,
-		SubtreeProof:  l.SubtreeProof,
 		LogID:         logID,
 	})
 	if err := srv.AttachStorage(fs); err != nil {

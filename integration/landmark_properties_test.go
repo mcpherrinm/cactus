@@ -10,18 +10,17 @@ import (
 	"github.com/letsencrypt/cactus/acme"
 	"github.com/letsencrypt/cactus/ca"
 	"github.com/letsencrypt/cactus/cert"
-	"github.com/letsencrypt/cactus/landmark"
 	cactuslog "github.com/letsencrypt/cactus/log"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 )
 
 // TestPEMWithPropertiesContent confirms that when the client sends
-// `Accept: application/pem-certificate-chain-with-properties`, both
-// the standalone /cert/{id} and the landmark-relative /alternate URL
-// reply with a PEM `CERTIFICATE PROPERTIES` block (whose contents
-// round-trip back to the expected CertificatePropertyList) followed by
-// the PEM CERTIFICATE block, per trust-anchor-ids §6.1.
+// `Accept: application/pem-certificate-chain-with-properties`, the
+// standalone /cert/{id} URL replies with a PEM `CERTIFICATE PROPERTIES`
+// block (whose contents round-trip back to the expected
+// CertificatePropertyList) followed by the PEM CERTIFICATE block, per
+// trust-anchor-ids §6.1.
 func TestPEMWithPropertiesContent(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := storage.New(dir)
@@ -45,36 +44,18 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	defer l.Stop()
 	issuer, _ := ca.New(l, "32473.1", 1)
 
-	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	seq, err := landmark.New(landmark.Config{
-		CAID:                 logID,
-		LogNumber:            1,
-		TimeBetweenLandmarks: 5 * time.Millisecond,
-		MaxCertLifetime:      20 * time.Millisecond, // MaxActive = 5
-	}, fs, t0)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	srv, _ := acme.New(acme.Config{
 		Issuer:        issuer,
 		ChallengeMode: acme.ChallengeAutoPass,
-		Landmarks:     seq,
-		SubtreeProof:  l.SubtreeProof,
 		LogID:         logID,
-		CAID:          logID, LogNumber: 1,
+		CAID:          logID,
 	})
 	hsrv := httptest.NewServer(srv.Handler())
 	defer hsrv.Close()
 	srv.SetExternalURL(hsrv.URL)
 
-	// Issue, allocate landmark.
 	_, certURL, acctKey, kid, err := acmeIssueOneWithKeys(hsrv.URL, "props.test")
 	if err != nil {
-		t.Fatal(err)
-	}
-	cp := l.CurrentCheckpoint()
-	if _, ok, err := seq.Append(context.Background(), cp.Size, t0.Add(time.Second)); err != nil || !ok {
 		t.Fatal(err)
 	}
 
@@ -100,39 +81,10 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// draft-04 §8.1: a standalone cert carries a single trust_anchor_id
+	// naming the CA.
 	if len(props) != 1 || props[0].Type != cert.PropertyTrustAnchorID ||
 		string(props[0].TrustAnchorID) != string(logID) {
 		t.Errorf("standalone properties = %+v, want one trust_anchor_id = %q", props, logID)
-	}
-
-	// /cert/{id}/alternate with the with-properties Accept header (POST-as-GET).
-	altResp, altBody := postAsGetWithAccept(t, hsrv.URL, certURL+"/alternate",
-		"application/pem-certificate-chain-with-properties", acctKey, kid)
-	if altResp.StatusCode != 200 {
-		t.Fatalf("alt status = %d body=%s", altResp.StatusCode, altBody)
-	}
-	p2, rest2 := pem.Decode(altBody)
-	if p2 == nil || p2.Type != cert.PEMBlockProperties {
-		t.Fatalf("alt: first block not %s", cert.PEMBlockProperties)
-	}
-	c2, _ := pem.Decode(rest2)
-	if c2 == nil || c2.Type != "CERTIFICATE" {
-		t.Fatalf("alt: missing CERTIFICATE block")
-	}
-	altProps, err := cert.ParsePropertyList(p2.Bytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// draft-04 §8.2: a landmark-relative cert carries a single
-	// trust_anchor_id = the individual landmark ID CA-ID.1.logNumber.L.
-	// With CA ID "32473.1", log number 1, landmark 1 → "32473.1.1.1.1".
-	if len(altProps) != 1 {
-		t.Fatalf("alt properties len = %d, want 1", len(altProps))
-	}
-	if altProps[0].Type != cert.PropertyTrustAnchorID {
-		t.Errorf("altProps[0].Type = %d", altProps[0].Type)
-	}
-	if string(altProps[0].TrustAnchorID) != "32473.1.1.1.1" {
-		t.Errorf("altProps[0].TrustAnchorID = %q, want 32473.1.1.1.1", altProps[0].TrustAnchorID)
 	}
 }

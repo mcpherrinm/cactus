@@ -47,11 +47,11 @@ operate it, and where to look in the code.
   `signatureAlgorithm` is `id-alg-mtcProof` and whose `signatureValue`
   body is an `MTCProof` blob carrying an inclusion proof + cosigner
   signatures.
-- Issues **landmark-relative certificates** (§6.3) alongside the
-  standalone ones. Allocates landmarks per §6.3.2, serves a
-  `/landmarks` endpoint per §6.3.1, and switches the §9 alternate URL
-  from a `503` stub to a real signature-less cert once a covering
-  landmark exists.
+- Supports **landmark-relative certificates** (§6.3). Allocates
+  landmarks per §6.3.2 and serves a `/landmarks` endpoint per §6.3.1.
+  The signature-free landmark-relative form is derived from the log
+  out-of-band with `cactus-cli cert landmark-relative` (not over the
+  ACME API).
 - Acts as a **CA cosigner** using ML-DSA-44 (requires a Go 1.27+ build).
 - Optionally **runs as a cosigning mirror** for an external upstream
   log ([tlog-mirror], [tlog-cosignature]). In mirror mode cactus
