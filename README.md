@@ -380,7 +380,7 @@ cactus/
 ├── cmd/
 │   ├── cactus/         main server binary (CA / mirror / both)
 │   ├── cactus-cli/     debugging client (tree show, entry, cert verify, prove)
-│   └── cactus-keygen/  fresh seed generator
+│   └── cactus-keygen/  cosigner seed generator (-pub prints the public key)
 ├── acme/      RFC 8555 ACME server with §9 extensions
 ├── ca/        Issuer (CSR → X.509 cert via id-alg-mtcProof)
 ├── cert/      TBSCertificateLogEntry, MTCProof, MTCSubtreeSignatureInput,
@@ -394,7 +394,7 @@ cactus/
 ├── tlogx/     §4 subtree primitives extending x/mod/sumdb/tlog
 ├── metrics/   Prometheus instruments
 ├── config/    JSON config loader
-├── docs/      threat-model, disk-layout
+├── docs/      threat-model, disk-layout, test-instance (CA + witness)
 └── integration/ end-to-end tests
 ```
 
