@@ -49,16 +49,16 @@ func TestCoveringLandmark(t *testing.T) {
 	// extra older line 0→0 so landmark 1's lower bound is known.
 	desc := []landmarkEntry{{3, 120}, {2, 80}, {1, 40}, {0, 0}}
 	cases := []struct {
-		index                  uint64
+		index                     uint64
 		wantNum, wantSz, wantPrev uint64
-		wantOK                 bool
+		wantOK                    bool
 	}{
-		{0, 1, 40, 0, true},    // first entry of landmark 1
-		{39, 1, 40, 0, true},   // last entry of landmark 1
-		{40, 2, 80, 40, true},  // first entry of landmark 2
+		{0, 1, 40, 0, true},     // first entry of landmark 1
+		{39, 1, 40, 0, true},    // last entry of landmark 1
+		{40, 2, 80, 40, true},   // first entry of landmark 2
 		{119, 3, 120, 80, true}, // last entry of landmark 3
-		{120, 0, 0, 0, false},  // past the newest landmark
-		{500, 0, 0, 0, false},  // well past
+		{120, 0, 0, 0, false},   // past the newest landmark
+		{500, 0, 0, 0, false},   // well past
 	}
 	for _, c := range cases {
 		num, sz, prev, ok := coveringLandmark(desc, c.index)
