@@ -142,7 +142,8 @@ that means the read-path (HTTP) serves files at:
 - `/tile/<L>/<NNN>[.p/<W>]` — Merkle hash tiles.
 - `/tile/entries/<NNN>[.p/<W>]` — entry blobs (the "data" tiles).
 - `/log/v1/entry/<index>` — fetch one entry by index.
-- `/subtree/<start>-<end>` — cached signed subtree blob.
+- `/subtree/<name>` — cached signed subtree blob (the name is the
+  `start-end` storage key).
 
 Cactus's `log/` and `tile/` packages own this. The log is a
 single-writer affair: one goroutine ticks every `flush_period_ms`,
@@ -187,13 +188,14 @@ MTC proofs always use `timestamp = 0`.
 
 In cactus, the cosigner abstraction is in `signer/`:
 
-- `signer.Signer` — a one-method interface (`Sign(rand, msg) → sig`).
+- `signer.Signer` — a small interface whose core method is
+  `Sign(rand, msg) → sig` (plus `Algorithm()` and `PublicKey()`).
 - `signer.FromSeed(alg, seed)` — derives a key from a 32-byte seed
-  via HKDF. ECDSA-P256 and ECDSA-P384 on any toolchain; ML-DSA-44/65/87
-  on Go 1.27+, where Go's built-in `crypto/mldsa` (FIPS 204) is available.
-  The ML-DSA files carry a `//go:build go1.27` constraint, so they compile
-  in automatically — no build tag. Until Go 1.27 is released a `gotip`
-  1.27-devel toolchain satisfies the constraint (`gotip build ./...`).
+  via HKDF. cactus is ML-DSA-only: ML-DSA-44/65/87, using Go's
+  built-in `crypto/mldsa` (FIPS 204). That package needs Go 1.27+, so
+  the whole module is `go 1.27` in go.mod — no per-file build tags.
+  Until Go 1.27 is released, a `gotip` 1.27-devel toolchain builds it
+  (`gotip build ./...`).
 
 ## §6: Building the certificate
 
@@ -239,7 +241,7 @@ The cert assembly code is in `cert/` and `ca/`:
 
 - `cert.MTCProof` / `cert.MTCSubtree` / `cert.MTCSignature` —
   TLS-presentation encoders.
-- `cert.BuildLogIDName` — the §5.2 issuer DN.
+- `cert.BuildCAName` — the §5.2 issuer DN.
 - `ca.Validator` / `ca.Issuer` — turn an ACME order + CSR into a
   TBSCertificateLogEntry, submit to the log, await the inclusion
   proof, assemble the X.509 cert.
