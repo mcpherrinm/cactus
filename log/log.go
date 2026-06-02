@@ -140,7 +140,25 @@ type signedSubtree struct {
 	// sigs[0] is always the CA cosigner; mirror cosigner signatures
 	// are appended afterwards.
 	sigs []cert.MTCSignature
+	// committedAt is when this subtree was first published in a flush.
+	// Used to bound how long it is carried forward across later flushes
+	// (see subtreeRetention).
+	committedAt time.Time
 }
+
+// subtreeRetention is how long a covering subtree is kept available in
+// l.committed.subtrees after it was first published, even once later
+// flushes have advanced the tree past its range. A subtree must remain
+// findable by buildIssued for the whole window in which an entry it
+// covers might still be Wait()ed on — both the in-flight finalize
+// (30s ctx, acme/handler.go) and the async mirror cosignature
+// collection (30s ctx, collectMirrorSigs), plus idempotent finalize
+// retries. Without this, the next flush would evict the subtree and
+// Wait would never see its cosigner quorum, hanging issuance until the
+// finalize deadline. The window is generous relative to those 30s
+// bounds; memory is bounded to ~retention worth of flushes (far smaller
+// than the never-pruned l.dedup map).
+const subtreeRetention = 10 * time.Minute
 
 // New constructs a Log and starts its sequencing goroutine. A fresh log
 // starts empty; the first appended entry is assigned index 0. draft-04
@@ -372,6 +390,7 @@ func (l *Log) flush() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	now := l.cfg.NowFunc()
 	prevSize := uint64(l.tw.Size())
 	pool := l.pool
 	l.pool = nil
@@ -446,19 +465,45 @@ func (l *Log) flush() error {
 			if err != nil {
 				return fmt.Errorf("flush sign subtree: %w", err)
 			}
-			subs = append(subs, signedSubtree{subtree: st, sigs: []cert.MTCSignature{caSig}})
+			subs = append(subs, signedSubtree{
+				subtree:     st,
+				sigs:        []cert.MTCSignature{caSig},
+				committedAt: now,
+			})
 		}
 	}
 
+	// `subs` holds only the subtrees freshly minted for this flush's
+	// range. Those are the ones we persist here and the only ones we
+	// kick mirror collection off for; carried-forward subtrees were
+	// already persisted and already had their collection started in the
+	// flush that minted them.
 	if err := l.persistCheckpoint(newSize, rootCp, signedNote, subs); err != nil {
 		return fmt.Errorf("flush persist: %w", err)
+	}
+
+	// Carry forward recent subtrees from the previous checkpoint that
+	// are still within the retention window. Earlier versions kept only
+	// the just-minted range, so the *next* flush would evict an entry's
+	// covering subtree before its mirror cosignatures arrived — leaving
+	// Wait (with WaitForCosigners > 0) unable to ever see the quorum and
+	// hanging issuance until the finalize deadline. Ranges are unique
+	// across flushes (FindSubtrees covers disjoint intervals), so the
+	// new range never collides with a carried-forward one.
+	committedSubs := subs
+	if l.committed != nil {
+		for _, s := range l.committed.subtrees {
+			if now.Sub(s.committedAt) < subtreeRetention {
+				committedSubs = append(committedSubs, s)
+			}
+		}
 	}
 
 	l.committed = &committedCheckpoint{
 		size:        newSize,
 		root:        rootCp,
 		signedNote:  signedNote,
-		subtrees:    subs,
+		subtrees:    committedSubs,
 		hashesAtCkp: l.tw.SnapshotHashes(),
 	}
 	close(l.notify)
@@ -472,11 +517,11 @@ func (l *Log) flush() error {
 		go l.cfg.OnFlush(newSize)
 	}
 
-	// Kick off mirror cosignature collection for each
-	// subtree we just committed. Runs in a goroutine so it doesn't
-	// block subsequent flushes; on success it appends to
-	// subtree.sigs in l.committed (still keyed to *this* checkpoint
-	// — older checkpoints are dropped from l.committed).
+	// Kick off mirror cosignature collection for each subtree we just
+	// minted (not the carried-forward ones — those already had a
+	// collector started). Runs in a goroutine so it doesn't block
+	// subsequent flushes; on success collectMirrorSigs appends to the
+	// matching subtree in l.committed, which now survives later flushes.
 	if l.cfg.MirrorRequester != nil && len(subs) > 0 {
 		// Capture by value so a subsequent flush replacing
 		// l.committed doesn't perturb the request.
@@ -507,11 +552,17 @@ func (l *Log) collectMirrorSigs(subs []signedSubtree, signedNote []byte, atSize 
 			continue
 		}
 
-		// Mutate l.committed under l.mu, but only if it still
-		// matches the checkpoint we collected sigs for. A newer
-		// flush in-between superseded our state; drop the result.
+		// Attach the mirror sigs to the matching subtree under l.mu.
+		// We match by the subtree's [Start,End) range, not by
+		// checkpoint size: a newer flush may have advanced
+		// l.committed.size since we started, but it carries the
+		// subtree forward (see flush), so the range is still the
+		// stable key. Earlier versions gated on l.committed.size ==
+		// atSize and dropped the sigs whenever any flush intervened —
+		// which, with WaitForCosigners > 0, stranded Wait below quorum
+		// and hung issuance.
 		l.mu.Lock()
-		if l.committed != nil && l.committed.size == atSize {
+		if l.committed != nil {
 			for j := range l.committed.subtrees {
 				cs := &l.committed.subtrees[j]
 				if cs.subtree.Start == st.Start && cs.subtree.End == st.End {

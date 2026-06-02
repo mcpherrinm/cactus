@@ -136,6 +136,95 @@ func TestMirrorRequesterErrorIsNonFatal(t *testing.T) {
 	}
 }
 
+// TestSlowMirrorSigSurvivesInterveningFlushes is a regression test for
+// the issuance hang: an entry's covering subtree used to be evicted from
+// l.committed by the very next flush, so a mirror cosignature that
+// arrived after a later flush was dropped and Wait (WaitForCosigners=2)
+// never saw the quorum — blocking until the finalize deadline.
+//
+// Here the mirror response for entry-0's subtree is stalled well past
+// several subsequent flushes (driven by noise entries). Wait must still
+// resolve once the late sig lands, because the subtree is now carried
+// forward across flushes and the sig is matched by range, not by the
+// (now-advanced) checkpoint size.
+func TestSlowMirrorSigSurvivesInterveningFlushes(t *testing.T) {
+	fs, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := bytes.Repeat([]byte{0x37}, signer.SeedSize)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
+	id := cert.TrustAnchorID("32473.1")
+	mirrorID := cert.TrustAnchorID("32473.24")
+
+	// targetIdx names entry-0 once it's appended; the requester stalls
+	// only the subtree covering it, so unrelated (noise) subtrees keep
+	// flowing and keep advancing the checkpoint.
+	var targetIdx atomic.Int64
+	targetIdx.Store(-1)
+	requester := func(_ context.Context, st *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
+		if ti := targetIdx.Load(); ti >= 0 && st.Start <= uint64(ti) && uint64(ti) < st.End {
+			// Stall past several FlushPeriods so the covering subtree
+			// is evicted by intervening flushes before this returns.
+			time.Sleep(250 * time.Millisecond)
+		}
+		return []cert.MTCSignature{{
+			CosignerID: mirrorID,
+			Signature:  bytes.Repeat([]byte{0xAB}, 8),
+		}}, nil
+	}
+
+	l, err := New(context.Background(), Config{
+		LogID: id, CosignerID: id,
+		Signer: s, FS: fs,
+		FlushPeriod:      20 * time.Millisecond,
+		MirrorRequester:  requester,
+		WaitForCosigners: 2, // CA + mirror
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Stop()
+
+	entry0 := cert.EncodeTBSCertEntry([]byte("entry-0"))
+	idx0, err := l.Append(context.Background(), entry0, sha256.Sum256(entry0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetIdx.Store(int64(idx0))
+
+	// Force several real flushes that advance the checkpoint past
+	// entry-0's range while its mirror sig is still stalled.
+	for i := 0; i < 5; i++ {
+		e := cert.EncodeTBSCertEntry([]byte{byte('a' + i)})
+		if _, err := l.Append(context.Background(), e, sha256.Sum256(e)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond) // > FlushPeriod
+	}
+
+	// Bound generously but finitely: pre-fix this blocks until ctx and
+	// returns an error; post-fix the late sig attaches and Wait returns.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	iss, err := l.Wait(ctx, idx0)
+	if err != nil {
+		t.Fatalf("Wait(idx0) did not resolve (the hang): %v", err)
+	}
+	if len(iss.Signatures) < 2 {
+		t.Fatalf("got %d sigs, want >= 2 (CA + late mirror sig)", len(iss.Signatures))
+	}
+	mirrorSeen := false
+	for _, sig := range iss.Signatures {
+		if string(sig.CosignerID) == string(mirrorID) {
+			mirrorSeen = true
+		}
+	}
+	if !mirrorSeen {
+		t.Errorf("late mirror sig was dropped; not present in Issued")
+	}
+}
+
 type fakeErr struct{}
 
 func (fakeErr) Error() string { return "synthetic requester failure" }
