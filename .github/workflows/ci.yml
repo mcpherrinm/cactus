@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# cactus uses Go's built-in crypto/mldsa and declares `go 1.27` in
+# go.mod, so it must be built with a Go 1.27 toolchain. Until 1.27 is
+# released, that means the gotip 1.27-devel toolchain (the same default
+# the Makefile uses: GO ?= gotip). Once Go 1.27 ships, replace the
+# bootstrap+gotip steps with a single actions/setup-go (go-version
+# '1.27') and drop GOTOOLCHAIN=local.
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A released Go is needed only to `go install` and bootstrap gotip.
+      - name: Install bootstrap Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      # Cache the built gotip toolchain so we don't rebuild Go from
+      # source on every run. Bump the -v1 suffix to force a refresh to a
+      # newer gotip commit.
+      - name: Cache gotip toolchain
+        id: cache-gotip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/sdk/gotip
+            ~/go/bin/gotip
+          key: gotip-${{ runner.os }}-v1
+
+      - name: Install gotip (Go 1.27 devel)
+        if: steps.cache-gotip.outputs.cache-hit != 'true'
+        run: |
+          go install golang.org/dl/gotip@latest
+          "$(go env GOPATH)/bin/gotip" download
+
+      - name: Put gotip on PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      # Module + build cache for faster test runs.
+      - name: Cache Go modules and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      - name: Toolchain version
+        run: gotip version
+
+      - name: Check gofmt
+        run: |
+          fmtout=$("$(gotip env GOROOT)/bin/gofmt" -l .)
+          if [ -n "$fmtout" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$fmtout"
+            exit 1
+          fi
+
+      - name: Vet
+        run: make vet
+
+      - name: Build
+        run: make build
+
+      - name: Test (race)
+        run: gotip test -race -count=1 ./...
+
+      - name: Integration tests (race)
+        run: make integration
