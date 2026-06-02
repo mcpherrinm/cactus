@@ -41,7 +41,7 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 		},
 		"ca_cosigner": map[string]any{
 			"id":        "44363.47.1.99",
-			"algorithm": "ecdsa-p256-sha256",
+			"algorithm": "mldsa-44",
 			"seed_path": "keys/ca-cosigner.seed",
 		},
 		"acme": map[string]any{
@@ -97,7 +97,7 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 	monBase := fmt.Sprintf("http://127.0.0.1:%d", monPort)
 
 	// Wait for /landmarks to come up.
-	if err := waitForHTTP(monBase+"/landmarks", 5*time.Second); err != nil {
+	if err := waitForHTTP(monBase+"/1/landmarks", 5*time.Second); err != nil {
 		t.Fatalf("/landmarks never answered: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	var lastBody string
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(monBase + "/landmarks")
+		resp, err := http.Get(monBase + "/1/landmarks")
 		if err == nil {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()

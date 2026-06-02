@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// FuzzParseSignSubtreeRequest feeds random bytes to the §C.2 request
-// parser and asserts that it never panics. The §C.2 format is fiddly
-// (three sections separated by blank lines, with signed-note
-// signatures inside each), so any unchecked length or index could
-// surface as a panic.
+// FuzzParseSignSubtreeRequest feeds random bytes to the
+// c2sp.org/tlog-witness sign-subtree request parser and asserts that it
+// never panics. The format is fiddly (a range line, a hash line, a
+// variable run of cosignature/proof lines, an empty line, then a signed
+// checkpoint), so any unchecked length or index could surface as a panic.
 func FuzzParseSignSubtreeRequest(f *testing.F) {
 	// Seed corpus: a handful of legal + suggestive shapes.
 	f.Add([]byte(""))
@@ -20,14 +20,18 @@ func FuzzParseSignSubtreeRequest(f *testing.F) {
 	f.Add([]byte("\n\n\n"))
 	f.Add([]byte(buildMinimal("oid/test", 0, 1)))
 
-	// A shape with 64 proof lines (1 over the §C.2 cap).
-	manyProofs := buildMinimal("oid/test", 0, 1)
+	// A shape with 64 proof lines (1 over the cap).
+	var manyProofs bytes.Buffer
+	manyProofs.WriteString("subtree 0 1\n")
+	manyProofs.WriteString(base64.StdEncoding.EncodeToString(make([]byte, sha256.Size)) + "\n")
 	for i := 0; i < 64; i++ {
-		manyProofs += base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n"
+		manyProofs.WriteString(base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n")
 	}
-	f.Add([]byte(manyProofs))
+	manyProofs.WriteString("\n")
+	manyProofs.WriteString("oid/test\n1\n" + base64.StdEncoding.EncodeToString(make([]byte, sha256.Size)) + "\n\n")
+	f.Add(manyProofs.Bytes())
 
-	// A shape with a malformed signature line.
+	// A shape with a malformed line where the checkpoint should be.
 	bad := buildMinimal("oid/test", 0, 1)
 	bad += "this isn't a signature\n"
 	f.Add([]byte(bad))
@@ -37,18 +41,17 @@ func FuzzParseSignSubtreeRequest(f *testing.F) {
 	})
 }
 
-// buildMinimal returns a §C.2 body with a no-sig subtree note + a
-// no-sig checkpoint note + zero proof lines. Both notes use the
-// given log_id; the checkpoint is at size 1 with a SHA-256 zero hash.
+// buildMinimal returns a sign-subtree body with a subtree range + hash,
+// no cosignature or proof lines, an empty line, then a no-signature
+// checkpoint at size 1 with a SHA-256 zero hash.
 func buildMinimal(origin string, start, end uint64) string {
 	var b bytes.Buffer
-	b.WriteString(origin + "\n")
-	fmt.Fprintf(&b, "%d %d\n", start, end)
+	fmt.Fprintf(&b, "subtree %d %d\n", start, end)
 	b.WriteString(base64.StdEncoding.EncodeToString(make([]byte, sha256.Size)) + "\n")
-	b.WriteString("\n\n")
+	b.WriteString("\n") // empty line before the checkpoint
 	b.WriteString(origin + "\n")
 	b.WriteString("1\n")
 	b.WriteString(base64.StdEncoding.EncodeToString(make([]byte, sha256.Size)) + "\n")
-	b.WriteString("\n\n")
+	b.WriteString("\n") // checkpoint body/sig separator (zero sigs)
 	return b.String()
 }

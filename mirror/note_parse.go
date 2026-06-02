@@ -85,18 +85,31 @@ func readSignedNote(r *bufio.Reader) (*signedNote, error) {
 			}
 			return nil, fmt.Errorf("mirror: unexpected non-signature line in note: %q", line)
 		}
-		rest := strings.TrimPrefix(line, emDash+" ")
-		parts := strings.SplitN(rest, " ", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("mirror: malformed sig line: %q", line)
-		}
-		raw, err := base64.StdEncoding.DecodeString(parts[1])
+		ns, err := parseNoteSignatureLine(line)
 		if err != nil {
-			return nil, fmt.Errorf("mirror: sig b64: %w", err)
+			return nil, err
 		}
-		sn.sigs = append(sn.sigs, noteSignature{keyName: parts[0], sigBytes: raw})
+		sn.sigs = append(sn.sigs, ns)
 	}
 	return &sn, nil
+}
+
+// parseNoteSignatureLine parses a single c2sp.org/signed-note signature
+// line ("— <key name> <base64(keyID || sig)>") into a noteSignature.
+func parseNoteSignatureLine(line string) (noteSignature, error) {
+	rest, ok := strings.CutPrefix(line, emDash+" ")
+	if !ok {
+		return noteSignature{}, fmt.Errorf("mirror: not a signature line: %q", line)
+	}
+	parts := strings.SplitN(rest, " ", 2)
+	if len(parts) != 2 {
+		return noteSignature{}, fmt.Errorf("mirror: malformed sig line: %q", line)
+	}
+	raw, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return noteSignature{}, fmt.Errorf("mirror: sig b64: %w", err)
+	}
+	return noteSignature{keyName: parts[0], sigBytes: raw}, nil
 }
 
 // readLine reads up to and including the next \n, returning the line
@@ -112,14 +125,4 @@ func readLine(r *bufio.Reader) (string, error) {
 	}
 	line = strings.TrimRight(line, "\n")
 	return line, nil
-}
-
-// signatureFor returns the signature lines whose keyName matches.
-func (sn *signedNote) signatureFor(keyName string) (noteSignature, bool) {
-	for _, s := range sn.sigs {
-		if s.keyName == keyName {
-			return s, true
-		}
-	}
-	return noteSignature{}, false
 }

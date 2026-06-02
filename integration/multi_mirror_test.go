@@ -66,12 +66,10 @@ func TestMultiMirrorQuorum(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = f.Run(ctx) }()
+		startFollower(t, ctx, f)
 
-		seed := make([]byte, signer.SeedSize)
-		seed[0] = byte(i + 1)
-		s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 		id := cert.TrustAnchorID(fmt.Sprintf("32473.%d", 40+i+1))
+		s, _ := mldsaCosigner(t, id, byte(i+1))
 		srv, err := mirror.NewServer(mirror.ServerConfig{
 			Follower: f, Signer: s, CosignerID: id,
 		})
@@ -146,7 +144,7 @@ func TestMultiMirrorQuorum(t *testing.T) {
 			URL: m.url + "/", // server.go's path was /sign-subtree but our handler is mounted at root
 			Key: cert.CosignerKey{
 				ID:        m.id,
-				Algorithm: cert.AlgECDSAP256SHA256,
+				Algorithm: cert.AlgMLDSA44,
 				PublicKey: m.signer.PublicKey(),
 			},
 		}
@@ -198,12 +196,11 @@ func TestMultiMirrorQuorumNotMet(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = f.Run(ctx) }()
+	startFollower(t, ctx, f)
 	waitFollowerCatchUp(t, f, ca.log.CurrentCheckpoint().Size, 2*time.Second)
 
-	seed := make([]byte, signer.SeedSize)
-	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
 	id := cert.TrustAnchorID("32473.22")
+	s, key := mldsaCosigner(t, id, 0x01)
 	srv, _ := mirror.NewServer(mirror.ServerConfig{Follower: f, Signer: s, CosignerID: id})
 	hSrv := httptest.NewServer(srv.Handler())
 	defer hSrv.Close()
@@ -218,7 +215,7 @@ func TestMultiMirrorQuorumNotMet(t *testing.T) {
 	}
 	_, err := cert.RequestCosignatures(ctx, req, []cert.MirrorEndpoint{{
 		URL: hSrv.URL,
-		Key: cert.CosignerKey{ID: id, Algorithm: cert.AlgECDSAP256SHA256, PublicKey: s.PublicKey()},
+		Key: key,
 	}}, 2, 200*time.Millisecond, false)
 	if err == nil {
 		t.Errorf("expected error when quorum > number of mirrors")

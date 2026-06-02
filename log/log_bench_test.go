@@ -27,7 +27,7 @@ func BenchmarkAppendWait(b *testing.B) {
 		b.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x88}, signer.SeedSize)
-	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 	l, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
 		CosignerID:  cert.TrustAnchorID("32473.1"),
@@ -68,7 +68,7 @@ func BenchmarkAppendBatch(b *testing.B) {
 		b.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x88}, signer.SeedSize)
-	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 	l, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
 		CosignerID:  cert.TrustAnchorID("32473.1"),

@@ -28,7 +28,7 @@ func TestLoadValid(t *testing.T) {
 	},
 	"ca_cosigner": {
 		"id": "44363.47.1.99",
-		"algorithm": "ecdsa-p256-sha256",
+		"algorithm": "mldsa-44",
 		"seed_path": "keys/ca.seed"
 	},
 	"acme": {

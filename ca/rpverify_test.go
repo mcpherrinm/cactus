@@ -25,7 +25,7 @@ func newDerivedLog(t *testing.T, caID cert.TrustAnchorID, logNumber uint16) (*ca
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0xCD}, signer.SeedSize)
-	sgn, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	sgn, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +70,17 @@ func TestRelyingPartyVerifyFromCACertificate(t *testing.T) {
 	}
 
 	// Build the §5.5 CA certificate from the cosigner key + parameters.
-	sigAlgOID, err := cert.SigAlgOID(cert.AlgECDSAP256SHA256)
+	sigAlgOID, err := cert.SigAlgOID(cert.AlgMLDSA44)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cosignerSPKI, err := cert.MarshalCosignerSPKI(cert.AlgMLDSA44, sgn.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 	caCertDER, err := cert.BuildCACertificate(cert.CACertificateInput{
 		CAID:         caID,
-		CosignerSPKI: sgn.PublicKey(),
+		CosignerSPKI: cosignerSPKI,
 		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlgOID,
 		MinSerial:    0,

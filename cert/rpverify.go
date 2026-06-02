@@ -209,34 +209,28 @@ func checkMTCProofAlgID(der []byte) error {
 }
 
 // cosignerKeyFromSPKI builds a CosignerKey for a CA cosigner from the CA
-// certificate's subjectPublicKeyInfo and the sigAlg OID. For ECDSA the
-// PublicKey is the SPKI DER (as VerifyMTCSignature expects); for ML-DSA
-// it is the raw FIPS 204 key.
+// certificate's subjectPublicKeyInfo and the sigAlg OID. The PublicKey is
+// the raw FIPS 204 ML-DSA key carried in the SPKI BIT STRING.
 func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdentifier) (CosignerKey, error) {
 	alg, err := algFromSigAlgOID(sigAlg)
 	if err != nil {
 		return CosignerKey{}, err
 	}
-	switch alg {
-	case AlgMLDSA44, AlgMLDSA65, AlgMLDSA87:
-		// crypto/x509 cannot parse ML-DSA SPKIs, and ML-DSA keys are the
-		// raw FIPS 204 key bytes carried in the SPKI BIT STRING. Extract
-		// that BIT STRING so VerifyMTCSignature (via the crypto/mldsa
-		// verifier) gets the same raw key encoding signer.Signer emits.
-		raw, err := rawKeyFromSPKI(spki)
-		if err != nil {
-			return CosignerKey{}, fmt.Errorf("cert: extract ML-DSA key: %w", err)
-		}
-		return CosignerKey{ID: id, Algorithm: alg, PublicKey: raw}, nil
-	default:
-		return CosignerKey{ID: id, Algorithm: alg, PublicKey: spki}, nil
+	// crypto/x509 cannot parse ML-DSA SPKIs, and ML-DSA keys are the raw
+	// FIPS 204 key bytes carried in the SPKI BIT STRING. Extract that BIT
+	// STRING so VerifyMTCSignature (via the crypto/mldsa verifier) gets the
+	// same raw key encoding signer.Signer emits.
+	raw, err := rawKeyFromSPKI(spki)
+	if err != nil {
+		return CosignerKey{}, fmt.Errorf("cert: extract ML-DSA key: %w", err)
 	}
+	return CosignerKey{ID: id, Algorithm: alg, PublicKey: raw}, nil
 }
 
 // rawKeyFromSPKI extracts the subjectPublicKey BIT STRING contents from a
 // DER SubjectPublicKeyInfo (SEQUENCE { AlgorithmIdentifier, BIT STRING }).
-// Used for algorithms crypto/x509 cannot parse (ML-DSA), where the raw
-// key bytes are exactly the BIT STRING value.
+// For ML-DSA (which crypto/x509 cannot parse) the raw key bytes are
+// exactly the BIT STRING value.
 func rawKeyFromSPKI(spki []byte) ([]byte, error) {
 	var seq asn1.RawValue
 	if _, err := asn1.Unmarshal(spki, &seq); err != nil {
@@ -257,11 +251,9 @@ func rawKeyFromSPKI(spki []byte) ([]byte, error) {
 	return bits.RightAlign(), nil
 }
 
-// PKIX signature algorithm OIDs cactus maps to its internal enum.
+// PKIX signature algorithm OIDs cactus maps to its internal enum:
+// id-ml-dsa-44/65/87 (NIST FIPS 204), per RFC 9881.
 var (
-	oidSigECDSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
-	oidSigECDSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
-	// id-ml-dsa-44/65/87 (NIST FIPS 204), per RFC 9881.
 	oidSigMLDSA44 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 17}
 	oidSigMLDSA65 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 18}
 	oidSigMLDSA87 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 3, 19}
@@ -269,10 +261,6 @@ var (
 
 func algFromSigAlgOID(oid asn1.ObjectIdentifier) (SignatureAlgorithm, error) {
 	switch {
-	case oid.Equal(oidSigECDSASHA256):
-		return AlgECDSAP256SHA256, nil
-	case oid.Equal(oidSigECDSASHA384):
-		return AlgECDSAP384SHA384, nil
 	case oid.Equal(oidSigMLDSA44):
 		return AlgMLDSA44, nil
 	case oid.Equal(oidSigMLDSA65):
@@ -289,10 +277,6 @@ func algFromSigAlgOID(oid asn1.ObjectIdentifier) (SignatureAlgorithm, error) {
 // field of a CA certificate.
 func SigAlgOID(alg SignatureAlgorithm) (asn1.ObjectIdentifier, error) {
 	switch alg {
-	case AlgECDSAP256SHA256:
-		return oidSigECDSASHA256, nil
-	case AlgECDSAP384SHA384:
-		return oidSigECDSASHA384, nil
 	case AlgMLDSA44:
 		return oidSigMLDSA44, nil
 	case AlgMLDSA65:
@@ -302,6 +286,27 @@ func SigAlgOID(alg SignatureAlgorithm) (asn1.ObjectIdentifier, error) {
 	default:
 		return nil, fmt.Errorf("cert: no PKIX sigAlg OID for algorithm 0x%04x", uint16(alg))
 	}
+}
+
+// MarshalCosignerSPKI returns the DER SubjectPublicKeyInfo for a CA
+// cosigner public key, suitable for CACertificateInput.CosignerSPKI.
+//
+// ML-DSA public keys (signer.Signer.PublicKey) are the raw FIPS 204 key
+// bytes, wrapped here in an SPKI carrying the ML-DSA algorithm OID (RFC
+// 9881) with absent parameters and the key in the BIT STRING — the exact
+// shape cosignerKeyFromSPKI/rawKeyFromSPKI expect on the relying-party side.
+func MarshalCosignerSPKI(alg SignatureAlgorithm, pub []byte) ([]byte, error) {
+	oid, err := SigAlgOID(alg)
+	if err != nil {
+		return nil, err
+	}
+	var spki struct {
+		Algorithm struct{ Algorithm asn1.ObjectIdentifier }
+		PublicKey asn1.BitString
+	}
+	spki.Algorithm.Algorithm = oid
+	spki.PublicKey = asn1.BitString{Bytes: pub, BitLength: len(pub) * 8}
+	return asn1.Marshal(spki)
 }
 
 // parseCACertificate extracts the subject DN, subjectPublicKeyInfo, and

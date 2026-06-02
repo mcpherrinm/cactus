@@ -31,8 +31,10 @@ type Upstream struct {
 	// CACosignerID identifies the upstream CA cosigner; used as the
 	// signed-note key name ("oid/<CACosignerID>").
 	CACosignerID cert.TrustAnchorID
-	// CACosignerKey is the SPKI of the upstream CA cosigner key.
-	// ECDSA-P256-SHA256 only in the v3 milestone.
+	// CACosignerKey is the upstream CA cosigner's raw FIPS 204 ML-DSA-44
+	// public key. Per the MTC-with-tlog profile every cosigner is
+	// ML-DSA-44, so the follower verifies the upstream checkpoint
+	// cosignature with that algorithm.
 	CACosignerKey []byte
 }
 
@@ -159,7 +161,7 @@ func (f *Follower) advance(ctx context.Context) error {
 	}
 	verifyErr := cert.VerifyMTCSignature(cert.CosignerKey{
 		ID:        f.cfg.Upstream.CACosignerID,
-		Algorithm: cert.AlgECDSAP256SHA256,
+		Algorithm: cert.AlgMLDSA44,
 		PublicKey: f.cfg.Upstream.CACosignerKey,
 	}, cert.MTCSignature{
 		CosignerID: f.cfg.Upstream.CACosignerID,

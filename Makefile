@@ -1,6 +1,9 @@
 .PHONY: build test test-race lint integration clean
 
-GO ?= go
+# cactus requires Go 1.27+ (built-in crypto/mldsa). Until 1.27 ships, the
+# default is the gotip 1.27-devel toolchain; override with `make GO=go`
+# once a 1.27 release is installed.
+GO ?= gotip
 BIN_DIR ?= bin
 
 build:

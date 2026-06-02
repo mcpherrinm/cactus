@@ -15,7 +15,6 @@ import (
 
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/mirror"
-	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tlogx"
 
@@ -55,16 +54,13 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = follower.Run(ctx) }()
+	startFollower(t, ctx, follower)
 	caSize := waitFollowerCatchUp(t, follower, ca.log.CurrentCheckpoint().Size, 3*time.Second)
 
-	// Mirror's own cosigner key (different from the CA's).
-	mSeed := make([]byte, signer.SeedSize)
-	for i := range mSeed {
-		mSeed[i] = 0xCC
-	}
-	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
+	// Mirror's own cosigner key (different from the CA's). The witness
+	// path is ML-DSA-44 only.
 	mirrorID := cert.TrustAnchorID("32473.21")
+	mSigner, mKey := mldsaCosigner(t, mirrorID, 0xCC)
 
 	srv, err := mirror.NewServer(mirror.ServerConfig{
 		Follower:                    follower,
@@ -124,7 +120,7 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 	}
 
 	// Build the request body.
-	body := buildSignSubtreeRequest(t, ca.logID, subtreeStart, subtreeEnd, subtreeHash, cpBody, proof)
+	body := buildSignSubtreeRequest(t, subtreeStart, subtreeEnd, subtreeHash, cpBody, proof)
 	req, _ := http.NewRequest("POST", hSrv.URL+"/sign-subtree", bytes.NewReader(body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -158,10 +154,8 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cert.VerifyMTCSignature(cert.CosignerKey{
-		ID: mirrorID, Algorithm: cert.AlgECDSAP256SHA256,
-		PublicKey: mSigner.PublicKey(),
-	}, cert.MTCSignature{CosignerID: mirrorID, Signature: rawWithKeyID[4:]}, msg); err != nil {
+	if err := cert.VerifyMTCSignature(mKey,
+		cert.MTCSignature{CosignerID: mirrorID, Signature: rawWithKeyID[4:]}, msg); err != nil {
 		t.Errorf("mirror cosignature verify: %v", err)
 	}
 }
@@ -184,11 +178,10 @@ func TestMirrorSignSubtreeRejectsStaleCheckpoint(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = follower.Run(ctx) }()
+	startFollower(t, ctx, follower)
 	waitFollowerCatchUp(t, follower, ca.log.CurrentCheckpoint().Size, 2*time.Second)
 
-	mSeed := make([]byte, signer.SeedSize)
-	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
+	mSigner, _ := mldsaCosigner(t, cert.TrustAnchorID("32473.21"), 0x00)
 	srv, _ := mirror.NewServer(mirror.ServerConfig{
 		Follower: follower, Signer: mSigner,
 		CosignerID: cert.TrustAnchorID("32473.21"),
@@ -196,17 +189,13 @@ func TestMirrorSignSubtreeRejectsStaleCheckpoint(t *testing.T) {
 	hSrv := httptest.NewServer(srv.Handler())
 	defer hSrv.Close()
 
-	// Build a request whose "checkpoint" has the wrong root. The
-	// subtree note + consistency proof don't matter — we never get
-	// past the stateful check. Per §C.2 each section ends with a
-	// blank line in addition to the signed-note's own body/sigs
-	// delimiter (= `\n\n` after the body for zero-sig notes), so
-	// each note is `body\n\n\n` = 5 newlines.
-	subtreeNote := []byte(cert.OIDName(ca.logID) + "\n0 1\n" +
-		base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n\n\n")
+	// Build a request whose reference checkpoint has the right origin but
+	// the wrong size/root, so we pass the origin (404) and range (400)
+	// checks but fail the stateful checkpoint comparison (409). The
+	// checkpoint is a zero-signature note: body + a trailing blank line.
 	bogusCP := []byte(cert.OIDName(ca.logID) + "\n9999\n" +
-		base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n\n\n")
-	body := append(append([]byte(nil), subtreeNote...), bogusCP...)
+		base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n\n")
+	body := buildSignSubtreeRequest(t, 0, 1, tlogx.Hash{}, bogusCP, nil)
 
 	req, _ := http.NewRequest("POST", hSrv.URL, bytes.NewReader(body))
 	resp, err := http.DefaultClient.Do(req)
@@ -217,35 +206,6 @@ func TestMirrorSignSubtreeRejectsStaleCheckpoint(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("status = %d, want 409", resp.StatusCode)
 	}
-}
-
-// buildSignSubtreeRequest assembles the §C.2 request body.
-func buildSignSubtreeRequest(t *testing.T, logID cert.TrustAnchorID,
-	start, end uint64, subtreeHash tlogx.Hash, cpBody []byte, proof []tlogx.Hash) []byte {
-	t.Helper()
-	var b bytes.Buffer
-	// Subtree note: origin / "<start> <end>" / b64(hash) / blank line.
-	b.WriteString(cert.OIDName(logID) + "\n")
-	b.WriteString(fmt.Sprintf("%d %d\n", start, end))
-	b.WriteString(base64.StdEncoding.EncodeToString(subtreeHash[:]) + "\n")
-	b.WriteString("\n") // blank line between body and (zero) signatures
-	// (No signatures since RequireCASignatureOnSubtree is off.)
-	// Section separator (the spec's blank line *between* notes — the
-	// blank line above already ends the subtree note's empty-sigs
-	// block; we also need a separator before the next note).
-	b.WriteString("\n")
-	// Checkpoint note: paste the CA's signed-note bytes verbatim.
-	// The CA's note already ends with "\n", and §C.2 requires a
-	// blank line separator; ensure a blank line follows.
-	b.Write(cpBody)
-	if !bytes.HasSuffix(cpBody, []byte("\n\n")) {
-		b.WriteString("\n")
-	}
-	// Consistency proof lines.
-	for _, h := range proof {
-		b.WriteString(base64.StdEncoding.EncodeToString(h[:]) + "\n")
-	}
-	return b.Bytes()
 }
 
 func sha256Hash(b []byte) tlogx.Hash {

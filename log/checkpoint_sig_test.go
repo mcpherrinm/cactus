@@ -3,9 +3,7 @@ package log
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -27,7 +25,7 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x77}, signer.SeedSize)
-	s, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +99,14 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 	if len(sigBytes) < 5 {
 		t.Fatalf("sig too short: %d bytes", len(sigBytes))
 	}
-	// First 4 bytes are the §C.1 keyID; rest is the raw signature.
-	wantKeyID := MTCCheckpointKeyID(cert.OIDName(cosignerID))
+	// First 4 bytes are the c2sp.org/signed-note keyID; rest is the raw
+	// signature. For ML-DSA-44 the key ID is
+	// SHA-256(name || 0x0A || 0x06 || raw key)[:4].
+	wantKeyID, err := cert.CosignatureKeyID(cert.OIDName(cosignerID),
+		cert.AlgMLDSA44, s.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(sigBytes[:4], wantKeyID[:]) {
 		t.Errorf("keyID mismatch: got %x, want %x", sigBytes[:4], wantKeyID)
 	}
@@ -117,21 +121,10 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify ECDSA signature.
-	pubAny, err := x509.ParsePKIXPublicKey(s.PublicKey())
-	if err != nil {
-		t.Fatal(err)
+	// Verify the ML-DSA-44 cosignature.
+	key := cert.CosignerKey{ID: cosignerID, Algorithm: cert.AlgMLDSA44, PublicKey: s.PublicKey()}
+	if err := cert.VerifyMTCSignature(key,
+		cert.MTCSignature{CosignerID: cosignerID, Signature: rawSig}, sigInput); err != nil {
+		t.Errorf("checkpoint cosignature failed to verify: %v", err)
 	}
-	pub := pubAny.(*ecdsa.PublicKey)
-	digest := sha256.Sum256(sigInput)
-	if !ecdsa.VerifyASN1(pub, digest[:], rawSig) {
-		t.Errorf("checkpoint cosignature failed to verify")
-	}
-}
-
-// MTCCheckpointKeyID exposes the §C.1 checkpoint keyID for tests.
-// (Internal helper; promoted here as the lowercase variant lives in
-// note.go.)
-func MTCCheckpointKeyID(keyName string) [4]byte {
-	return mtcCheckpointKeyID(keyName)
 }

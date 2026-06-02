@@ -50,7 +50,7 @@ func TestRelyingPartyFastPath(t *testing.T) {
 	for i := range seed {
 		seed[i] = 0xAA
 	}
-	sgn, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	sgn, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 	logID := cert.TrustAnchorID("32473.1")
 	cosigID := cert.TrustAnchorID("32473.1")
 

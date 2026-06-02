@@ -13,7 +13,8 @@ import (
 
 // buildSignedNote returns a c2sp signed-note for the checkpoint, using
 // the cosigner's signature over the §5.3.1 CosignedMessage for
-// [0, size).
+// [0, size). The checkpoint origin and signature line follow
+// c2sp.org/tlog-checkpoint and c2sp.org/signed-note.
 //
 // Body lines (each terminated by \n):
 //
@@ -21,11 +22,12 @@ import (
 //	<size>
 //	<base64 root>
 //
-// Origin is "oid/<logID>" per Appendix C.1 of the draft.
+// Origin is "oid/<logID>".
 //
-// Trailing signature line: "— <key-name> <base64 sig>\n".
+// Trailing signature line: "— <key-name> <base64(keyID || sig)>\n", where
+// keyID is the c2sp.org/signed-note key ID for (cosigner name, alg, pub).
 func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
-	size uint64, root tlogx.Hash, sig []byte) ([]byte, error) {
+	size uint64, root tlogx.Hash, alg cert.SignatureAlgorithm, pub, sig []byte) ([]byte, error) {
 	if len(logID) == 0 {
 		return nil, errors.New("buildSignedNote: empty logID")
 	}
@@ -35,10 +37,10 @@ func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
 		origin, size,
 		base64.StdEncoding.EncodeToString(root[:]))
 
-	// Per draft Appendix C.1: key ID = SHA-256(key name || 0x0A || 0xFF
-	// || "mtc-checkpoint/v1")[:4]. We emit the standard signed-note
-	// format with a 4-byte key ID prefixed onto the signature.
-	keyID := mtcCheckpointKeyID(cosigner)
+	keyID, err := cert.CosignatureKeyID(cosigner, alg, pub)
+	if err != nil {
+		return nil, fmt.Errorf("buildSignedNote: %w", err)
+	}
 	sigWithID := append(append([]byte(nil), keyID[:]...), sig...)
 	sigB64 := base64.StdEncoding.EncodeToString(sigWithID)
 
@@ -125,26 +127,4 @@ type parsedNoteSig struct {
 	keyName string
 	keyID   [4]byte
 	sig     []byte
-}
-
-// mtcCheckpointKeyID computes the §C.1 key ID for a checkpoint
-// signature: SHA-256(keyName || 0x0A || 0xFF || "mtc-checkpoint/v1")[:4].
-func mtcCheckpointKeyID(keyName string) [4]byte {
-	return signedNoteKeyID(keyName, "mtc-checkpoint/v1")
-}
-
-// MTCSubtreeKeyID is exposed for tests; computes the §C.1 subtree key
-// ID for a given cosigner's signed-note key name.
-func MTCSubtreeKeyID(keyName string) [4]byte {
-	return signedNoteKeyID(keyName, "mtc-subtree/v1")
-}
-
-func signedNoteKeyID(keyName, suffix string) [4]byte {
-	// SHA-256(keyName || 0x0A || 0xFF || suffix)[:4].
-	buf := append([]byte(keyName), 0x0A, 0xFF)
-	buf = append(buf, []byte(suffix)...)
-	sum := sha256Hash(buf)
-	var out [4]byte
-	copy(out[:], sum[:4])
-	return out
 }

@@ -73,7 +73,7 @@ type UpstreamConfig struct {
 	TileURL          string `json:"tile_url"`
 	LogID            string `json:"log_id"`
 	CACosignerID     string `json:"ca_cosigner_id"`
-	CACosignerKeyPEM string `json:"ca_cosigner_key_pem"` // PEM-encoded SPKI
+	CACosignerKeyPEM string `json:"ca_cosigner_key_pem"` // PEM block; body is the raw ML-DSA-44 public key
 	PollIntervalMS   int    `json:"poll_interval_ms"`
 }
 
@@ -151,7 +151,7 @@ func Default() Config {
 			PoolSize:           256,
 		},
 		CACosigner: CosignerConfig{
-			Algorithm: "ecdsa-p256-sha256",
+			Algorithm: "mldsa-44",
 			SeedPath:  "keys/ca-cosigner.seed",
 		},
 		ACME: ACMEConfig{
@@ -166,7 +166,7 @@ func Default() Config {
 			MaxCertLifetimeMS:      604800000, // 7 days
 		},
 		Mirror: MirrorConfig{
-			Algorithm:                   "ecdsa-p256-sha256",
+			Algorithm:                   "mldsa-44",
 			SignSubtreePath:             "/sign-subtree",
 			RequireCASignatureOnSubtree: true,
 			Upstream: UpstreamConfig{
@@ -217,14 +217,16 @@ func (c *Config) Validate() error {
 	if c.CACosigner.ID == "" {
 		return fmt.Errorf("ca_cosigner.id must be set")
 	}
-	switch c.CACosigner.Algorithm {
-	case "ecdsa-p256-sha256", "ecdsa-p384-sha384", "mldsa-44", "mldsa-65", "mldsa-87":
-		// ML-DSA algorithms validate here regardless of toolchain, but only
-		// produce a working signer when built with Go 1.27+ (where
-		// crypto/mldsa exists); on older toolchains signer.FromSeed reports
-		// the missing support at startup.
-	default:
-		return fmt.Errorf("ca_cosigner.algorithm %q not supported", c.CACosigner.Algorithm)
+	// The MTC-with-tlog profile requires every MTC cosigner — including
+	// the CA cosigner that signs checkpoints — to use an ML-DSA-44 key and
+	// produce ML-DSA-44 signed messages (c2sp.org/tlog-cosignature), since
+	// that is currently the only signature algorithm available in both
+	// X.509 and C2SP in a subtree-capable form. ML-DSA-44 validates here
+	// regardless of toolchain, but only produces a working signer when
+	// built with Go 1.27+ (where crypto/mldsa exists); on older toolchains
+	// signer.FromSeed reports the missing support at startup.
+	if c.CACosigner.Algorithm != "mldsa-44" {
+		return fmt.Errorf("ca_cosigner.algorithm must be \"mldsa-44\" (the MTC-with-tlog profile requires ML-DSA-44 cosigners), got %q", c.CACosigner.Algorithm)
 	}
 	if c.CACosigner.SeedPath == "" {
 		return fmt.Errorf("ca_cosigner.seed_path must be set")
@@ -309,6 +311,12 @@ func (c *Config) Validate() error {
 		}
 		if c.Mirror.Algorithm == "" {
 			return fmt.Errorf("mirror.algorithm must be set when mirror.enabled")
+		}
+		// The c2sp.org/tlog-witness sign-subtree response is an ML-DSA-44
+		// cosignature (c2sp.org/tlog-cosignature defines no ECDSA
+		// cosignature type), so a mirror's cosigner MUST be ML-DSA-44.
+		if c.Mirror.Algorithm != "mldsa-44" {
+			return fmt.Errorf("mirror.algorithm must be \"mldsa-44\" (the witness path is ML-DSA-44 only), got %q", c.Mirror.Algorithm)
 		}
 		if c.Mirror.Upstream.TileURL == "" {
 			return fmt.Errorf("mirror.upstream.tile_url required")

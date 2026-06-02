@@ -26,7 +26,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *log.Log) {
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x33}, signer.SeedSize)
-	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 	l, err := log.New(context.Background(), log.Config{
 		LogID:       cert.TrustAnchorID("32473.1"),
 		CosignerID:  cert.TrustAnchorID("32473.1"),

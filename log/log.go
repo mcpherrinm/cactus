@@ -417,7 +417,8 @@ func (l *Log) flush() error {
 		return fmt.Errorf("flush sign checkpoint: %w", err)
 	}
 	signedNote, err := buildSignedNote(l.cfg.LogID, l.cfg.CosignerID,
-		newSize, rootCp, checkpointSig.Signature)
+		newSize, rootCp, cert.SignatureAlgorithm(l.cfg.Signer.Algorithm()),
+		l.cfg.Signer.PublicKey(), checkpointSig.Signature)
 	if err != nil {
 		return fmt.Errorf("flush build note: %w", err)
 	}
@@ -620,7 +621,11 @@ func (l *Log) loadCheckpoint() error {
 // other sigs (mirrors) are not checked here.
 func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []parsedNoteSig) error {
 	cosignerKeyName := cert.OIDName(l.cfg.CosignerID)
-	wantKeyID := mtcCheckpointKeyID(cosignerKeyName)
+	wantKeyID, err := cert.CosignatureKeyID(cosignerKeyName,
+		cert.SignatureAlgorithm(l.cfg.Signer.Algorithm()), l.cfg.Signer.PublicKey())
+	if err != nil {
+		return fmt.Errorf("checkpoint cosigner key ID: %w", err)
+	}
 	var sig parsedNoteSig
 	found := false
 	for _, s := range sigs {
