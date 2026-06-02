@@ -128,10 +128,12 @@ determined by which top-level config blocks are populated and
 
 | Concern | Adds | Set |
 |---|---|---|
-| **CA** (default) | Issuance log + ACME server | `acme`, `log`, `ca_cosigner` |
-| **Landmarks** | Landmark-relative cert support | `landmarks.enabled = true` |
+| **CA** (default) | Issuance log + ACME server + landmark-relative certs | `acme`, `log`, `ca_cosigner` |
 | **CA-side mirror collection** | Multi-mirror cosignatures during issuance | `ca_cosigner_quorum.mirrors[]` |
 | **Mirror operating mode** | Follow an upstream + serve `/sign-subtree` | `mirror.enabled = true` (and `mirror.upstream`) |
+
+Landmark-relative cert support is always on; only its cadence is
+tunable (see `landmarks` below).
 
 Cactus operating modes are not enumerated; the binary just brings up
 whichever subsystems the config asks for. The validator does enforce
@@ -271,22 +273,23 @@ and an older toolchain simply won't compile cactus.
 valid; for tests) or `http-01` (real fetch of
 `http://identifier/.well-known/acme-challenge/<token>`).
 
-### `landmarks` (optional)
+### `landmarks` (tuning only)
 
 ```json
 "landmarks": {
-  "enabled": true,
   "time_between_landmarks_ms": 3600000,
-  "max_cert_lifetime_ms": 604800000,
-  "landmark_url_path": "/landmarks"
+  "max_cert_lifetime_ms": 604800000
 }
 ```
 
-Landmark trust anchor IDs are derived from the CA ID and log number
-(`CA-ID.1.logNumber.L`, §6.3.1) — there's no separate `base_id`.
-Defaults: 1-hour landmark cadence, 7-day max cert lifetime ⇒
-`max_active_landmarks = ceil(168) + 1 = 169` ⇒ ~10 KiB of relying
-party state per CA. See §6.3.1 of the draft.
+Landmarks are always on; this block only tunes the cadence and the
+max cert lifetime (both optional, with the defaults shown). The
+§6.3.1 list is always served at `/landmarks`. Landmark trust anchor
+IDs are derived from the CA ID and log number (`CA-ID.1.logNumber.L`,
+§6.3.1) — there's no separate `base_id`. Defaults: 1-hour landmark
+cadence, 7-day max cert lifetime ⇒ `max_active_landmarks =
+ceil(168) + 1 = 169` ⇒ ~10 KiB of relying party state per CA. See
+§6.3.1 of the draft.
 
 ### `mirror` (optional, mirror mode)
 

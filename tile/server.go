@@ -41,8 +41,7 @@ func New(l *log.Log, fs storage.FS) *Server {
 }
 
 // WithLandmarks attaches a landmark.Sequence so the server exposes
-// the §6.3.1 /landmarks endpoint (path configurable; "/landmarks" by
-// default in cmd/cactus).
+// the §6.3.1 /landmarks endpoint.
 func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 	s.landmarks = seq
 	return s

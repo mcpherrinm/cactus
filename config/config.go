@@ -82,15 +82,15 @@ func (u UpstreamConfig) PollInterval() time.Duration {
 	return time.Duration(u.PollIntervalMS) * time.Millisecond
 }
 
-// LandmarkConfig configures the §6.3 landmark sequence + URL.
-// Disabled by default; set Enabled=true to opt in. In draft-04 landmark
-// trust anchor IDs are derived from the CA ID and log number
-// (CA-ID.1.logNumber.L), so there is no separate base_id parameter.
+// LandmarkConfig configures the §6.3 landmark sequence. Landmarks are
+// always on; only their cadence and the max cert lifetime (which sets
+// max_active_landmarks) are tunable. In draft-04 landmark trust anchor
+// IDs are derived from the CA ID and log number (CA-ID.1.logNumber.L),
+// so there is no separate base_id parameter. The §6.3.1 list is always
+// served at "/landmarks".
 type LandmarkConfig struct {
-	Enabled                bool   `json:"enabled"`
-	TimeBetweenLandmarksMS int    `json:"time_between_landmarks_ms"`
-	MaxCertLifetimeMS      int    `json:"max_cert_lifetime_ms"`
-	URLPath                string `json:"landmark_url_path"`
+	TimeBetweenLandmarksMS int `json:"time_between_landmarks_ms"`
+	MaxCertLifetimeMS      int `json:"max_cert_lifetime_ms"`
 }
 
 // TimeBetweenLandmarks returns the §6.3.2 interval as a time.Duration.
@@ -161,7 +161,6 @@ func Default() Config {
 		Monitoring: ListenerConfig{Listen: ":14080"},
 		Metrics:    MetricsConfig{Listen: "127.0.0.1:14090"},
 		Landmarks: LandmarkConfig{
-			URLPath:                "/landmarks",
 			TimeBetweenLandmarksMS: 3600000,   // 1 hour
 			MaxCertLifetimeMS:      604800000, // 7 days
 		},
@@ -256,16 +255,13 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("log_level %q invalid", c.LogLevel)
 	}
-	if c.Landmarks.Enabled {
-		if c.Landmarks.TimeBetweenLandmarksMS <= 0 {
-			return fmt.Errorf("landmarks.time_between_landmarks_ms must be > 0")
-		}
-		if c.Landmarks.MaxCertLifetimeMS <= 0 {
-			return fmt.Errorf("landmarks.max_cert_lifetime_ms must be > 0")
-		}
-		if c.Landmarks.URLPath == "" {
-			return fmt.Errorf("landmarks.landmark_url_path must be set")
-		}
+	// Landmarks are mandatory; their cadence and max cert lifetime
+	// always apply.
+	if c.Landmarks.TimeBetweenLandmarksMS <= 0 {
+		return fmt.Errorf("landmarks.time_between_landmarks_ms must be > 0")
+	}
+	if c.Landmarks.MaxCertLifetimeMS <= 0 {
+		return fmt.Errorf("landmarks.max_cert_lifetime_ms must be > 0")
 	}
 	if len(c.CACosignerQuorum.Mirrors) > 0 {
 		if c.CACosignerQuorum.MinSignatures < 1 {

@@ -193,25 +193,22 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("build CA certificate: %w", err)
 	}
 
-	// Optional landmark sequence. Built before the log so we
-	// can pass the OnFlush hook to log.Config.
-	var landmarkSeq *landmark.Sequence
-	if cfg.Landmarks.Enabled {
-		landmarkSeq, err = landmark.New(landmark.Config{
-			CAID:                 caID,
-			LogNumber:            cfg.Log.Number,
-			TimeBetweenLandmarks: cfg.Landmarks.TimeBetweenLandmarks(),
-			MaxCertLifetime:      cfg.Landmarks.MaxCertLifetime(),
-		}, fsRoot, time.Now())
-		if err != nil {
-			return fmt.Errorf("landmark sequence: %w", err)
-		}
-		logger.Info("landmarks enabled",
-			"ca_id", string(caID),
-			"log_number", cfg.Log.Number,
-			"interval", cfg.Landmarks.TimeBetweenLandmarks(),
-			"max_active", landmarkSeq.MaxActive())
+	// Landmark sequence. Built before the log so we can pass the
+	// OnFlush hook to log.Config. Landmarks are mandatory.
+	landmarkSeq, err := landmark.New(landmark.Config{
+		CAID:                 caID,
+		LogNumber:            cfg.Log.Number,
+		TimeBetweenLandmarks: cfg.Landmarks.TimeBetweenLandmarks(),
+		MaxCertLifetime:      cfg.Landmarks.MaxCertLifetime(),
+	}, fsRoot, time.Now())
+	if err != nil {
+		return fmt.Errorf("landmark sequence: %w", err)
 	}
+	logger.Info("landmarks ready",
+		"ca_id", string(caID),
+		"log_number", cfg.Log.Number,
+		"interval", cfg.Landmarks.TimeBetweenLandmarks(),
+		"max_active", landmarkSeq.MaxActive())
 
 	// Issuance log. The MirrorRequester closure (CA-mode quorum)
 	// needs `l` to compute consistency proofs, so we forward-declare
@@ -231,17 +228,15 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			SignatureDuration: m.SignatureDurationVec(),
 		},
 	}
-	if landmarkSeq != nil {
-		logCfg.OnFlush = func(treeSize uint64) {
-			lm, ok, err := landmarkSeq.Append(ctx, treeSize, time.Now())
-			if err != nil {
-				logger.Error("landmark append", "err", err)
-				return
-			}
-			if ok {
-				logger.Info("landmark allocated",
-					"number", lm.Number, "tree_size", lm.TreeSize)
-			}
+	logCfg.OnFlush = func(treeSize uint64) {
+		lm, ok, err := landmarkSeq.Append(ctx, treeSize, time.Now())
+		if err != nil {
+			logger.Error("landmark append", "err", err)
+			return
+		}
+		if ok {
+			logger.Info("landmark allocated",
+				"number", lm.Number, "tree_size", lm.TreeSize)
 		}
 	}
 	if len(cfg.CACosignerQuorum.Mirrors) > 0 {
@@ -336,11 +331,9 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		LogID:          logID,
 		CAID:           caID,
 	}
-	if landmarkSeq != nil {
-		acmeCfg.Landmarks = landmarkSeq
-		acmeCfg.SubtreeProof = l.SubtreeProof
-		acmeCfg.LogNumber = cfg.Log.Number
-	}
+	acmeCfg.Landmarks = landmarkSeq
+	acmeCfg.SubtreeProof = l.SubtreeProof
+	acmeCfg.LogNumber = cfg.Log.Number
 	acmeSrv, err := acme.New(acmeCfg)
 	if err != nil {
 		return fmt.Errorf("acme: %w", err)
@@ -368,10 +361,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 * 1024,
 	}
-	tileSrv := tile.New(l, fsRoot)
-	if landmarkSeq != nil {
-		tileSrv = tileSrv.WithLandmarks(landmarkSeq)
-	}
+	tileSrv := tile.New(l, fsRoot).WithLandmarks(landmarkSeq)
 	monMux := http.NewServeMux()
 	monMux.HandleFunc("/ca-certificate", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain")

@@ -15,10 +15,10 @@ import (
 	"time"
 )
 
-// TestCactusBinaryWithLandmarks builds the cactus binary with
-// landmarks enabled in config, lets it allocate at least one landmark
-// (using a 50ms interval), then hits /landmarks and confirms the body
-// matches the §6.3.1 format with at least one allocated landmark.
+// TestCactusBinaryWithLandmarks builds the cactus binary, lets it
+// allocate at least one landmark (using a 50ms interval), then hits
+// /landmarks and confirms the body matches the §6.3.1 format with at
+// least one allocated landmark.
 func TestCactusBinaryWithLandmarks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in -short mode")
@@ -57,10 +57,8 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 			"listen": fmt.Sprintf("127.0.0.1:%d", metricsPort),
 		},
 		"landmarks": map[string]any{
-			"enabled":                   true,
 			"time_between_landmarks_ms": 50, // 50ms so a landmark allocates fast
 			"max_cert_lifetime_ms":      300,
-			"landmark_url_path":         "/landmarks",
 		},
 		"log_level": "info",
 	}
