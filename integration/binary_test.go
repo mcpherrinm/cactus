@@ -156,6 +156,8 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	if d["newAccount"] == "" {
 		t.Errorf("missing newAccount in directory: %v", d)
 	}
+	// CORS: the ACME endpoint is usable from any web origin.
+	assertCORS(t, "acme /directory", resp.Header)
 
 	// /metrics on the metrics listener.
 	mURL := fmt.Sprintf("http://127.0.0.1:%d/metrics", metricsPort)
@@ -184,6 +186,8 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	if resp3.StatusCode != 200 {
 		t.Fatalf("/checkpoint status = %d", resp3.StatusCode)
 	}
+	// CORS: the monitoring endpoint is usable from any web origin.
+	assertCORS(t, "monitor /checkpoint", resp3.Header)
 
 	// §5.5 / §7.1 / §7.2 end-to-end: fetch the CA certificate the server
 	// serves, derive a relying-party config from it, issue a real cert,
@@ -313,4 +317,18 @@ func (c *capWriter) snapshot() []string {
 	out := make([]string, len(c.lines))
 	copy(out, c.lines)
 	return out
+}
+
+// assertCORS checks that a response carries the permissive CORS headers
+// (Access-Control-Allow-Origin: * and the Boulder-compatible
+// Access-Control-Expose-Headers set) so the endpoint is usable from any
+// webpage.
+func assertCORS(t *testing.T, what string, h http.Header) {
+	t.Helper()
+	if got := h.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("%s: Access-Control-Allow-Origin = %q, want *", what, got)
+	}
+	if got := h.Get("Access-Control-Expose-Headers"); got != "Link, Replay-Nonce, Location, Retry-After" {
+		t.Errorf("%s: Access-Control-Expose-Headers = %q, want Boulder's set", what, got)
+	}
 }

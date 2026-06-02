@@ -37,6 +37,7 @@ import (
 	"github.com/letsencrypt/cactus/ca"
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/config"
+	"github.com/letsencrypt/cactus/cors"
 	"github.com/letsencrypt/cactus/landmark"
 	cactuslog "github.com/letsencrypt/cactus/log"
 	"github.com/letsencrypt/cactus/logging"
@@ -355,7 +356,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	)
 	acmeHTTP := &http.Server{
 		Addr:              cfg.ACME.Listen,
-		Handler:           logging.Middleware(logger)(acmeSrv.Handler()),
+		Handler:           logging.Middleware(logger)(cors.Middleware(acmeSrv.Handler())),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -381,7 +382,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	})
 	monitoringHTTP := &http.Server{
 		Addr:              cfg.Monitoring.Listen,
-		Handler:           logging.Middleware(logger)(monMux),
+		Handler:           logging.Middleware(logger)(cors.Middleware(monMux)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
