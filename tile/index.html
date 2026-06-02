@@ -281,11 +281,209 @@ async function fetchEntry() {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) { out.innerHTML = '<span class="err">GET ' + esc(url) + " → HTTP " + r.status + "</span>"; return; }
     const buf = new Uint8Array(await r.arrayBuffer());
-    out.innerHTML = '<span class="ok">GET ' + esc(url) + "</span>\n" +
-      buf.length + " bytes (MerkleTreeCertEntry)\n\n" + hex(buf).replace(/(.{64})/g, "$1\n");
+    renderEntry(out, url, buf);
   } catch (e) {
     out.innerHTML = '<span class="err">' + esc(String(e.message)) + "</span>";
   }
+}
+
+// ---- MerkleTreeCertEntry / TBSCertificateLogEntry decoding -------------
+// Mirrors cert/entry.go. The entry is: extensions<0..2^16-1> ‖ uint16 type
+// ‖ data. For tbs_cert_entry (type 1), data is the contents octets of a
+// TBSCertificateLogEntry DER (no outer SEQUENCE header).
+
+// Minimal DER reader over a Uint8Array. Each read advances .pos.
+class DER {
+  constructor(buf, pos = 0, end = buf.length) { this.b = buf; this.pos = pos; this.end = end; }
+  eof() { return this.pos >= this.end; }
+  // Read one TLV. Returns the tag class/number plus:
+  //   bytes:   the content octets (the V), as a Uint8Array
+  //   content: a DER positioned over those content octets, for nesting
+  //   full:    the whole TLV (T+L+V), as a Uint8Array
+  tlv() {
+    const start = this.pos;
+    if (this.pos + 2 > this.end) throw new Error("short TLV");
+    const t = this.b[this.pos++];
+    const cls = t >> 6, constructed = (t & 0x20) !== 0, tag = t & 0x1f;
+    let len = this.b[this.pos++];
+    if (len & 0x80) {
+      const n = len & 0x7f;
+      if (n === 0 || n > 4) throw new Error("bad length");
+      len = 0;
+      for (let i = 0; i < n; i++) len = (len << 8) | this.b[this.pos++];
+    }
+    if (this.pos + len > this.end) throw new Error("truncated value");
+    const cStart = this.pos;
+    this.pos += len;
+    return { cls, constructed, tag,
+             bytes: this.b.subarray(cStart, cStart + len),
+             content: new DER(this.b, cStart, cStart + len),
+             full: this.b.subarray(start, this.pos) };
+  }
+}
+
+const OID_TRUST_ANCHOR_ID = "1.3.6.1.4.1.44363.47.1";
+const ATTR_NAMES = { [OID_TRUST_ANCHOR_ID]: "trustAnchorID", "2.5.4.3": "CN",
+  "2.5.4.6": "C", "2.5.4.10": "O", "2.5.4.11": "OU" };
+const ALG_NAMES = { "2.16.840.1.101.3.4.3.17": "ML-DSA-44",
+  "1.2.840.10045.2.1": "ecPublicKey", "1.2.840.113549.1.1.1": "rsaEncryption" };
+const EXT_NAMES = { "2.5.29.15": "keyUsage", "2.5.29.17": "subjectAltName",
+  "2.5.29.19": "basicConstraints", "2.5.29.37": "extKeyUsage" };
+
+// Decode a DER OBJECT IDENTIFIER's content bytes to dotted-decimal.
+function decodeOID(bytes) {
+  if (bytes.length === 0) return "";
+  const parts = [Math.floor(bytes[0] / 40), bytes[0] % 40];
+  let v = 0;
+  for (let i = 1; i < bytes.length; i++) {
+    v = (v << 7) | (bytes[i] & 0x7f);
+    if (!(bytes[i] & 0x80)) { parts.push(v); v = 0; }
+  }
+  return parts.join(".");
+}
+
+const td = new TextDecoder();
+function oidName(oid, table) { return table[oid] ? table[oid] + " (" + oid + ")" : oid; }
+
+// Format a Time TLV (UTCTime tag 23 or GeneralizedTime tag 24) as
+// YYYY-MM-DDTHH:MM:SSZ. Falls back to the raw string on anything else.
+function formatTime(t) {
+  const s = td.decode(t.bytes);
+  let y, rest;
+  if (t.tag === 23 && s.length >= 12) {            // UTCTime: YYMMDDHHMMSSZ
+    const yy = parseInt(s.slice(0, 2), 10);
+    y = yy < 50 ? 2000 + yy : 1900 + yy;
+    rest = s.slice(2);
+  } else if (t.tag === 24 && s.length >= 14) {     // GeneralizedTime: YYYYMMDD…
+    y = s.slice(0, 4);
+    rest = s.slice(4);
+  } else {
+    return s;
+  }
+  return y + "-" + rest.slice(0, 2) + "-" + rest.slice(2, 4) + "T" +
+    rest.slice(4, 6) + ":" + rest.slice(6, 8) + ":" + rest.slice(8, 10) + "Z";
+}
+
+// Render a Name (RDNSequence) DER as "type=value, …". der is positioned
+// at the outer Name SEQUENCE.
+function decodeDN(der) {
+  try {
+    const rdns = der.tlv().content; // SEQUENCE OF RDN
+    const parts = [];
+    while (!rdns.eof()) {
+      const set = rdns.tlv().content; // SET OF AttributeTypeAndValue
+      while (!set.eof()) {
+        const atv = set.tlv().content; // SEQUENCE { type, value }
+        const oid = decodeOID(atv.tlv().bytes);
+        const val = td.decode(atv.tlv().bytes);
+        parts.push((ATTR_NAMES[oid] || oid) + "=" + val);
+      }
+    }
+    return parts.length ? parts.join(", ") : "(empty)";
+  } catch (e) { return "(unparseable)"; }
+}
+
+// dNSName entries from a SubjectAltName extension value (a GeneralNames
+// SEQUENCE). der is positioned at that SEQUENCE.
+function decodeSAN(der) {
+  try {
+    const names = der.tlv().content;
+    const out = [];
+    while (!names.eof()) {
+      const gn = names.tlv();
+      if (gn.cls === 2 && gn.tag === 2) out.push("DNS:" + td.decode(gn.bytes)); // [2] dNSName
+    }
+    return out.join(", ");
+  } catch (e) { return ""; }
+}
+
+function decodeEntry(buf) {
+  if (buf.length < 4) throw new Error("entry too short");
+  const extLen = (buf[0] << 8) | buf[1];
+  if (4 + extLen > buf.length) throw new Error("bad extensions length");
+  const type = (buf[2 + extLen] << 8) | buf[3 + extLen];
+  const data = new DER(buf, 4 + extLen); // TBSCertificateLogEntry contents octets
+  if (type === 0) return { type, label: "null_entry" };
+  if (type !== 1) return { type, label: "unknown type " + type };
+
+  const e = { type, label: "tbs_cert_entry", fields: [], dataLen: buf.length - (4 + extLen) };
+  // version [0] EXPLICIT INTEGER (optional, omitted for v1), then issuer Name.
+  let rv = data.tlv();
+  let version = 1; // X.509 v1 when the field is absent
+  if (rv.cls === 2 && rv.tag === 0) {
+    const vb = rv.content.tlv().bytes; // INTEGER content
+    version = vb[vb.length - 1] + 1;   // stored 0=v1, 2=v3
+    rv = data.tlv();
+  }
+  e.fields.push(["version", "v" + version]);
+  e.fields.push(["issuer", decodeDN(new DER(rv.full))]); // rv holds the issuer Name
+  // validity SEQUENCE { notBefore Time, notAfter Time }
+  const val = data.tlv().content;
+  e.fields.push(["not before", formatTime(val.tlv())]);
+  e.fields.push(["not after", formatTime(val.tlv())]);
+  // subject Name
+  e.fields.push(["subject", decodeDN(new DER(data.tlv().full))]);
+  // subjectPublicKeyAlgorithm AlgorithmIdentifier
+  const alg = data.tlv().content;
+  e.fields.push(["spki alg", oidName(decodeOID(alg.tlv().bytes), ALG_NAMES)]);
+  // subjectPublicKeyInfoHash OCTET STRING
+  e.fields.push(["spki hash", hex(data.tlv().bytes) + " (sha-256)"]);
+  // optional tail: [1] issuerUID, [2] subjectUID, [3] EXPLICIT extensions
+  while (!data.eof()) {
+    const f = data.tlv();
+    if (f.cls === 2 && f.tag === 3) {
+      const exts = f.content.tlv().content; // unwrap EXPLICIT → Extensions SEQUENCE
+      const lines = [];
+      while (!exts.eof()) {
+        const ext = exts.tlv().content; // Extension SEQUENCE { id, critical?, value }
+        const oid = decodeOID(ext.tlv().bytes);
+        let next = ext.tlv();
+        let critical = false;
+        if (next.cls === 0 && next.tag === 1) { critical = next.bytes[0] !== 0; next = ext.tlv(); }
+        let line = EXT_NAMES[oid] ? oid + " " + EXT_NAMES[oid] : oid;
+        if (critical) line += " (critical)";
+        if (EXT_NAMES[oid] === "subjectAltName") {
+          const sans = decodeSAN(new DER(next.bytes)); // next is the extnValue OCTET STRING
+          if (sans) line += "  " + sans;
+        }
+        lines.push(line);
+      }
+      e.extensions = lines;
+    } else if (f.cls === 2 && f.tag === 1) {
+      e.fields.push(["issuerUID", hex(f.bytes)]);
+    } else if (f.cls === 2 && f.tag === 2) {
+      e.fields.push(["subjectUID", hex(f.bytes)]);
+    }
+  }
+  return e;
+}
+
+function renderEntry(out, url, buf) {
+  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" +
+    buf.length + " bytes (MerkleTreeCertEntry)\n\n";
+  let e;
+  try { e = decodeEntry(buf); }
+  catch (err) {
+    html += '<span class="err">decode error: ' + esc(String(err.message)) + "</span>\n\n" +
+      hex(buf).replace(/(.{64})/g, "$1\n");
+    out.innerHTML = html;
+    return;
+  }
+  if (e.type !== 1) {
+    html += "type: " + esc(e.label);
+    out.innerHTML = html;
+    return;
+  }
+  html += "type: tbs_cert_entry (" + e.dataLen + " bytes)\n\n";
+  html += '<dl class="grid">';
+  for (const [k, v] of e.fields) {
+    html += "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
+  }
+  if (e.extensions) {
+    html += "<dt>extensions</dt><dd>" + e.extensions.map(esc).join("<br>") + "</dd>";
+  }
+  html += "</dl>";
+  out.innerHTML = html;
 }
 
 // Hide the landmarks link if the endpoint isn't enabled.
