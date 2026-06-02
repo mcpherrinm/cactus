@@ -2,6 +2,7 @@ package cert
 
 import (
 	"crypto/sha256"
+	"encoding/asn1"
 	"errors"
 	"fmt"
 	"hash"
@@ -231,6 +232,109 @@ func (e *TBSCertificateLogEntry) MarshalDER() ([]byte, error) {
 		b.WriteExplicit(3, e.Extensions)
 	}
 	return wrapSequence(b.Bytes()), nil
+}
+
+// ParseTBSCertificateLogEntry is the inverse of MarshalContents: it
+// decodes the contents octets of a TBSCertificateLogEntry (i.e.
+// MerkleTreeCertEntry.tbs_cert_entry_data, without the outer SEQUENCE
+// header) into the structured fields. The DER-valued fields (IssuerDN,
+// SubjectDN, SubjectPublicKeyAlgorithm, Extensions) are returned as their
+// raw DER, exactly as MarshalDER would emit them, so round-tripping is
+// lossless.
+func ParseTBSCertificateLogEntry(contents []byte) (*TBSCertificateLogEntry, error) {
+	e := &TBSCertificateLogEntry{}
+	rest := contents
+
+	read := func(field string) (asn1.RawValue, error) {
+		var rv asn1.RawValue
+		var err error
+		rest, err = asn1.Unmarshal(rest, &rv)
+		if err != nil {
+			return rv, fmt.Errorf("parse %s: %w", field, err)
+		}
+		return rv, nil
+	}
+
+	// version [0] EXPLICIT Version DEFAULT v1 — present only when != v1.
+	rv, err := read("version/issuer")
+	if err != nil {
+		return nil, err
+	}
+	if rv.Class == asn1.ClassContextSpecific && rv.Tag == 0 {
+		var v int
+		if _, err := asn1.Unmarshal(rv.Bytes, &v); err != nil {
+			return nil, fmt.Errorf("parse version: %w", err)
+		}
+		e.Version = v
+		if rv, err = read("issuer"); err != nil {
+			return nil, err
+		}
+	}
+
+	// issuer Name (the RawValue currently in rv).
+	e.IssuerDN = rv.FullBytes
+
+	// validity SEQUENCE { notBefore Time, notAfter Time }.
+	validity, err := read("validity")
+	if err != nil {
+		return nil, err
+	}
+	vrest := validity.Bytes
+	for i, dst := range []*time.Time{&e.NotBefore, &e.NotAfter} {
+		var t time.Time
+		vrest, err = asn1.Unmarshal(vrest, &t)
+		if err != nil {
+			return nil, fmt.Errorf("parse validity[%d]: %w", i, err)
+		}
+		*dst = t
+	}
+
+	// subject Name.
+	subject, err := read("subject")
+	if err != nil {
+		return nil, err
+	}
+	e.SubjectDN = subject.FullBytes
+
+	// subjectPublicKeyAlgorithm AlgorithmIdentifier.
+	alg, err := read("subjectPublicKeyAlgorithm")
+	if err != nil {
+		return nil, err
+	}
+	e.SubjectPublicKeyAlgorithm = alg.FullBytes
+
+	// subjectPublicKeyInfoHash OCTET STRING.
+	spkiHash, err := read("subjectPublicKeyInfoHash")
+	if err != nil {
+		return nil, err
+	}
+	if spkiHash.Tag != asn1.TagOctetString || spkiHash.Class != asn1.ClassUniversal {
+		return nil, fmt.Errorf("subjectPublicKeyInfoHash: unexpected tag 0x%02x", spkiHash.FullBytes[0])
+	}
+	e.SubjectPublicKeyInfoHash = spkiHash.Bytes
+
+	// Optional tail: issuerUniqueID [1], subjectUniqueID [2], extensions [3].
+	for len(rest) > 0 {
+		rv, err := read("tail field")
+		if err != nil {
+			return nil, err
+		}
+		if rv.Class != asn1.ClassContextSpecific {
+			return nil, fmt.Errorf("unexpected entry field class=%d tag=%d", rv.Class, rv.Tag)
+		}
+		switch rv.Tag {
+		case 1:
+			e.IssuerUniqueID = rv.Bytes
+		case 2:
+			e.SubjectUniqueID = rv.Bytes
+		case 3:
+			// extensions [3] EXPLICIT — rv.Bytes is the Extensions SEQUENCE DER.
+			e.Extensions = rv.Bytes
+		default:
+			return nil, fmt.Errorf("unknown entry context-specific tag %d", rv.Tag)
+		}
+	}
+	return e, nil
 }
 
 // EntryHash implements the §7.2 single-pass hash for a tbs_cert_entry

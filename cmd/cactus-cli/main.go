@@ -9,6 +9,8 @@ package main
 
 import (
 	"crypto/sha256"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
@@ -113,19 +115,175 @@ func entryShow(logURL string, idx uint64) {
 	if err != nil {
 		die("fetch entry: %v", err)
 	}
+	// MerkleTreeCertEntry (§5.2.1): extensions<0..2^16-1> then uint16 type
+	// then the type-specific data. The leading uint16 is the extensions
+	// vector length, NOT the type.
 	if len(body) < 2 {
 		die("entry too short")
 	}
-	t := uint16(body[0])<<8 | uint16(body[1])
+	extLen := int(body[0])<<8 | int(body[1])
+	if len(body) < 2+extLen+2 {
+		die("entry too short (ext_len=%d, %d bytes)", extLen, len(body))
+	}
+	rest := body[2+extLen:]
+	t := uint16(rest[0])<<8 | uint16(rest[1])
+	data := rest[2:]
 	switch t {
 	case 0:
 		fmt.Printf("entry %d: null_entry\n", idx)
 	case 1:
-		fmt.Printf("entry %d: tbs_cert_entry, %d bytes\n", idx, len(body)-2)
-		fmt.Printf("  raw (first 64 bytes): %x\n", body[2:min(len(body), 66)])
+		fmt.Printf("entry %d: tbs_cert_entry, %d bytes\n", idx, len(data))
+		e, err := cert.ParseTBSCertificateLogEntry(data)
+		if err != nil {
+			fmt.Printf("  (decode failed: %v)\n", err)
+			fmt.Printf("  raw (first 64 bytes): %x\n", data[:min(len(data), 64)])
+			break
+		}
+		printLogEntry(e)
 	default:
-		fmt.Printf("entry %d: unknown type %d, %d bytes\n", idx, t, len(body))
+		fmt.Printf("entry %d: unknown type %d, %d bytes\n", idx, t, len(data))
 	}
+}
+
+// printLogEntry pretty-prints the decoded fields of a TBSCertificateLogEntry.
+func printLogEntry(e *cert.TBSCertificateLogEntry) {
+	fmt.Printf("  version:    v%d\n", e.Version+1)
+	fmt.Printf("  issuer:     %s\n", formatDN(e.IssuerDN))
+	fmt.Printf("  not before: %s\n", e.NotBefore.UTC().Format("2006-01-02T15:04:05Z"))
+	fmt.Printf("  not after:  %s\n", e.NotAfter.UTC().Format("2006-01-02T15:04:05Z"))
+	fmt.Printf("  subject:    %s\n", formatDN(e.SubjectDN))
+	fmt.Printf("  spki alg:   %s\n", formatAlgID(e.SubjectPublicKeyAlgorithm))
+	fmt.Printf("  spki hash:  %x (sha-256)\n", e.SubjectPublicKeyInfoHash)
+	if e.IssuerUniqueID != nil {
+		fmt.Printf("  issuerUID:  %x\n", e.IssuerUniqueID)
+	}
+	if e.SubjectUniqueID != nil {
+		fmt.Printf("  subjectUID: %x\n", e.SubjectUniqueID)
+	}
+	if e.Extensions != nil {
+		fmt.Printf("  extensions:\n")
+		for _, line := range formatExtensions(e.Extensions) {
+			fmt.Printf("    %s\n", line)
+		}
+	}
+}
+
+// attrNames maps the AttributeType OIDs cactus may emit in a Name to
+// short labels. Unknown OIDs fall back to dotted notation.
+var attrNames = map[string]string{
+	cert.OIDRDNATrustAnchorID.String(): "trustAnchorID",
+	"2.5.4.3":                          "CN",
+	"2.5.4.6":                          "C",
+	"2.5.4.10":                         "O",
+	"2.5.4.11":                         "OU",
+}
+
+// formatDN renders a DER-encoded Name (RDNSequence) as "type=value, …".
+func formatDN(der []byte) string {
+	if len(der) == 0 {
+		return "(empty)"
+	}
+	var rdns pkix.RDNSequence
+	if _, err := asn1.Unmarshal(der, &rdns); err != nil {
+		return fmt.Sprintf("<unparseable: %x>", der)
+	}
+	if len(rdns) == 0 {
+		return "(empty)"
+	}
+	var parts []string
+	for _, rdn := range rdns {
+		for _, atv := range rdn {
+			name := atv.Type.String()
+			if n, ok := attrNames[name]; ok {
+				name = n
+			}
+			parts = append(parts, fmt.Sprintf("%s=%v", name, atv.Value))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatAlgID renders an AlgorithmIdentifier as its OID (named if known).
+func formatAlgID(der []byte) string {
+	var alg struct {
+		Algorithm  asn1.ObjectIdentifier
+		Parameters asn1.RawValue `asn1:"optional"`
+	}
+	if _, err := asn1.Unmarshal(der, &alg); err != nil {
+		return fmt.Sprintf("<unparseable: %x>", der)
+	}
+	oid := alg.Algorithm.String()
+	if name, ok := algNames[oid]; ok {
+		return fmt.Sprintf("%s (%s)", name, oid)
+	}
+	return oid
+}
+
+// algNames maps SPKI algorithm OIDs to friendly names.
+var algNames = map[string]string{
+	"2.16.840.1.101.3.4.3.17": "ML-DSA-44",
+	"1.2.840.10045.2.1":       "ecPublicKey",
+	"1.2.840.113549.1.1.1":    "rsaEncryption",
+}
+
+// extOIDNames maps certificate extension OIDs to short labels.
+var extOIDNames = map[string]string{
+	"2.5.29.15": "keyUsage",
+	"2.5.29.17": "subjectAltName",
+	"2.5.29.19": "basicConstraints",
+	"2.5.29.37": "extKeyUsage",
+}
+
+// formatExtensions decodes a DER Extensions SEQUENCE into one display
+// line per extension.
+func formatExtensions(der []byte) []string {
+	var exts []pkix.Extension
+	if _, err := asn1.Unmarshal(der, &exts); err != nil {
+		return []string{fmt.Sprintf("<unparseable: %x>", der)}
+	}
+	var lines []string
+	for _, ext := range exts {
+		oid := ext.Id.String()
+		name := extOIDNames[oid]
+		label := oid
+		if name != "" {
+			label = fmt.Sprintf("%s %s", oid, name)
+		}
+		if ext.Critical {
+			label += " (critical)"
+		}
+		if name == "subjectAltName" {
+			if sans := formatSAN(ext.Value); sans != "" {
+				label += "  " + sans
+			}
+		}
+		lines = append(lines, label)
+	}
+	return lines
+}
+
+// formatSAN extracts the dNSName entries from a SubjectAltName extension
+// value (the GeneralNames SEQUENCE), the common case for cactus leaves.
+func formatSAN(der []byte) string {
+	var seq asn1.RawValue
+	if _, err := asn1.Unmarshal(der, &seq); err != nil {
+		return ""
+	}
+	var names []string
+	rest := seq.Bytes
+	for len(rest) > 0 {
+		var gn asn1.RawValue
+		var err error
+		rest, err = asn1.Unmarshal(rest, &gn)
+		if err != nil {
+			break
+		}
+		// dNSName is [2] IMPLICIT IA5String.
+		if gn.Class == asn1.ClassContextSpecific && gn.Tag == 2 {
+			names = append(names, "DNS:"+string(gn.Bytes))
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // certVerify performs the §7.2 verification: decode MTCProof, recompute

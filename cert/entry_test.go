@@ -116,6 +116,79 @@ func TestMarshalDERIsParseable(t *testing.T) {
 	}
 }
 
+func TestParseTBSCertificateLogEntryRoundTrip(t *testing.T) {
+	dn, err := BuildCAName("32473.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjectDN, err := BuildCAName("cactus.test/example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	algID := []byte{
+		0x30, 0x13,
+		0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+		0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+	}
+	// A minimal Extensions SEQUENCE with one extension.
+	exts := []byte{
+		0x30, 0x09,
+		0x30, 0x07,
+		0x06, 0x03, 0x55, 0x1d, 0x0f, // OID 2.5.29.15 (keyUsage)
+		0x04, 0x00, // empty OCTET STRING value
+	}
+
+	for _, tc := range []struct {
+		name string
+		e    *TBSCertificateLogEntry
+	}{
+		{"minimal", &TBSCertificateLogEntry{
+			Version:                   2,
+			IssuerDN:                  dn,
+			NotBefore:                 time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			NotAfter:                  time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
+			SubjectDN:                 subjectDN,
+			SubjectPublicKeyAlgorithm: algID,
+			SubjectPublicKeyInfoHash:  bytes.Repeat([]byte{0xab}, 32),
+		}},
+		{"v1-with-extensions", &TBSCertificateLogEntry{
+			Version:                   0, // v1: version field omitted
+			IssuerDN:                  dn,
+			NotBefore:                 time.Date(2051, 1, 2, 3, 4, 5, 0, time.UTC), // GeneralizedTime path
+			NotAfter:                  time.Date(2052, 6, 7, 8, 9, 10, 0, time.UTC),
+			SubjectDN:                 subjectDN,
+			SubjectPublicKeyAlgorithm: algID,
+			SubjectPublicKeyInfoHash:  bytes.Repeat([]byte{0xcd}, 32),
+			Extensions:                exts,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			contents, err := tc.e.MarshalContents()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ParseTBSCertificateLogEntry(contents)
+			if err != nil {
+				t.Fatalf("ParseTBSCertificateLogEntry: %v", err)
+			}
+			// Re-marshalling the parsed entry must reproduce the input.
+			reMarshalled, err := got.MarshalContents()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(reMarshalled, contents) {
+				t.Errorf("round-trip mismatch:\n got %x\nwant %x", reMarshalled, contents)
+			}
+			if got.Version != tc.e.Version {
+				t.Errorf("Version = %d, want %d", got.Version, tc.e.Version)
+			}
+			if !got.NotBefore.Equal(tc.e.NotBefore) || !got.NotAfter.Equal(tc.e.NotAfter) {
+				t.Errorf("validity = %s..%s, want %s..%s", got.NotBefore, got.NotAfter, tc.e.NotBefore, tc.e.NotAfter)
+			}
+		})
+	}
+}
+
 func TestRoundTripDERLength(t *testing.T) {
 	cases := []int{0, 1, 0x7f, 0x80, 0xff, 0x100, 0xffff, 0x10000}
 	for _, n := range cases {
