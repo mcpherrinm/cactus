@@ -3,7 +3,7 @@
 // content type, alternate URL for landmark-relative cert).
 //
 // This is a test-grade implementation: auto-pass challenges, in-memory
-// nonces, single CA cosigner. See PROJECT_PLAN §1 Non-Goals.
+// nonces, single CA cosigner.
 package acme
 
 import (

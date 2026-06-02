@@ -1,9 +1,9 @@
 // Package ca turns validated ACME orders into Merkle Tree certificates.
 //
-// The Validator (Phase 3.1) checks a CSR matches an order and produces
-// the inputs needed to build a TBSCertificateLogEntry. The Issuer
-// (Phase 3.2) drives the log Append/Wait round-trip and assembles the
-// final X.509 certificate per §6.1.
+// The Validator checks a CSR matches an order and produces the inputs
+// needed to build a TBSCertificateLogEntry. The Issuer drives the log
+// Append/Wait round-trip and assembles the final X.509 certificate
+// per §6.1.
 package ca
 
 import (

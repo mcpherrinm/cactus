@@ -23,9 +23,9 @@ type Config struct {
 }
 
 // CACosignerQuorum configures the CA-mode multi-mirror cosignature
-// collection (Phase 9 client). When `Mirrors` is non-empty, the
-// log's flush invokes a MirrorRequester that fans out a §C.2
-// sign-subtree request in parallel to all of them.
+// collection client. When `Mirrors` is non-empty, the log's flush
+// invokes a MirrorRequester that fans out a tlog-witness sign-subtree
+// request in parallel to all of them.
 type CACosignerQuorum struct {
 	Mirrors                []MirrorEndpointConfig `json:"mirrors"`
 	MinSignatures          int                    `json:"min_signatures"`
@@ -54,7 +54,7 @@ type MirrorEndpointConfig struct {
 	PublicKeyPEM string `json:"public_key_pem"`
 }
 
-// MirrorConfig configures cactus's mirror operating mode (Phase 9).
+// MirrorConfig configures cactus's mirror operating mode.
 // When Enabled, the binary brings up a Follower + sign-subtree
 // listener alongside (or instead of) its CA-mode duties.
 type MirrorConfig struct {

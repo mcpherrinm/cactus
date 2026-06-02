@@ -69,7 +69,7 @@ func newTestLog(t *testing.T) (*cactuslog.Log, signer.Signer, cert.TrustAnchorID
 	return l, s, logID, cosignerID
 }
 
-// TestIssueRoundTripFullValidation is the §7.2 / Phase 3.3 invariant:
+// TestIssueRoundTripFullValidation is the §7.2 invariant:
 // after Issue(...) returns a DER cert,
 //
 //  1. parse the cert structure;

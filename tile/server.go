@@ -2,9 +2,9 @@
 // tlog-tiles read-path conventions: cacheable, immutable tiles plus a
 // signed checkpoint at /checkpoint.
 //
-// The serving layout matches PROJECT_PLAN §4: paths under "log/" in
-// storage map directly to URL paths, with the leading "log/" stripped
-// (since the monitoring listener is rooted at the log).
+// In the serving layout, paths under "log/" in storage map directly
+// to URL paths, with the leading "log/" stripped (since the monitoring
+// listener is rooted at the log).
 package tile
 
 import (

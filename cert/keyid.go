@@ -32,10 +32,6 @@ const (
 //     per c2sp.org/tlog-cosignature.
 //   - ML-DSA-65/87: the signed-note 0xff escape with a "ml-dsa-NN"
 //     identifier and the raw key.
-//
-// This replaces the MTC draft-03 Appendix C.1 derivation
-// (name || 0x0A || 0xFF || "mtc-{checkpoint,subtree}/v1"), which was
-// removed in draft-04; cactus MUST NOT depend on it.
 func CosignatureKeyID(name string, alg SignatureAlgorithm, pub []byte) ([4]byte, error) {
 	var out [4]byte
 	h := sha256.New()

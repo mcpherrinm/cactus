@@ -21,7 +21,7 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
-// TestAltURLServesLandmarkRelativeCert wires Phase 8.4 end-to-end:
+// TestAltURLServesLandmarkRelativeCert wires the alternate URL end-to-end:
 // when a landmark sequence is configured and a covering landmark
 // exists, GET /cert/{id}/alternate stops returning 503 and returns a
 // real landmark-relative cert. Without the landmark, the existing

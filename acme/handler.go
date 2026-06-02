@@ -52,7 +52,7 @@ type Config struct {
 	// "invalid" on failure. Optional.
 	OrdersByStatus cactusmetrics.CounterVec
 
-	// Landmarks, if non-nil, enables Phase 8.4 alternate-URL
+	// Landmarks, if non-nil, enables the alternate-URL
 	// switchover: GET /cert/{id}/alternate returns a real
 	// landmark-relative cert once a covering landmark exists.
 	// Otherwise the alternate URL keeps the §9-permitted 503 stub.
@@ -932,7 +932,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// handleCertAlternate returns the landmark-relative cert (Phase 8) for
+// handleCertAlternate returns the landmark-relative cert for
 // the given cert id, falling back to 503 + Retry-After (the
 // §9-permitted stub) when a covering landmark hasn't been allocated yet
 // or when landmark mode is disabled.
@@ -1029,9 +1029,8 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
 		// draft-04 §8.2: a landmark-relative certificate's trust anchor
-		// ID is the individual landmark ID (CA-ID.1.logNumber.L). The
-		// draft-03 additional_trust_anchor_ranges property was removed;
-		// relying parties advertise a landmark group (§8.2.1) instead.
+		// ID is the individual landmark ID (CA-ID.1.logNumber.L).
+		// Relying parties advertise a landmark group (§8.2.1) instead.
 		props := []cert.CertificateProperty{
 			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lm.TrustAnchorID(s.cfg.CAID, s.cfg.LogNumber)},
 		}

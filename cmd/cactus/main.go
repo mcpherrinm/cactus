@@ -4,8 +4,9 @@
 //
 //	cactus -config /path/to/config.json
 //
-// See PROJECT_PLAN.md for the design and §1 (Goals & Non-Goals): this
-// is a *test* server; do not use it for anything that matters.
+// This is a *test* server; do not use it for anything that matters.
+// See docs/threat-model.md for what it deliberately does not protect
+// against.
 package main
 
 import (
@@ -192,7 +193,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("build CA certificate: %w", err)
 	}
 
-	// Optional landmark sequence (Phase 8). Built before the log so we
+	// Optional landmark sequence. Built before the log so we
 	// can pass the OnFlush hook to log.Config.
 	var landmarkSeq *landmark.Sequence
 	if cfg.Landmarks.Enabled {
@@ -212,9 +213,9 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			"max_active", landmarkSeq.MaxActive())
 	}
 
-	// Issuance log. The MirrorRequester closure (Phase 9 CA-mode
-	// quorum) needs `l` to compute consistency proofs, so we
-	// forward-declare via a pointer the closure captures.
+	// Issuance log. The MirrorRequester closure (CA-mode quorum)
+	// needs `l` to compute consistency proofs, so we forward-declare
+	// via a pointer the closure captures.
 	var l *cactuslog.Log
 	logCfg := cactuslog.Config{
 		LogID:       logID,
@@ -416,7 +417,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		MaxHeaderBytes: 16 * 1024,
 	}
 
-	// Optional mirror operating mode (Phase 9).
+	// Optional mirror operating mode.
 	var mirrorHTTP *http.Server
 	if cfg.Mirror.Enabled {
 		mirrorHTTP, err = startMirror(ctx, cfg, fsRoot, logger, m, readHeaderTimeout, readTimeout, writeTimeout, idleTimeout)

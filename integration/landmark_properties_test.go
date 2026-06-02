@@ -125,7 +125,6 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	// draft-04 §8.2: a landmark-relative cert carries a single
 	// trust_anchor_id = the individual landmark ID CA-ID.1.logNumber.L.
 	// With CA ID "32473.1", log number 1, landmark 1 → "32473.1.1.1.1".
-	// The draft-03 additional_trust_anchor_ranges property was removed.
 	if len(altProps) != 1 {
 		t.Fatalf("alt properties len = %d, want 1", len(altProps))
 	}

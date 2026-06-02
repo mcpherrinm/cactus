@@ -8,8 +8,8 @@
 //   - Serve as a tlog.HashReader so the rest of the log can build proofs.
 //
 // All state is owned by a single goroutine; the type is NOT
-// goroutine-safe. The cactus sequencer is the sole writer per the
-// single-writer invariant in PROJECT_PLAN §3.
+// goroutine-safe. The cactus sequencer is the sole writer, per the
+// single-writer invariant (see docs/threat-model.md).
 package tilewriter
 
 import (

@@ -1,6 +1,5 @@
-// Package mirror implements the cosigning-mirror operating mode from
-// PROJECT_PLAN Phase 9, conforming to c2sp tlog-mirror and
-// tlog-cosignature.
+// Package mirror implements the cosigning-mirror operating mode,
+// conforming to c2sp tlog-mirror and tlog-cosignature.
 //
 // The follower (this file's neighbor follower.go) tails an upstream
 // log via the tlog-tiles convention, verifying the CA cosigner's

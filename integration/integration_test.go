@@ -230,7 +230,7 @@ func acmeIssueOne(base, dnsName string) ([]byte, error) {
 }
 
 // acmeIssueOneFull is acmeIssueOne but also returns the certificate URL.
-// Phase 8.4 tests need both — the DER to verify and the URL to fetch
+// Alternate-URL tests need both — the DER to verify and the URL to fetch
 // the alternate-URL variant.
 func acmeIssueOneFull(base, dnsName string) ([]byte, string, error) {
 	der, certURL, _, _, err := acmeIssueOneInner(base, dnsName)

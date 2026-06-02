@@ -16,8 +16,8 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
-// TestLandmarkRelativeCertConstruction is an end-to-end check of
-// Phase 8.3: bring up the stack, issue a cert, manually allocate a
+// TestLandmarkRelativeCertConstruction is an end-to-end check:
+// bring up the stack, issue a cert, manually allocate a
 // landmark that covers the issued entry, build the landmark-relative
 // cert, and verify §7.2 with a *trusted-subtree* fast path (no
 // cosigner key consulted).

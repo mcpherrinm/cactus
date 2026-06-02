@@ -65,14 +65,11 @@ operate it, and where to look in the code.
 ## What it does not do
 
 - **Witness-only cosigners** (§7.3). Mirror cosigners are in scope;
-  pure witnesses are a future addition.
+  pure witnesses are out of scope.
 - **Log pruning** (§5.2.3).
 - **Real DNS-01 challenges.** `auto-pass` and `http-01` are
   supported; DNS-01 is not.
 - **Revoked ranges** (§7.5) beyond a stub list in config.
-
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full design and
-[TODO.md](TODO.md) for an iteration log.
 
 ---
 
@@ -442,12 +439,9 @@ The cornerstone tests:
 
 ## Status
 
-§9 Definition of Done v1 + v2 + v3 all met (see [PROJECT_PLAN.md][plan]
-and [TODO.md][todo]). Working draft; APIs may shift to track the
-upstream IETF and c2sp specs.
+Working draft; APIs may shift to track the upstream IETF and c2sp
+specs.
 
 [draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
-[plan]: PROJECT_PLAN.md
-[todo]: TODO.md

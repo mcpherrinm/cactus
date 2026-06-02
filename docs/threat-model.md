@@ -44,7 +44,7 @@ The CA cosigner private key is derived from a 32-byte seed at
 `crypto/rand.Read` (and so depends on the OS PRNG); it sits on disk
 with mode 0600 but with no HSM, no encryption at rest, nothing
 fancier. Anyone who can read the seed can mint certificates that
-verify against `cactus_acme_orders_total`.
+verify against the CA's published cosigner key.
 
 ## What's intentionally OK
 

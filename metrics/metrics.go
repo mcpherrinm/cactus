@@ -20,13 +20,13 @@ type Metrics struct {
 	SignatureDuration *prometheus.HistogramVec // labels: alg
 	PoolFlushSize     prometheus.Histogram
 
-	// Phase 9 — mirror operating mode.
+	// Mirror operating mode.
 	MirrorUpstreamSize        prometheus.Gauge
 	MirrorConsistencyFailures prometheus.Counter
 	MirrorSignSubtreeRequests *prometheus.CounterVec // labels: result
 	MirrorSignSubtreeDuration prometheus.Histogram
 
-	// Phase 9 — CA-mode multi-mirror.
+	// CA-mode multi-mirror.
 	CAMirrorRequests *prometheus.CounterVec // labels: mirror_id, result
 	CAQuorumFailures prometheus.Counter
 }

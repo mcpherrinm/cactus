@@ -155,8 +155,7 @@ func encodeEntryExtensionsVector(exts []MerkleTreeCertEntryExtension) ([]byte, e
 
 // EncodeNullEntry returns the §5.2.1 MerkleTreeCertEntry serialization
 // for a null entry: an empty extensions vector followed by the
-// null_entry type. Any index MAY be a null entry (draft-04 relaxed the
-// earlier "index 0 must be null" rule).
+// null_entry type. Any index MAY be a null entry.
 func EncodeNullEntry() []byte {
 	return []byte{0x00, 0x00, 0x00, 0x00} // empty extensions + type=null_entry
 }

@@ -133,8 +133,8 @@ func (d *Disk) Put(name string, data []byte, exclusive bool) error {
 	if exclusive {
 		// Open with O_EXCL on the final path is the only race-free check.
 		// We can't combine O_EXCL with rename, so we use O_EXCL on the
-		// final destination. Since cactus is single-writer (per
-		// PROJECT_PLAN §2 — operator must not run two instances),
+		// final destination. Since cactus is single-writer (the
+		// operator must not run two instances; see docs/threat-model.md),
 		// exclusive Put does not need to be atomic w.r.t. concurrent
 		// writers; we just want "fail if already there".
 		f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)

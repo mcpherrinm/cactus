@@ -24,9 +24,8 @@ import (
 //
 // Issues a few certs on the CA, then waits for the mirror's
 // /metrics or /sign-subtree to come up and confirms it's listening.
-// The full end-to-end "mirror cosignature in cert" test is deferred
-// to a later iteration (Phase 9.6 + the real ca-only-flag retry
-// loop) — this is the binary smoke test.
+// This is the binary smoke test; the full end-to-end "mirror
+// cosignature in cert" path is covered by TestEndToEndCAWithThreeMirrors.
 func TestCactusBinaryMirrorMode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in -short mode")

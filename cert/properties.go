@@ -10,8 +10,7 @@ import (
 )
 
 // CertificatePropertyType codes mirror the trust-anchor-ids
-// CertificateProperty registry (TAI §7). draft-04 removed the MTC-specific
-// additional_trust_anchor_ranges property; only trust_anchor_id remains.
+// CertificateProperty registry (TAI §7). Only trust_anchor_id is used.
 type CertificatePropertyType uint16
 
 const (

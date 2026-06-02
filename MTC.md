@@ -123,9 +123,8 @@ as `CA-ID.0.logNumber` (§5.2). cactus runs one log, configured by its
 
 The log is an append-only tree of `MerkleTreeCertEntry` structures.
 Each entry begins with an `extensions<0..2^16-1>` vector (empty in
-cactus) followed by a type. Any index MAY be a `null_entry`; draft-04
-dropped the draft-03 rule that index 0 must be null. Serial numbers are
-kept non-zero instead by requiring a non-zero log number (see §6).
+cactus) followed by a type. Any index MAY be a `null_entry`. Serial
+numbers are kept non-zero by requiring a non-zero log number (see §6).
 
 Each non-null entry is a `tbs_cert_entry`: the TBS-style fields of
 the cert with the public key replaced by `HASH(SubjectPublicKeyInfo)`.
@@ -270,8 +269,8 @@ The CA:
 3. Signs each subtree's `MTCSubtreeSignatureInput` with its CA
    cosigner key.
 
-4. Optionally fans the request out to mirrors (Phase 9). Each mirror
-   that has caught up returns its own signature.
+4. Optionally fans the request out to mirrors. Each mirror that has
+   caught up returns its own signature.
 
 5. Persists the signed checkpoint and the per-subtree signatures to
    disk.
@@ -381,8 +380,7 @@ ACME is what the authenticating party (the cert holder) uses to
      the specific landmark's ID `CA-ID.1.logNumber.L` for
      landmark-relative certs (§8.2).
 
-   draft-04 removed the draft-03 `additional_trust_anchor_ranges`
-   property. A relying party instead advertises a **landmark group**
+   A relying party advertises a **landmark group**
    `CA-ID.2.logNumber.L` (§8.2.1) in its `trust_anchors`, signalling
    support for the CA's standalone certs and all active landmarks at
    once.
@@ -410,7 +408,7 @@ If you're reading the code, this is the order I'd recommend:
 5. `ca/issuer.go` — assemble the X.509 cert from a CSR + a `log.Issued`.
 6. `acme/handler.go` — the ACME state machine.
 7. `landmark/sequence.go` — §6.3.1/2 allocator.
-8. `mirror/follower.go` and `mirror/server.go` — Phase 9.
+8. `mirror/follower.go` and `mirror/server.go` — the mirror role.
 
 The integration test `integration/TestParallelIssuance` exercises
 1–6 end-to-end: 100 certs in parallel, each one re-parsed and

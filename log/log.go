@@ -3,8 +3,8 @@
 // that periodically signs checkpoints and covering subtrees (§4.5,
 // §5.3.1) using a CA cosigner.
 //
-// The public surface is the Log type, which exposes Append + Wait per
-// PROJECT_PLAN §6. Append assigns an index immediately; Wait blocks
+// The public surface is the Log type, which exposes Append + Wait.
+// Append assigns an index immediately; Wait blocks
 // until the entry has been included in a published checkpoint and a
 // covering signed subtree exists.
 package log
@@ -138,7 +138,7 @@ type signedSubtree struct {
 	subtree cert.MTCSubtree
 	// sigs are the cosigner signatures attached to this subtree.
 	// sigs[0] is always the CA cosigner; mirror cosigner signatures
-	// (Phase 9.4) are appended afterwards.
+	// are appended afterwards.
 	sigs []cert.MTCSignature
 }
 
@@ -275,7 +275,7 @@ func (l *Log) Wait(ctx context.Context, index uint64) (Issued, error) {
 // so callers must hold a consistent view of the tree (e.g. a tree
 // size from CurrentCheckpoint or a landmark.Sequence entry).
 //
-// Used by the ACME alternate-URL handler (Phase 8.4) to assemble
+// Used by the ACME alternate-URL handler to assemble
 // landmark-relative certs.
 func (l *Log) SubtreeProof(start, end, index uint64) (tlogx.Hash, []tlogx.Hash, error) {
 	l.mu.Lock()
@@ -296,7 +296,7 @@ func (l *Log) SubtreeProof(start, end, index uint64) (tlogx.Hash, []tlogx.Hash, 
 // ConsistencyProof returns the §4.4 subtree consistency proof from
 // (start, end) up to a tree of size treeSize, against a snapshot of
 // the current tile state. Used by the multi-mirror requester to
-// construct the §C.2 sign-subtree request body.
+// construct the tlog-witness sign-subtree request body.
 func (l *Log) ConsistencyProof(start, end, treeSize uint64) ([]tlogx.Hash, error) {
 	l.mu.Lock()
 	hashes := l.tw.SnapshotHashes()
@@ -424,7 +424,7 @@ func (l *Log) flush() error {
 	}
 
 	// Sign covering subtrees for the just-added range, if any.
-	// Phase 9.4: subtrees start with just the CA's sig; mirror sigs
+	// Subtrees start with just the CA's sig; mirror sigs
 	// are collected *after* the checkpoint is committed so that
 	// mirrors polling our /checkpoint can see and verify the new
 	// state before we ask them to sign.
@@ -472,7 +472,7 @@ func (l *Log) flush() error {
 		go l.cfg.OnFlush(newSize)
 	}
 
-	// Phase 9.4: kick off mirror cosignature collection for each
+	// Kick off mirror cosignature collection for each
 	// subtree we just committed. Runs in a goroutine so it doesn't
 	// block subsequent flushes; on success it appends to
 	// subtree.sigs in l.committed (still keyed to *this* checkpoint
