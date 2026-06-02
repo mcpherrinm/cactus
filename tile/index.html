@@ -94,13 +94,7 @@
 
     <div class="row" style="margin-top:1rem">
       <label>Level</label>
-      <select id="mlevel">
-        <option value="0">0 (leaves)</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="entries">entries (data)</option>
-      </select>
+      <select id="mlevel"><!-- populated from the checkpoint by populateLevels() --></select>
       <label>Index</label><input type="number" id="mindex" min="0" value="0">
       <label>Width</label><input type="number" id="mwidth" min="1" max="256" placeholder="full (256)">
       <button id="mfetch">Fetch tile</button>
@@ -149,6 +143,37 @@ function tileURL(level, index, width) {
   return p;
 }
 
+// Number of tree levels (the level of the root); 0 for an empty or
+// single-leaf tree. E.g. a size-12 tree is 4 levels tall.
+function treeHeight(n) {
+  let h = 0, p = 1;
+  while (p < n) { p *= 2; h++; }
+  return h;
+}
+
+// Number of tile levels the tree spans (how many tiles tall it is): the
+// count of levels L >= 0 with floor(n / 256^L) > 0. Mirrors the level loop
+// in tlog.NewTiles, so it matches exactly which tile/<L>/… paths exist.
+function tileLevels(n) {
+  let levels = 0;
+  while (n > 0) { levels++; n = Math.floor(n / TILE_W); }
+  return levels;
+}
+
+// Width (node/entry count) of the tile at tile level (a number or
+// "entries") and tile index, derived from the current tree size. Returns 0
+// when the tile is empty / out of range, TILE_W (256) for a full tile, or
+// the partial width otherwise. Mirrors the per-tile width in tlog.NewTiles.
+function tileWidth(level, index) {
+  let units = treeSize; // entries, or count of stored hashes at this level
+  if (level !== "entries") {
+    for (let k = 0; k < Number(level); k++) units = Math.floor(units / TILE_W);
+  }
+  const w = units - index * TILE_W;
+  if (w <= 0) return 0;
+  return Math.min(TILE_W, w);
+}
+
 let treeSize = 0;
 
 async function loadCheckpoint() {
@@ -170,9 +195,12 @@ async function loadCheckpoint() {
     const root = lines[2] || "";
     $("origin").textContent = origin;
     $("size").textContent = treeSize.toLocaleString();
-    $("height").textContent = treeSize === 0 ? "0" : Math.ceil(Math.log2(treeSize)) + " levels";
+    const th = tileLevels(treeSize);
+    $("height").textContent = treeSize === 0 ? "0" :
+      treeHeight(treeSize) + " levels · " + th + " tile" + (th === 1 ? "" : "s") + " high";
     $("root").textContent = root;
     $("cpstatus").innerHTML = '<span class="ok">updated ' + new Date().toLocaleTimeString() + "</span>";
+    populateLevels();
     renderTileLists();
   } catch (e) {
     $("cpstatus").innerHTML = '<span class="err">checkpoint error: ' + esc(String(e.message)) + "</span>";
@@ -221,6 +249,53 @@ function renderTileLists() {
   }
 }
 
+// Rebuild the manual-fetch level dropdown from the current checkpoint so it
+// lists exactly the tile levels that exist (using the tree's tile height,
+// not its level height), ordered to match the tree: the highest hash level
+// on top, level 0 just above the entries, entries at the bottom.
+function populateLevels() {
+  const sel = $("mlevel");
+  const prev = sel.value;
+  const top = Math.max(tileLevels(treeSize) - 1, 0);
+  sel.innerHTML = "";
+  for (let L = top; L >= 0; L--) {
+    const o = document.createElement("option");
+    o.value = String(L);
+    o.textContent = L === 0 ? "0 (leaf hashes)" : String(L);
+    sel.appendChild(o);
+  }
+  const oe = document.createElement("option");
+  oe.value = "entries";
+  oe.textContent = "entries (data)";
+  sel.appendChild(oe);
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+// Point the manual-fetch controls at (level, index) and fetch that tile,
+// auto-sizing the width from the current checkpoint.
+function selectAndFetch(level, index) {
+  $("mlevel").value = level;
+  $("mindex").value = index;
+  const w = tileWidth(level, index);
+  $("mwidth").value = (w && w !== TILE_W) ? w : "";
+  fetchTile(level, index, w || null);
+}
+
+// Descend one layer from row i of the hash tile at (level, index): to the
+// child hash tile for level >= 1, or to the corresponding entry (data) tile
+// for level 0 (whose tiles line up 1:1 with the level-0 hash tiles).
+function drillDown(level, index, i) {
+  if (level >= 1) selectAndFetch(String(level - 1), index * TILE_W + i);
+  else selectAndFetch("entries", index);
+}
+
+// Open one entry (global index) in the entry viewer below.
+function openEntry(globalIndex) {
+  $("eindex").value = globalIndex;
+  fetchEntry();
+  $("entryout").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 async function fetchTile(level, index, width) {
   const out = $("tileout");
   out.style.display = "block";
@@ -230,20 +305,30 @@ async function fetchTile(level, index, width) {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) { out.innerHTML = '<span class="err">GET ' + esc(url) + " → HTTP " + r.status + "</span>"; return; }
     const buf = new Uint8Array(await r.arrayBuffer());
-    if (level === "entries") renderEntriesTile(out, url, buf);
-    else renderHashTile(out, url, buf);
+    if (level === "entries") renderEntriesTile(out, url, buf, index);
+    else renderHashTile(out, url, buf, Number(level), index);
   } catch (e) {
     out.innerHTML = '<span class="err">' + esc(String(e.message)) + "</span>";
   }
 }
 
-function renderHashTile(out, url, buf) {
+function renderHashTile(out, url, buf, level, index) {
   const n = Math.floor(buf.length / 32);
+  const down = level >= 1 ? "level " + (level - 1) + " tile" : "entry (data) tile";
   let html = '<span class="ok">GET ' + esc(url) + "</span>\n" +
-    buf.length + " bytes · " + n + " node hash" + (n === 1 ? "" : "es") + "\n\n";
+    buf.length + " bytes · " + n + " node hash" + (n === 1 ? "" : "es") + "\n" +
+    '<span class="hint">click an index to descend to its ' + down + "</span>\n\n";
   html += '<div class="hash">';
   for (let i = 0; i < n; i++) {
-    html += '<span class="i">' + i + '</span><span>' + hex(buf.subarray(i * 32, i * 32 + 32)) + "</span>";
+    // Drill target: the child hash tile (level >= 1) or the aligned entry
+    // (data) tile (level 0). Shown in the link's title; the click is wired
+    // to drillDown which also resyncs the manual-fetch controls.
+    const tgt = level >= 1
+      ? tileURL(String(level - 1), index * TILE_W + i, tileWidth(String(level - 1), index * TILE_W + i))
+      : tileURL("entries", index, tileWidth("entries", index));
+    html += '<span class="i"><a href="#" title="' + esc(tgt) +
+      '" onclick="drillDown(' + level + ',' + index + ',' + i + ');return false">' + i + "</a></span>" +
+      "<span>" + hex(buf.subarray(i * 32, i * 32 + 32)) + "</span>";
   }
   html += "</div>";
   if (buf.length % 32 !== 0) html += '\n<span class="err">note: length not a multiple of 32</span>';
@@ -251,8 +336,9 @@ function renderHashTile(out, url, buf) {
 }
 
 // Entry (data) tiles are uint16-big-endian length-prefixed entries.
-function renderEntriesTile(out, url, buf) {
-  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" + buf.length + " bytes\n\n";
+function renderEntriesTile(out, url, buf, tileIndex) {
+  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" + buf.length + " bytes\n" +
+    '<span class="hint">click an entry to open it in the entry viewer</span>\n\n';
   let pos = 0, i = 0;
   try {
     while (pos + 2 <= buf.length) {
@@ -261,7 +347,9 @@ function renderEntriesTile(out, url, buf) {
       const body = buf.subarray(pos, pos + len);
       pos += len;
       const preview = hex(body.subarray(0, 32));
-      html += "entry " + i + ": " + len + " bytes  " + preview + (len > 32 ? "…" : "") + "\n";
+      const gidx = tileIndex * TILE_W + i;
+      html += '<a href="#" onclick="openEntry(' + gidx + ');return false">entry ' + i + "</a>" +
+        " (#" + gidx + "): " + len + " bytes  " + preview + (len > 32 ? "…" : "") + "\n";
       i++;
     }
     html = html.replace("\n\n", "\n" + i + " entr" + (i === 1 ? "y" : "ies") + "\n\n");
@@ -496,9 +584,13 @@ $("mfetch").onclick = () => {
   const level = $("mlevel").value;
   const index = parseInt($("mindex").value, 10) || 0;
   const wraw = parseInt($("mwidth").value, 10);
-  fetchTile(level, index, Number.isFinite(wraw) ? wraw : null);
+  // If no width is given, size it from the current checkpoint (so the
+  // rightmost partial tile resolves to its .p/<width> path automatically).
+  const width = Number.isFinite(wraw) ? wraw : (tileWidth(level, index) || null);
+  fetchTile(level, index, width);
 };
 $("efetch").onclick = fetchEntry;
+populateLevels(); // seed the dropdown before the first checkpoint loads
 loadCheckpoint();
 </script>
 </body>
