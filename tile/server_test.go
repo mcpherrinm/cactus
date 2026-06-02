@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,29 @@ func TestCheckpointEndpoint(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !bytes.Equal(body, l.CurrentCheckpoint().SignedNote) {
 		t.Errorf("body != current SignedNote")
+	}
+}
+
+func TestAppJSEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp, err := http.Get(srv.URL + "/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
+		t.Errorf("Content-Type = %q, want text/javascript", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, appJS) {
+		t.Errorf("body != embedded app.js")
+	}
+	// index.html must load the embedded script, or the page is dead.
+	if !bytes.Contains(indexHTML, []byte(`src="app.js"`)) {
+		t.Errorf("index.html does not reference app.js")
 	}
 }
 
