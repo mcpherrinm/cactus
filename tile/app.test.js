@@ -125,11 +125,25 @@ test("drillDown from level 0 descends to the aligned entry (data) tile", () => {
   expect(fetches.at(-1)).toBe("tile/entries/001");
 });
 
-test("openEntry fetches the single entry by global index", () => {
+test("openEntry opens a tile-loaded entry without any extra fetch", () => {
   const { els, fetches } = makeUI();
-  app.openEntry(1283);
-  expect(els.eindex.value).toBe("1283");
-  expect(fetches.at(-1)).toBe("log/v1/entry/1283");
+  app.treeSize = 600;
+  // Render a data tile so its entries are cached, then click one.
+  const out = new El("#tileout");
+  const buf = new Uint8Array([0x00, 0x04, 0x00, 0x00, 0x00, 0x00]); // one 4-byte null_entry blob
+  app.renderEntriesTile(out, "tile/entries/000", buf, 0);
+  app.openEntry(0);
+  expect(els.eindex.value).toBe("0");
+  expect(els.inspector.style.display).toBe("grid"); // inspector populated
+  expect(fetches.length).toBe(0);                   // no network call
+});
+
+test("openEntry falls back to the standard data tile for an uncached entry", () => {
+  const { els, fetches } = makeUI();
+  app.treeSize = 600;
+  app.openEntry(257); // not loaded from a tile yet → fetch its data tile
+  expect(els.eindex.value).toBe("257");
+  expect(fetches.at(-1)).toBe("tile/entries/001"); // tile 1 (full), standard path
 });
 
 // =========================================================================
@@ -309,7 +323,7 @@ test("renderAnnotations: each row carries its structure's byte range", () => {
 test("renderEntry: fills all three columns and reports byte count", () => {
   const { els } = makeUI();
   const buf = fixtureEntry();
-  const res = app.renderEntry(buf, "log/v1/entry/0");
+  const res = app.renderEntry(buf, "tile/entries/000 · entry 0 (#0)");
   expect(res.type).toBe(1);
   expect(els.entrymeta.innerHTML).toContain(buf.length + " bytes");
   expect(els.entrymeta.innerHTML).toContain("tbs_cert_entry");

@@ -157,8 +157,11 @@
     <div class="row">
       <label>Index</label><input type="number" id="eindex" min="0" value="0">
       <button id="efetch">Fetch entry</button>
-      <span class="hint">GET <code>log/v1/entry/&lt;index&gt;</code> — one MerkleTreeCertEntry blob</span>
+      <span class="hint">extracted from its standard <code>tile/entries/&lt;N&gt;</code> data tile</span>
     </div>
+    <p class="hint">Click an entry in a data tile above to open it here with no extra fetch, or
+      look one up by index. Either way the entry is read straight from the standard
+      tlog-tiles data tile — no log-specific API.</p>
     <p class="hint">A §5.2.1 <code>MerkleTreeCertEntry</code>: TLS-presentation framing
       (<code>extensions</code> ‖ <code>entry_type</code>) wrapping the DER contents octets of a
       <code>TBSCertificateLogEntry</code>. Hover any column to light up the matching bytes.</p>

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/letsencrypt/cactus/cert"
+	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
@@ -121,12 +122,42 @@ func treeShow(logURL string) {
 	fmt.Printf("root:   %x\n", root[:])
 }
 
-// entryShow fetches an entry blob and prints a brief decode.
+// entryShow fetches an entry blob and prints a brief decode. It reads the
+// entry the way any tlog-tiles client would — there is no per-entry endpoint.
+// It fetches the standard data tile that contains the index (sized from the
+// checkpoint so the rightmost partial tile resolves to its .p/<width> path)
+// and splits out the entry at its position within that tile.
 func entryShow(logURL string, idx uint64) {
-	body, err := httpGet(fmt.Sprintf("%s/log/v1/entry/%d", logURL, idx))
+	cp, err := httpGet(logURL + "/checkpoint")
 	if err != nil {
-		die("fetch entry: %v", err)
+		die("fetch checkpoint: %v", err)
 	}
+	size, _, _, err := parseSignedNoteFlat(cp)
+	if err != nil {
+		die("parse checkpoint: %v", err)
+	}
+	if idx >= size {
+		die("entry %d out of range (tree size %d)", idx, size)
+	}
+	tileN := int64(idx) / int64(tilewriter.EntriesPerDataTile)
+	posInTile := int(int64(idx) % int64(tilewriter.EntriesPerDataTile))
+	width := tilewriter.EntriesPerDataTile
+	if w := int(size - uint64(tileN)*tilewriter.EntriesPerDataTile); w < width {
+		width = w // rightmost (partial) data tile
+	}
+	tilePath := logURL + "/" + tilewriter.DataTilePath(tileN, width)
+	tile, err := httpGet(tilePath)
+	if err != nil {
+		die("fetch data tile: %v", err)
+	}
+	entries, err := tilewriter.SplitDataTile(tile)
+	if err != nil {
+		die("parse data tile: %v", err)
+	}
+	if posInTile >= len(entries) {
+		die("entry %d not present in %s", idx, tilePath)
+	}
+	body := entries[posInTile]
 	// MerkleTreeCertEntry (§5.2.1): extensions<0..2^16-1> then uint16 type
 	// then the type-specific data. The leading uint16 is the extensions
 	// vector length, NOT the type.

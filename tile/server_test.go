@@ -84,34 +84,6 @@ func TestAppJSEndpoint(t *testing.T) {
 	}
 }
 
-func TestEntryEndpoint(t *testing.T) {
-	srv, l := newTestServer(t)
-	entry := cert.EncodeTBSCertEntry([]byte("payload-1"))
-	idem := sha256.Sum256(entry)
-	idx, err := l.Append(context.Background(), entry, idem)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := l.Wait(ctx, idx); err != nil {
-		t.Fatal(err)
-	}
-	url := srv.URL + "/log/v1/entry/" + uint64s(idx)
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	got, _ := io.ReadAll(resp.Body)
-	if !bytes.Equal(got, entry) {
-		t.Errorf("body mismatch")
-	}
-}
-
 func TestSubtreeEndpoint(t *testing.T) {
 	srv, l := newTestServer(t)
 	// Append one entry so a covering subtree gets signed.

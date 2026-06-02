@@ -185,10 +185,14 @@ function drillDown(level, index, i) {
   else selectAndFetch("entries", index);
 }
 
-// Open one entry (global index) in the entry viewer below.
+// Open one entry (global index) in the entry viewer below, reusing the bytes
+// already fetched as part of its data tile. Falls back to fetching the data
+// tile (a standard request) if this entry hasn't been loaded yet.
 function openEntry(globalIndex) {
   $("eindex").value = globalIndex;
-  fetchEntry();
+  const e = entryCache[globalIndex];
+  if (!e) { fetchEntry(); return; }
+  renderEntry(e.bytes, e.label);
   $("inspector").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -231,26 +235,42 @@ function renderHashTile(out, url, buf, level, index) {
   out.innerHTML = html;
 }
 
-// Entry (data) tiles are uint16-big-endian length-prefixed entries.
+// Split an entry (data) tile into its entries. Data tiles are a sequence of
+// uint16-big-endian length-prefixed blobs; subarray() clamps a final
+// length that overruns a truncated/partial tile, so this never throws.
+function splitDataTile(buf) {
+  const entries = [];
+  let pos = 0;
+  while (pos + 2 <= buf.length) {
+    const len = (buf[pos] << 8) | buf[pos + 1];
+    pos += 2;
+    entries.push(buf.subarray(pos, pos + len));
+    pos += len;
+  }
+  return entries;
+}
+
+// Bytes of entries we've already pulled out of fetched data tiles, keyed by
+// global entry index, so clicking an entry link opens it in the viewer with
+// no extra fetch. Each value is { bytes, label } (label is the source line
+// shown in the inspector header).
+const entryCache = {};
+
+// Render a fetched entry (data) tile, one clickable row per entry. Clicking a
+// row opens that entry in the inspector below straight from the bytes we
+// already have — no per-entry request, so this stays standard-API-only.
 function renderEntriesTile(out, url, buf, tileIndex) {
-  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" + buf.length + " bytes\n" +
-    '<span class="hint">click an entry to open it in the entry viewer</span>\n\n';
-  let pos = 0, i = 0;
-  try {
-    while (pos + 2 <= buf.length) {
-      const len = (buf[pos] << 8) | buf[pos + 1];
-      pos += 2;
-      const body = buf.subarray(pos, pos + len);
-      pos += len;
-      const preview = hex(body.subarray(0, 32));
-      const gidx = tileIndex * TILE_W + i;
-      html += '<a href="#" onclick="openEntry(' + gidx + ');return false">entry ' + i + "</a>" +
-        " (#" + gidx + "): " + len + " bytes  " + preview + (len > 32 ? "…" : "") + "\n";
-      i++;
-    }
-    html = html.replace("\n\n", "\n" + i + " entr" + (i === 1 ? "y" : "ies") + "\n\n");
-  } catch (e) {
-    html += '<span class="err">decode error: ' + esc(String(e.message)) + "</span>";
+  const entries = splitDataTile(buf);
+  let html = '<span class="ok">GET ' + esc(url) + "</span>\n" + buf.length + " bytes · " +
+    entries.length + " entr" + (entries.length === 1 ? "y" : "ies") + "\n" +
+    '<span class="hint">click an entry to open it in the entry viewer below</span>\n\n';
+  for (let i = 0; i < entries.length; i++) {
+    const body = entries[i];
+    const gidx = tileIndex * TILE_W + i;
+    entryCache[gidx] = { bytes: body, label: url + " · entry " + i + " (#" + gidx + ")" };
+    const preview = hex(body.subarray(0, 32));
+    html += '<a href="#" onclick="openEntry(' + gidx + ');return false">entry ' + i + "</a>" +
+      " (#" + gidx + "): " + body.length + " bytes  " + preview + (body.length > 32 ? "…" : "") + "\n";
   }
   out.innerHTML = html;
 }
@@ -677,12 +697,14 @@ function renderAnnotations(container, ann) {
   container.innerHTML = ann.length ? html : '<div class="hint">(no annotations)</div>';
 }
 
-// Render the full three-column inspector for one entry blob.
-function renderEntry(buf, url) {
+// Render the full three-column inspector for one entry blob. `label` is the
+// source line shown in the header (e.g. the data-tile path the entry came
+// from).
+function renderEntry(buf, label) {
   const res = parseEntry(buf);
   const meta = $("entrymeta");
   meta.style.display = "block";
-  let m = '<span class="ok">GET ' + esc(url) + "</span> · " + buf.length + " bytes (MerkleTreeCertEntry)";
+  let m = '<span class="ok">' + esc(label) + "</span> · " + buf.length + " bytes (MerkleTreeCertEntry)";
   if (res.typeLabel) m += " · type " + esc(res.typeLabel);
   if (res.error) m += ' · <span class="err">' + esc(res.error) + "</span>";
   meta.innerHTML = m;
@@ -694,9 +716,15 @@ function renderEntry(buf, url) {
   return res;
 }
 
+// Look up an entry by global index using only the standard tile API: fetch
+// the data tile that contains it (auto-sizing the partial width from the
+// checkpoint) and pull out the entry at its position within that tile.
 async function fetchEntry() {
   const idx = parseInt($("eindex").value, 10) || 0;
-  const url = "log/v1/entry/" + idx;
+  const tileIndex = Math.floor(idx / TILE_W);
+  const posInTile = idx % TILE_W;
+  const width = tileWidth("entries", tileIndex);
+  const url = tileURL("entries", tileIndex, width || null);
   const meta = $("entrymeta");
   meta.style.display = "block";
   meta.textContent = "GET " + url + " …";
@@ -705,7 +733,15 @@ async function fetchEntry() {
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) { meta.innerHTML = '<span class="err">GET ' + esc(url) + " → HTTP " + r.status + "</span>"; return; }
     const buf = new Uint8Array(await r.arrayBuffer());
-    renderEntry(buf, url);
+    const entries = splitDataTile(buf);
+    if (posInTile >= entries.length) {
+      meta.innerHTML = '<span class="err">entry #' + idx + " not in " + esc(url) +
+        " (tile holds " + entries.length + " entr" + (entries.length === 1 ? "y" : "ies") + ")</span>";
+      return;
+    }
+    const body = entries[posInTile];
+    entryCache[idx] = { bytes: body, label: url + " · entry " + posInTile + " (#" + idx + ")" };
+    renderEntry(body, entryCache[idx].label);
   } catch (e) {
     meta.innerHTML = '<span class="err">' + esc(String(e.message)) + "</span>";
   }
@@ -789,7 +825,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     TILE_W, formatTileIndex, tileURL, treeHeight, tileLevels, tileWidth,
     loadCheckpoint, renderTileLists, populateLevels, selectAndFetch, drillDown,
-    openEntry, fetchTile, renderHashTile, renderEntriesTile, fetchEntry,
+    openEntry, fetchTile, renderHashTile, splitDataTile, renderEntriesTile, fetchEntry,
     DER, tagName, decodeOID, oidName, decodeDN, decodeSAN, hexPreview,
     previewInteger, formatTime, previewPrimitive, derNode, derForest,
     parseEntry, renderHexDump, renderStructure, renderAnnotations, renderEntry,

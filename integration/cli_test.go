@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,6 +145,48 @@ func TestCLIProve(t *testing.T) {
 	// tree of size `got.TreeSize` with root `rootHash`, given `proof`.
 	if err := tlog.CheckRecord(proof, int64(got.TreeSize), rootHash, int64(got.Index), leafHash); err != nil {
 		t.Errorf("tlog.CheckRecord: %v", err)
+	}
+}
+
+// TestCLIEntry issues a cert, then runs `cactus-cli entry` to confirm the
+// CLI reads the entry through the standard data tile (there is no per-entry
+// endpoint), and checks the read path directly: the data tile serves, while
+// the old /log/v1/entry/<index> endpoint is gone (404).
+func TestCLIEntry(t *testing.T) {
+	s := bringUp(t, t.TempDir())
+	defer s.close()
+	if _, err := acmeIssueOne(s.acmeBase, "entry.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildCLI(t)
+	out, err := exec.Command(bin, "entry", s.tileBase, "0").CombinedOutput()
+	if err != nil {
+		t.Fatalf("cactus-cli entry: %v\nout=%s", err, out)
+	}
+	for _, want := range []string{"entry 0: tbs_cert_entry", "subject:", "spki hash:"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// The first (and only) entry lives in the partial data tile 0 at width 1.
+	if r, err := http.Get(s.tileBase + "/tile/entries/000.p/1"); err != nil {
+		t.Fatalf("GET data tile: %v", err)
+	} else {
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Errorf("standard data tile: status = %d, want 200", r.StatusCode)
+		}
+	}
+	// The nonstandard per-entry endpoint must no longer exist.
+	if r, err := http.Get(s.tileBase + "/log/v1/entry/0"); err != nil {
+		t.Fatalf("GET removed endpoint: %v", err)
+	} else {
+		r.Body.Close()
+		if r.StatusCode != http.StatusNotFound {
+			t.Errorf("removed /log/v1/entry/0: status = %d, want 404", r.StatusCode)
+		}
 	}
 }
 

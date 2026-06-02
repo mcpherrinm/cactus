@@ -140,8 +140,9 @@ that means the read-path (HTTP) serves files at:
 
 - `/checkpoint` — a c2sp signed-note with the latest size + root.
 - `/tile/<L>/<NNN>[.p/<W>]` — Merkle hash tiles.
-- `/tile/entries/<NNN>[.p/<W>]` — entry blobs (the "data" tiles).
-- `/log/v1/entry/<index>` — fetch one entry by index.
+- `/tile/entries/<NNN>[.p/<W>]` — entry blobs (the "data" tiles). A single
+  entry is read by fetching its data tile and splitting out the entry at its
+  position within the tile; there is no per-entry endpoint.
 - `/subtree/<name>` — cached signed subtree blob (the name is the
   `start-end` storage key).
 

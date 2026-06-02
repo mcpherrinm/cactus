@@ -12,12 +12,10 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/letsencrypt/cactus/landmark"
 	"github.com/letsencrypt/cactus/log"
-	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/storage"
 )
 
@@ -58,7 +56,6 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 //	GET /checkpoint            — latest signed note
 //	GET /tile/<L>/<NNN..>      — hash tiles (c2sp tlog-tiles)
 //	GET /tile/entries/<NNN..>  — entry (data) tiles (c2sp tlog-tiles)
-//	GET /log/v1/entry/<index>  — single entry blob (the §5.2.1 MerkleTreeCertEntry)
 //	GET /subtree/<start>-<end> — cached signed subtree signature
 //	GET /landmarks             — §6.3.1 landmark list (only if WithLandmarks)
 func (s *Server) Handler() http.Handler {
@@ -67,7 +64,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /app.js", s.handleAppJS)
 	mux.HandleFunc("GET /checkpoint", s.handleCheckpoint)
 	mux.HandleFunc("GET /tile/", s.handleTile)
-	mux.HandleFunc("GET /log/v1/entry/{index}", s.handleEntry)
 	mux.HandleFunc("GET /subtree/{name}", s.handleSubtree)
 	if s.landmarks != nil {
 		mux.Handle("GET /landmarks", s.landmarks.Handler())
@@ -126,45 +122,6 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
 	}
 	w.Write(data)
-}
-
-func (s *Server) handleEntry(w http.ResponseWriter, r *http.Request) {
-	idxStr := r.PathValue("index")
-	idx, err := strconv.ParseUint(idxStr, 10, 64)
-	if err != nil {
-		http.Error(w, "bad index", http.StatusBadRequest)
-		return
-	}
-
-	// Locate the data tile and the position of the requested entry within it.
-	tileN := int64(idx) / int64(tilewriter.EntriesPerDataTile)
-	posInTile := int(int64(idx) - tileN*int64(tilewriter.EntriesPerDataTile))
-
-	// Find any persisted data tile at width >= posInTile+1, preferring
-	// the widest (most up-to-date) one.
-	for width := tilewriter.EntriesPerDataTile; width >= posInTile+1; width-- {
-		data, err := s.fs.Get("log/" + tilewriter.DataTilePath(tileN, width))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			http.Error(w, "entry read failed", http.StatusInternalServerError)
-			return
-		}
-		entries, err := tilewriter.SplitDataTile(data)
-		if err != nil {
-			http.Error(w, "data tile parse failed", http.StatusInternalServerError)
-			return
-		}
-		if posInTile >= len(entries) {
-			continue
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
-		w.Write(entries[posInTile])
-		return
-	}
-	http.NotFound(w, r)
 }
 
 func (s *Server) handleSubtree(w http.ResponseWriter, r *http.Request) {
