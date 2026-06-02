@@ -279,6 +279,13 @@ func run(cfg config.Config, logger *slog.Logger) error {
 					Subtree:          st,
 					CACheckpointBody: cp.SignedNote,
 					ConsistencyProof: proof,
+					// Include the CA's own subtree cosignature so mirrors
+					// that enforce the tlog-witness DoS gate
+					// (require_ca_signature_on_subtree, on by default)
+					// will honour the request.
+					CASignature:   &caSig,
+					CACosignerID:  caID,
+					CACosignerKey: sgn.PublicKey(),
 				}
 				subCtx, cancel := context.WithTimeout(ctx, cfg.CACosignerQuorum.RequestTimeout())
 				sigs, err := cert.RequestCosignaturesWithMetrics(

@@ -103,19 +103,26 @@ and targets the draft plus the MTC-with-tlog profile
   applies to the checkpoint signature line (`log/note.go`), the
   sign-subtree response (`mirror/server.go`), and the CA DoS-gate line in
   a sign-subtree request (`cert/cosigner_request.go`); the matching
-  parsers strip the timestamp. The MTCProof signature carried in the
-  X.509 certificate is a bare PKIX signature over the `CosignedMessage`
+  parsers strip the timestamp and reject a non-zero timestamp on a
+  subtree cosignature. The MTCProof signature carried in the X.509
+  certificate is a bare PKIX signature over the `CosignedMessage`
   (§6.1), with no note-line wrapper.
-- **Checkpoint body** (`log/note.go`) is origin / size / base64 root, and
-  **tile and entry-bundle framing** (`log/tilewriter`, `tile/server.go`)
+- **Checkpoint body** (`log/note.go`) is origin / size / base64 root,
+  with the empty tree's root being the RFC 6962 / RFC 9162 §2.1
+  empty-tree hash `SHA-256("")` (`log/tilewriter`, not the zero hash).
+  **Tile and entry-bundle framing** (`log/tilewriter`, `tile/server.go`)
   uses the tlog-tiles path layout, `.p/<W>` partials, and uint16
   length-prefixed entry bundles.
 - **`POST /sign-subtree`** (`mirror/server.go`) implements the
   tlog-witness request/response framing — `subtree <start> <end>`, base64
   hash, 0–8 cosignature lines, 0–63 consistency-proof lines, blank line,
-  reference checkpoint — and the DoS gate requiring a valid CA subtree
-  cosignature. The mirror follower (`mirror/follower.go`) polls an
-  upstream over tlog-tiles and verifies append-only progress.
+  reference checkpoint (≤8 signatures) — parsing the decimal range and
+  size with no leading zeros. The DoS gate requires a valid CA subtree
+  cosignature, returning 403 when it is missing or fails to verify. In
+  CA mode the sign-subtree requests carry the CA's own subtree
+  cosignature (`cmd/cactus/main.go`) so mirrors that enforce the gate by
+  default honour them. The mirror follower (`mirror/follower.go`) polls
+  an upstream over tlog-tiles and verifies append-only progress.
 
 ### MTC-with-tlog profile
 
@@ -141,6 +148,12 @@ and targets the draft plus the MTC-with-tlog profile
   zero-length `signatureValue` (`cert/cacert.go`).
 - **X.690** — hand-rolled DER uses definite, minimal lengths and a
   correct BIT STRING unused-bits octet.
+- **Leaf extensions** — only subjectAltName, keyUsage, and
+  extendedKeyUsage are copied from the CSR onto the leaf; other
+  extensions (basic constraints, the MTC-CA extension, private
+  extensions) are dropped, duplicate extension OIDs are rejected
+  (RFC 5280 §4.2), and an empty subject forces a critical subjectAltName
+  (§4.1.2.6) — all in `ca/validator.go`.
 
 ### Cryptography
 
@@ -148,7 +161,9 @@ and targets the draft plus the MTC-with-tlog profile
   (FIPS 204 / RFC 9881); keys derive deterministically from a 32-byte
   seed via HKDF-SHA256 with a per-algorithm info string
   (`signer/mldsa.go`). SHA-256 is used consistently for tree hashing and
-  for SPKI/key-ID hashing.
+  for SPKI/key-ID hashing. Verification is SHA-256-only: the relying-party
+  config rejects a CA certificate advertising any other `logHash`
+  (`cert/rpverify.go`).
 
 ### Trust Anchor IDs and TLS-presentation encoding
 
@@ -178,10 +193,15 @@ and targets the draft plus the MTC-with-tlog profile
 - **§7.1.2 account resource** — `POST /account/{id}` serves the account
   object (POST-as-GET) with the required `orders` member, and
   `POST /account/{id}/orders` serves the orders list.
-- **§7.4 finalize** — atomic ready→processing claim with `orderNotReady`
-  for the race loser, `badCSR` mapping for CSR errors, and rejection of a
-  malformed `notBefore`/`notAfter` (RFC 3339) with `malformed`. The order
-  moves to `valid` once its entry is sequenced (MTC §9).
+- **§7.4 finalize** — the request body and CSR are parsed before the
+  atomic ready→processing claim, so a malformed finalize never strands
+  the order in `processing` (§7.1.6); the race loser gets `orderNotReady`,
+  CSR errors map to `badCSR`, and a malformed `notBefore`/`notAfter`
+  (RFC 3339) is rejected with `malformed`. The order moves to `valid`
+  once its entry is sequenced (MTC §9).
+- **Object fields** — a `valid` challenge carries `validated` (§8), a
+  `valid` authorization carries `expires` (§7.1.4), and an `invalid`
+  order or challenge carries an `error` problem document (§7.1.6/§8).
 - **§9 download extensions** — the `CertificatePropertyList` carries the
   `trust_anchor_id`, the alternate URL returns 503 + Retry-After until a
   covering landmark exists and the landmark-relative certificate
@@ -207,8 +227,9 @@ and targets the draft plus the MTC-with-tlog profile
   is relevant only to ECDSA ACME account keys handled by go-jose.
 - **Log pruning** (MTC §5.2.3 / the profile's pruning rules) is not
   implemented.
-- **Revocation by serial range** (§7.5) carries the data model but only a
-  stub list.
+- **Revocation by serial range** (§7.5) is enforced during verification
+  (§7.2 step 4, seeded from the CA cert's `minSerial`); ingesting
+  additional revoked ranges out-of-band is not implemented.
 - **Account update / deactivation** (RFC 8555 §7.3.2/§7.3.6) is not
   implemented; the account resource is read-only beyond creation.
 - **DN SET-OF ordering** (`cert/dn.go`) is correct by single-element

@@ -2,6 +2,7 @@ package tilewriter
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"testing"
 
 	"github.com/letsencrypt/cactus/storage"
@@ -30,9 +31,11 @@ func TestEmptyTreeRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var zero tlog.Hash
-	if root != zero {
-		t.Errorf("RootHash = %x, want zero", root)
+	// RFC 6962 / RFC 9162 §2.1: the empty-tree hash is SHA-256(""), not
+	// the zero hash.
+	want := tlog.Hash(sha256.Sum256(nil))
+	if root != want {
+		t.Errorf("RootHash = %x, want %x (SHA-256 of empty)", root, want)
 	}
 }
 

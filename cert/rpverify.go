@@ -72,6 +72,12 @@ func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
 	if err != nil {
 		return RelyingPartyConfig{}, err
 	}
+	// Verification is SHA-256-only, so reject (fail closed) a CA cert
+	// that advertises any other log hash rather than silently verifying
+	// it as SHA-256.
+	if !ca.LogHash.Equal(OIDDigestSHA256) {
+		return RelyingPartyConfig{}, fmt.Errorf("cert: unsupported log hash %v (only id-sha256 is supported)", ca.LogHash)
+	}
 	caID, err := parseCANameDN(subjectDN)
 	if err != nil {
 		return RelyingPartyConfig{}, fmt.Errorf("cert: CA certificate subject: %w", err)

@@ -238,9 +238,14 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		if [4]byte(raw[:4]) != wantKeyID {
 			continue // same name, different key ID: not our key.
 		}
-		_, rawSig, err := ParseTimestampedSignature(raw[4:])
+		ts, rawSig, err := ParseTimestampedSignature(raw[4:])
 		if err != nil {
 			return MTCSignature{}, err
+		}
+		// Subtree cosignatures MUST carry a zero timestamp
+		// (c2sp.org/tlog-witness / tlog-cosignature).
+		if ts != 0 {
+			return MTCSignature{}, fmt.Errorf("cert: mirror cosignature has non-zero timestamp %d", ts)
 		}
 		// Verify against the §5.3.1 CosignedMessage.
 		msg, err := MarshalSignatureInput(m.Key.ID, subtree)

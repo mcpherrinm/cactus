@@ -577,15 +577,18 @@ func (s *Server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 	// state.Update* takes the same mutex, so we must release the
 	// authz lock before acquiring the challenge lock.
 	if s.cfg.ChallengeMode == ChallengeAutoPass {
+		now := time.Now().UTC()
 		for _, aid := range o.AuthzIDs {
 			var challIDs []string
 			s.state.UpdateAuthz(aid, func(a *authz) {
 				a.Status = "valid"
+				a.Expires = now.Add(s.cfg.OrderLifetime)
 				challIDs = append([]string(nil), a.ChallIDs...)
 			})
 			for _, cid := range challIDs {
 				s.state.UpdateChallenge(cid, func(c *challenge) {
 					c.Status = "valid"
+					c.Validated = now
 				})
 			}
 		}
@@ -620,7 +623,29 @@ func (s *Server) orderJSON(o *order) OrderResp {
 	if o.CertificateID != "" {
 		resp.Certificate = s.urlFor("/cert/" + o.CertificateID)
 	}
+	if o.Error != nil {
+		resp.Error = o.Error
+	}
 	return resp
+}
+
+// challengeMsg renders a challenge as its wire object, including the
+// `validated` timestamp on valid challenges (RFC 8555 §8) and the
+// `error` problem document on invalid ones.
+func (s *Server) challengeMsg(c *challenge) ChallengeMsg {
+	msg := ChallengeMsg{
+		Type:   c.Type,
+		Status: c.Status,
+		URL:    s.urlFor("/chall/" + c.ID),
+		Token:  c.Token,
+	}
+	if c.Status == "valid" && !c.Validated.IsZero() {
+		msg.Validated = c.Validated.UTC().Format(time.RFC3339)
+	}
+	if c.Status == "invalid" {
+		msg.Error = c.Error
+	}
+	return msg
 }
 
 func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
@@ -638,17 +663,15 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 		Status:     a.Status,
 		Identifier: a.Identifier,
 	}
+	if a.Status == "valid" && !a.Expires.IsZero() {
+		resp.Expires = a.Expires.UTC().Format(time.RFC3339)
+	}
 	for _, cid := range a.ChallIDs {
 		c, ok := s.state.GetChallenge(cid)
 		if !ok {
 			continue
 		}
-		resp.Challenges = append(resp.Challenges, ChallengeMsg{
-			Type:   c.Type,
-			Status: c.Status,
-			URL:    s.urlFor("/chall/" + c.ID),
-			Token:  c.Token,
-		})
+		resp.Challenges = append(resp.Challenges, s.challengeMsg(c))
 	}
 	s.issueNonce(w)
 	w.Header().Set("Content-Type", "application/json")
@@ -675,13 +698,28 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.attemptHTTP01(c, az, acct); err != nil {
-			s.state.UpdateChallenge(c.ID, func(ch *challenge) { ch.Status = "invalid" })
-			s.problem(w, http.StatusForbidden, "urn:ietf:params:acme:error:incorrectResponse", err.Error())
+			prob := &Problem{
+				Type:   "urn:ietf:params:acme:error:incorrectResponse",
+				Detail: err.Error(),
+				Status: http.StatusForbidden,
+			}
+			s.state.UpdateChallenge(c.ID, func(ch *challenge) {
+				ch.Status = "invalid"
+				ch.Error = prob
+			})
+			s.problem(w, prob.Status, prob.Type, prob.Detail)
 			return
 		}
-		s.state.UpdateChallenge(c.ID, func(ch *challenge) { ch.Status = "valid" })
+		now := time.Now().UTC()
+		s.state.UpdateChallenge(c.ID, func(ch *challenge) {
+			ch.Status = "valid"
+			ch.Validated = now
+		})
 		// Authz is valid if any of its challenges is valid.
-		s.state.UpdateAuthz(az.ID, func(a *authz) { a.Status = "valid" })
+		s.state.UpdateAuthz(az.ID, func(a *authz) {
+			a.Status = "valid"
+			a.Expires = now.Add(s.cfg.OrderLifetime)
+		})
 		// Order moves to ready when all authzs are valid.
 		s.maybeOrderReady(az.OrderID)
 		// Refresh c after the update.
@@ -690,12 +728,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 
 	s.issueNonce(w)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(ChallengeMsg{
-		Type:   c.Type,
-		Status: c.Status,
-		URL:    s.urlFor("/chall/" + c.ID),
-		Token:  c.Token,
-	})
+	_ = json.NewEncoder(w).Encode(s.challengeMsg(c))
 }
 
 // attemptHTTP01 fetches http://{identifier}/.well-known/acme-challenge/{token}
@@ -839,20 +872,11 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	// Atomic ready→processing claim. The loser of a finalize race
-	// gets "orderNotReady"; the order remains valid because the winner
-	// will produce the cert.
-	o, claimed := s.state.TryClaimReadyOrder(id)
-	if o == nil {
-		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no order")
-		return
-	}
-	if !claimed {
-		s.problem(w, http.StatusForbidden, "urn:ietf:params:acme:error:orderNotReady",
-			fmt.Sprintf("order is %s", o.Status))
-		return
-	}
 
+	// Parse and validate the request body and CSR before mutating any
+	// order state, so a malformed finalize can never strand the order
+	// in "processing" (RFC 8555 §7.1.6: a processing order only advances
+	// to valid/invalid, so the client could otherwise never retry).
 	var req FinalizeReq
 	if err := json.Unmarshal(parsed.Payload, &req); err != nil {
 		s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:malformed", "bad payload")
@@ -866,6 +890,20 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	csr, err := x509.ParseCertificateRequest(csrDER)
 	if err != nil {
 		s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:badCSR", err.Error())
+		return
+	}
+
+	// Atomic ready→processing claim. The loser of a finalize race
+	// gets "orderNotReady"; the order remains valid because the winner
+	// will produce the cert.
+	o, claimed := s.state.TryClaimReadyOrder(id)
+	if o == nil {
+		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no order")
+		return
+	}
+	if !claimed {
+		s.problem(w, http.StatusForbidden, "urn:ietf:params:acme:error:orderNotReady",
+			fmt.Sprintf("order is %s", o.Status))
 		return
 	}
 
@@ -891,17 +929,27 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	der, err := s.cfg.Issuer.Issue(ctx, csr, orderInput)
 	if err != nil {
-		s.state.UpdateOrder(o.ID, func(o *order) { o.Status = "invalid" })
+		// CSR/order mismatches surface as ca.ErrBadCSR; map to the
+		// RFC 8555 §7.4 badCSR error type, otherwise serverInternal.
+		prob := &Problem{
+			Type:   "urn:ietf:params:acme:error:serverInternal",
+			Detail: err.Error(),
+			Status: http.StatusInternalServerError,
+		}
+		if errors.Is(err, ca.ErrBadCSR) {
+			prob.Type = "urn:ietf:params:acme:error:badCSR"
+			prob.Status = http.StatusBadRequest
+		}
+		// Record the error on the order (RFC 8555 §7.1.6: an invalid
+		// order SHOULD carry an error problem document).
+		s.state.UpdateOrder(o.ID, func(o *order) {
+			o.Status = "invalid"
+			o.Error = prob
+		})
 		if s.cfg.OrdersByStatus != nil {
 			s.cfg.OrdersByStatus.WithLabelValues("invalid").Add(1)
 		}
-		// CSR/order mismatches surface as ca.ErrBadCSR; map to the
-		// RFC 8555 §7.4 badCSR error type.
-		if errors.Is(err, ca.ErrBadCSR) {
-			s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:badCSR", err.Error())
-			return
-		}
-		s.problem(w, http.StatusInternalServerError, "urn:ietf:params:acme:error:serverInternal", err.Error())
+		s.problem(w, prob.Status, prob.Type, prob.Detail)
 		return
 	}
 

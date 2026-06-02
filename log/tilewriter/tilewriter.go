@@ -13,6 +13,7 @@
 package tilewriter
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -65,11 +66,12 @@ func New(fs storage.FS) (*TileWriter, error) {
 // Size returns the current tree size (number of entries).
 func (w *TileWriter) Size() int64 { return w.size }
 
-// RootHash returns the Merkle tree hash at the current size, or the
-// zero Hash if size==0.
+// RootHash returns the Merkle tree hash at the current size. For an
+// empty tree it returns the RFC 6962 empty-tree hash SHA-256(""), as
+// required by tlog-checkpoint / RFC 9162 §2.1 (not the zero hash).
 func (w *TileWriter) RootHash() (tlog.Hash, error) {
 	if w.size == 0 {
-		return tlog.Hash{}, nil
+		return tlog.Hash(sha256.Sum256(nil)), nil
 	}
 	return tlog.TreeHash(w.size, hashReader(w.hashes))
 }

@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/letsencrypt/cactus/cert"
@@ -39,7 +38,7 @@ func parseSignedNote(data []byte, expectKey string) (
 	if len(bodyLines) != 3 {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("mirror: %d body lines, want 3", len(bodyLines))
 	}
-	size, err = strconv.ParseUint(bodyLines[1], 10, 64)
+	size, err = parseCanonicalDecimal(bodyLines[1])
 	if err != nil {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("mirror: bad size: %w", err)
 	}

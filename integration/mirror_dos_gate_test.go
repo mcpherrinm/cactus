@@ -22,8 +22,8 @@ import (
 
 // TestMirrorRequireCASignatureGate covers the DoS-mitigation gate
 // in mirror.Server. With RequireCASignatureOnSubtree=true:
-//   - A request lacking the CA's signature on the subtree note → 400.
-//   - A request whose CA-sig fails verification → 400.
+//   - A request lacking the CA's signature on the subtree note → 403.
+//   - A request whose CA-sig fails verification → 403.
 //   - A request with a valid CA-sig → 200, signature returned.
 func TestMirrorRequireCASignatureGate(t *testing.T) {
 	ca := bringUp(t, t.TempDir())
@@ -101,8 +101,8 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp1.Body.Close()
-	if resp1.StatusCode != http.StatusBadRequest {
-		t.Errorf("no-CA-sig: status = %d, want 400", resp1.StatusCode)
+	if resp1.StatusCode != http.StatusForbidden {
+		t.Errorf("no-CA-sig: status = %d, want 403", resp1.StatusCode)
 	}
 
 	// (2) Request with a *bogus* CA signature (right key ID, corrupt
@@ -115,8 +115,8 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusBadRequest {
-		t.Errorf("bogus-CA-sig: status = %d, want 400", resp2.StatusCode)
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("bogus-CA-sig: status = %d, want 403", resp2.StatusCode)
 	}
 
 	// (3) Request with a *real* CA signature on the subtree → 200.

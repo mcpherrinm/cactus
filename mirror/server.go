@@ -149,10 +149,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3) DoS mitigation: a valid CA subtree cosignature must be present.
+	// A missing/invalid gate cosignature is an authorization failure, so
+	// it returns 403 (distinct from the 400 used for a malformed body).
 	if s.cfg.RequireCASignatureOnSubtree {
 		if err := s.verifyCAOnSubtree(parsed); err != nil {
 			result = "ca_sig_error"
-			http.Error(w, "CA signature on subtree: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "CA signature on subtree: "+err.Error(), http.StatusForbidden)
 			return
 		}
 	}
@@ -259,6 +261,17 @@ type parsedRequest struct {
 //	...
 //	<empty line>
 //	<reference checkpoint>
+//
+// parseCanonicalDecimal parses an unsigned ASCII decimal with no leading
+// zeros, as the c2sp.org/tlog-witness and tlog-checkpoint formats require
+// (strconv.ParseUint alone would accept "007").
+func parseCanonicalDecimal(s string) (uint64, error) {
+	if len(s) > 1 && s[0] == '0' {
+		return 0, fmt.Errorf("non-canonical decimal %q (leading zero)", s)
+	}
+	return strconv.ParseUint(s, 10, 64)
+}
+
 func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	r := bufio.NewReader(bytes.NewReader(body))
 
@@ -271,11 +284,11 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	if len(fields) != 3 || fields[0] != "subtree" {
 		return nil, fmt.Errorf("malformed subtree range line %q", rangeLine)
 	}
-	start, err := strconv.ParseUint(fields[1], 10, 64)
+	start, err := parseCanonicalDecimal(fields[1])
 	if err != nil {
 		return nil, fmt.Errorf("subtree start: %w", err)
 	}
-	end, err := strconv.ParseUint(fields[2], 10, 64)
+	end, err := parseCanonicalDecimal(fields[2])
 	if err != nil {
 		return nil, fmt.Errorf("subtree end: %w", err)
 	}
@@ -349,10 +362,14 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint note: %w", err)
 	}
+	// c2sp.org/tlog-witness: at most 8 checkpoint signatures.
+	if len(checkpointNote.sigs) > 8 {
+		return nil, fmt.Errorf("checkpoint has %d signatures, max 8", len(checkpointNote.sigs))
+	}
 	if len(checkpointNote.body) != 3 {
 		return nil, fmt.Errorf("checkpoint note has %d body lines, want 3", len(checkpointNote.body))
 	}
-	cpSize, err := strconv.ParseUint(checkpointNote.body[1], 10, 64)
+	cpSize, err := parseCanonicalDecimal(checkpointNote.body[1])
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint size: %w", err)
 	}
@@ -398,10 +415,16 @@ func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
 		if len(c.sigBytes) < 4 || [4]byte(c.sigBytes[:4]) != wantKeyID {
 			continue // same name, different key ID: ignore.
 		}
-		_, rawSig, err = cert.ParseTimestampedSignature(c.sigBytes[4:])
-		if err != nil {
-			return fmt.Errorf("CA subtree cosignature: %w", err)
+		ts, sig, perr := cert.ParseTimestampedSignature(c.sigBytes[4:])
+		if perr != nil {
+			return fmt.Errorf("CA subtree cosignature: %w", perr)
 		}
+		// Subtree cosignatures MUST carry a zero timestamp
+		// (c2sp.org/tlog-witness / tlog-cosignature).
+		if ts != 0 {
+			return fmt.Errorf("CA subtree cosignature has non-zero timestamp %d", ts)
+		}
+		rawSig = sig
 		break
 	}
 	if rawSig == nil {

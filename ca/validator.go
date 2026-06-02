@@ -127,7 +127,7 @@ func (v *Validator) Validate(csr *x509.CertificateRequest, order OrderInput) (*V
 		return nil, fmt.Errorf("extract SPKI algorithm: %w", err)
 	}
 
-	extensions, err := buildExtensionsFromCSR(csr)
+	extensions, err := buildExtensionsFromCSR(csr, len(csr.RawSubject) == 0)
 	if err != nil {
 		return nil, fmt.Errorf("build extensions: %w", err)
 	}
@@ -196,28 +196,75 @@ func extractFirstElement(data []byte) ([]byte, error) {
 	return first.FullBytes, nil
 }
 
+// Extension OIDs cactus will copy from a CSR onto a leaf certificate.
+// Anything outside this allow-list (basic constraints, the
+// id-pe-mtcCertificationAuthority extension, private extensions, etc.)
+// is dropped so a subscriber cannot self-elevate via CSR contents.
+var (
+	oidExtSubjectAltName  = asn1.ObjectIdentifier{2, 5, 29, 17}
+	oidExtKeyUsage        = asn1.ObjectIdentifier{2, 5, 29, 15}
+	oidExtExtKeyUsage     = asn1.ObjectIdentifier{2, 5, 29, 37}
+	leafExtensionAllowSet = []asn1.ObjectIdentifier{
+		oidExtSubjectAltName, oidExtKeyUsage, oidExtExtKeyUsage,
+	}
+)
+
+func leafExtensionAllowed(id asn1.ObjectIdentifier) bool {
+	for _, a := range leafExtensionAllowSet {
+		if a.Equal(id) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildExtensionsFromCSR returns the DER of the EXPLICIT [3] Extensions
-// wrapper for a CSR's extensions. We re-emit each extension verbatim
-// from the CSR (which preserves DER from the request), filtering out
-// any that don't belong on a leaf cert (none currently filtered).
+// wrapper for a CSR's extensions. Each extension is re-emitted verbatim
+// from the CSR (which preserves the request DER), but only the
+// leaf-appropriate ones (leafExtensionAllowSet) are carried; the rest
+// are dropped. Duplicate extension OIDs are rejected (RFC 5280 §4.2).
+// When subjectEmpty is true, the subjectAltName extension is forced
+// critical (RFC 5280 §4.1.2.6).
 //
 // The returned bytes are the *value contents* of the EXPLICIT [3]
 // wrapper — i.e. the SEQUENCE-of-Extension DER itself, ready to be
 // dropped into TBSCertificateLogEntry.Extensions or
 // TBSCertificate.extensions.
-func buildExtensionsFromCSR(csr *x509.CertificateRequest) ([]byte, error) {
+func buildExtensionsFromCSR(csr *x509.CertificateRequest, subjectEmpty bool) ([]byte, error) {
 	if len(csr.Extensions) == 0 {
+		if subjectEmpty {
+			return nil, fmt.Errorf("%w: empty subject requires a subjectAltName extension", ErrBadCSR)
+		}
 		return nil, nil
 	}
-	// Sort by OID for determinism.
+	seen := make(map[string]bool, len(csr.Extensions))
 	exts := make([]pkix_Extension, 0, len(csr.Extensions))
+	sawSAN := false
 	for _, e := range csr.Extensions {
+		if seen[e.Id.String()] {
+			return nil, fmt.Errorf("%w: duplicate extension %v", ErrBadCSR, e.Id)
+		}
+		seen[e.Id.String()] = true
+		if !leafExtensionAllowed(e.Id) {
+			continue // drop extensions that don't belong on a leaf
+		}
+		critical := e.Critical
+		if e.Id.Equal(oidExtSubjectAltName) {
+			sawSAN = true
+			if subjectEmpty {
+				critical = true // RFC 5280 §4.1.2.6
+			}
+		}
 		exts = append(exts, pkix_Extension{
 			ID:       e.Id,
-			Critical: e.Critical,
+			Critical: critical,
 			Value:    e.Value,
 		})
 	}
+	if subjectEmpty && !sawSAN {
+		return nil, fmt.Errorf("%w: empty subject requires a subjectAltName extension", ErrBadCSR)
+	}
+	// Sort by OID for determinism.
 	sort.Slice(exts, func(i, j int) bool {
 		return oidLess(exts[i].ID, exts[j].ID)
 	})

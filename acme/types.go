@@ -71,6 +71,7 @@ type OrderResp struct {
 	Certificate    string       `json:"certificate,omitempty"`
 	NotBefore      string       `json:"notBefore,omitempty"`
 	NotAfter       string       `json:"notAfter,omitempty"`
+	Error          *Problem     `json:"error,omitempty"`
 }
 
 // AuthzResp is the body returned for an authorization.
@@ -83,11 +84,12 @@ type AuthzResp struct {
 
 // ChallengeMsg is a single challenge in an authz.
 type ChallengeMsg struct {
-	Type      string `json:"type"`
-	Status    string `json:"status"`
-	URL       string `json:"url"`
-	Token     string `json:"token,omitempty"`
-	Validated string `json:"validated,omitempty"`
+	Type      string   `json:"type"`
+	Status    string   `json:"status"`
+	URL       string   `json:"url"`
+	Token     string   `json:"token,omitempty"`
+	Validated string   `json:"validated,omitempty"`
+	Error     *Problem `json:"error,omitempty"`
 }
 
 // FinalizeReq is the payload for the finalize endpoint.
@@ -151,7 +153,8 @@ type order struct {
 	AuthzIDs      []string
 	NotBefore     time.Time
 	NotAfter      time.Time
-	CertificateID string // populated after issuance
+	CertificateID string   // populated after issuance
+	Error         *Problem // set when Status == "invalid" (RFC 8555 §7.1.6)
 }
 
 type authz struct {
@@ -160,12 +163,15 @@ type authz struct {
 	Status     string
 	Identifier Identifier
 	ChallIDs   []string
+	Expires    time.Time // set when Status == "valid" (RFC 8555 §7.1.4)
 }
 
 type challenge struct {
-	ID      string
-	AuthzID string
-	Type    string
-	Status  string
-	Token   string
+	ID        string
+	AuthzID   string
+	Type      string
+	Status    string
+	Token     string
+	Validated time.Time // set when Status == "valid" (RFC 8555 §8)
+	Error     *Problem  // set when Status == "invalid" (RFC 8555 §8)
 }
