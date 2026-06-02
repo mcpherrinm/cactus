@@ -303,7 +303,7 @@ ceil(168) + 1 = 169` ⇒ ~10 KiB of relying party state per CA. See
     "tile_url": "https://upstream.example/log",
     "log_id": "1.3.6.1.4.1.44363.47.1.99.0.1",
     "ca_cosigner_id": "1.3.6.1.4.1.44363.47.1.99",
-    "ca_cosigner_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+    "ca_cosigner_key_path": "keys/ca-cosigner.pub.pem",
     "ca_cosigner_algorithm": "mldsa-44",
     "poll_interval_ms": 1000
   },
@@ -331,7 +331,7 @@ subtree cosignature it requires must likewise be ML-DSA-44.
       "id": "example.mirror.1",
       "url": "https://mirror-1.example/sign-subtree",
       "algorithm": "mldsa-44",
-      "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"
+      "public_key_path": "keys/mirror-1.pub.pem"
     }
   ],
   "min_signatures": 1,

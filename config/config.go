@@ -48,10 +48,13 @@ func (c CACosignerQuorum) RetryDeadline() time.Duration {
 
 // MirrorEndpointConfig is one mirror the CA fans out to.
 type MirrorEndpointConfig struct {
-	ID           string `json:"id"`
-	URL          string `json:"url"`
-	Algorithm    string `json:"algorithm"`
-	PublicKeyPEM string `json:"public_key_pem"`
+	ID        string `json:"id"`
+	URL       string `json:"url"`
+	Algorithm string `json:"algorithm"`
+	// PublicKeyPath points to a PEM "PUBLIC KEY" file holding the mirror's
+	// cosigner key, resolved relative to data_dir. The PEM body is the raw
+	// ML-DSA-44 public key.
+	PublicKeyPath string `json:"public_key_path"`
 }
 
 // MirrorConfig configures cactus's mirror operating mode.
@@ -70,11 +73,14 @@ type MirrorConfig struct {
 
 // UpstreamConfig describes the log being mirrored.
 type UpstreamConfig struct {
-	TileURL          string `json:"tile_url"`
-	LogID            string `json:"log_id"`
-	CACosignerID     string `json:"ca_cosigner_id"`
-	CACosignerKeyPEM string `json:"ca_cosigner_key_pem"` // PEM block; body is the raw ML-DSA-44 public key
-	PollIntervalMS   int    `json:"poll_interval_ms"`
+	TileURL      string `json:"tile_url"`
+	LogID        string `json:"log_id"`
+	CACosignerID string `json:"ca_cosigner_id"`
+	// CACosignerKeyPath points to a PEM "PUBLIC KEY" file holding the
+	// upstream CA cosigner's key, resolved relative to data_dir. The PEM
+	// body is the raw ML-DSA-44 public key.
+	CACosignerKeyPath string `json:"ca_cosigner_key_path"`
+	PollIntervalMS    int    `json:"poll_interval_ms"`
 }
 
 // PollInterval is a typed-time accessor.
@@ -287,8 +293,8 @@ func (c *Config) Validate() error {
 			if m.Algorithm == "" {
 				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].algorithm required", i)
 			}
-			if m.PublicKeyPEM == "" {
-				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].public_key_pem required", i)
+			if m.PublicKeyPath == "" {
+				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].public_key_path required", i)
 			}
 		}
 	}
@@ -323,8 +329,8 @@ func (c *Config) Validate() error {
 		if c.Mirror.Upstream.CACosignerID == "" {
 			return fmt.Errorf("mirror.upstream.ca_cosigner_id required")
 		}
-		if c.Mirror.Upstream.CACosignerKeyPEM == "" {
-			return fmt.Errorf("mirror.upstream.ca_cosigner_key_pem required")
+		if c.Mirror.Upstream.CACosignerKeyPath == "" {
+			return fmt.Errorf("mirror.upstream.ca_cosigner_key_path required")
 		}
 		if c.Mirror.Upstream.PollIntervalMS <= 0 {
 			return fmt.Errorf("mirror.upstream.poll_interval_ms must be > 0")

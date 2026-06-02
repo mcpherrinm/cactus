@@ -75,17 +75,18 @@ func (a caMirrorRequestsAdapter) WithLabelValues(lvs ...string) cert.Counter {
 }
 
 // buildMirrorEndpoints converts the per-mirror config slice into the
-// cert.MirrorEndpoint shape, parsing each public key from PEM.
-func buildMirrorEndpoints(mirrors []config.MirrorEndpointConfig) ([]cert.MirrorEndpoint, error) {
+// cert.MirrorEndpoint shape, loading each public key from its PEM file
+// (resolved relative to dataDir).
+func buildMirrorEndpoints(mirrors []config.MirrorEndpointConfig, dataDir string) ([]cert.MirrorEndpoint, error) {
 	out := make([]cert.MirrorEndpoint, 0, len(mirrors))
 	for i, m := range mirrors {
 		alg, err := signer.ParseAlgorithm(m.Algorithm)
 		if err != nil {
 			return nil, fmt.Errorf("mirrors[%d]: %w", i, err)
 		}
-		key, err := parsePEMSPKI(m.PublicKeyPEM)
+		key, err := loadPEMSPKI(filepath.Join(dataDir, m.PublicKeyPath))
 		if err != nil {
-			return nil, fmt.Errorf("mirrors[%d] public_key_pem: %w", i, err)
+			return nil, fmt.Errorf("mirrors[%d] public_key_path: %w", i, err)
 		}
 		out = append(out, cert.MirrorEndpoint{
 			URL: m.URL,
@@ -240,7 +241,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		}
 	}
 	if len(cfg.CACosignerQuorum.Mirrors) > 0 {
-		endpoints, err := buildMirrorEndpoints(cfg.CACosignerQuorum.Mirrors)
+		endpoints, err := buildMirrorEndpoints(cfg.CACosignerQuorum.Mirrors, cfg.DataDir)
 		if err != nil {
 			return fmt.Errorf("ca_cosigner_quorum: %w", err)
 		}
@@ -482,9 +483,9 @@ func startMirror(
 		return nil, fmt.Errorf("mirror signer: %w", err)
 	}
 
-	upstreamKey, err := parsePEMSPKI(cfg.Mirror.Upstream.CACosignerKeyPEM)
+	upstreamKey, err := loadPEMSPKI(filepath.Join(cfg.DataDir, cfg.Mirror.Upstream.CACosignerKeyPath))
 	if err != nil {
-		return nil, fmt.Errorf("upstream ca_cosigner_key_pem: %w", err)
+		return nil, fmt.Errorf("upstream ca_cosigner_key_path: %w", err)
 	}
 
 	follower, err := mirror.NewFollower(mirror.FollowerConfig{
@@ -543,6 +544,16 @@ func startMirror(
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 * 1024,
 	}, nil
+}
+
+// loadPEMSPKI reads a PEM SubjectPublicKeyInfo file from path and
+// returns the inner DER bytes that mirror.Upstream.CACosignerKey expects.
+func loadPEMSPKI(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read public key %q: %w", path, err)
+	}
+	return parsePEMSPKI(string(data))
 }
 
 // parsePEMSPKI accepts a PEM SubjectPublicKeyInfo block and returns

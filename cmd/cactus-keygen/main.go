@@ -3,9 +3,9 @@
 // block. The seed is used by the cactus server to derive its cosigner
 // private key via HKDF (see signer/signer.go); the public key is what
 // other components configure to verify that cosigner — a mirror's
-// upstream.ca_cosigner_key_pem or a CA quorum mirror's public_key_pem.
-// Those config fields take a PEM block whose body is the raw public key,
-// which is exactly what -pub emits.
+// upstream.ca_cosigner_key_path or a CA quorum mirror's public_key_path.
+// Those config fields point at a PEM file whose body is the raw public
+// key, which is exactly what -pub emits; redirect it to a .pem file.
 package main
 
 import (

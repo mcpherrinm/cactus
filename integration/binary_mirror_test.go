@@ -79,13 +79,18 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 	}
 
 	// PEM-wrap the CA's raw ML-DSA-44 public key for the mirror config
-	// (parsePEMSPKI returns the PEM body verbatim, which for ML-DSA is the
+	// (loadPEMSPKI returns the PEM body verbatim, which for ML-DSA is the
 	// raw FIPS 204 key the verifier expects).
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: caSigner.PublicKey()})
 
 	// Mirror binary.
 	mDataDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(mDataDir, "keys"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The upstream CA cosigner key is loaded from a PEM file resolved
+	// relative to data_dir.
+	if err := os.WriteFile(filepath.Join(mDataDir, "keys", "ca-cosigner.pub.pem"), pubPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	mAcmePort, mMonPort, mMetricsPort, mSignPort := freePort(t), freePort(t), freePort(t), freePort(t)
@@ -106,10 +111,10 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 			// draft-04 §5.2: the upstream log ID is the CA ID with the
 			// log number appended (CA-ID.0.1); the CA cosigner ID is the
 			// CA ID (§5.4).
-			"log_id":              "44363.47.1.99.0.1",
-			"ca_cosigner_id":      "44363.47.1.99",
-			"ca_cosigner_key_pem": string(pubPEM),
-			"poll_interval_ms":    100,
+			"log_id":               "44363.47.1.99.0.1",
+			"ca_cosigner_id":       "44363.47.1.99",
+			"ca_cosigner_key_path": "keys/ca-cosigner.pub.pem",
+			"poll_interval_ms":     100,
 		},
 	}
 	b, _ := json.MarshalIndent(mCfg, "", "  ")

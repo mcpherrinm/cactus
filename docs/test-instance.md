@@ -64,14 +64,13 @@ mkdir -p "$DATA_DIR/keys"
 cp config-witness-example.json config.json
 sed -i "s|/tmp/cactus-data|$DATA_DIR|" config.json
 
-# 4. Fill in the two public keys. `-pub` prints the PEM block whose body
-#    is the raw public key — exactly what the config fields take.
-#    - ca_cosigner.seed  -> mirror.upstream.ca_cosigner_key_pem
-#    - witness seed       -> ca_cosigner_quorum.mirrors[0].public_key_pem
-./bin/cactus-keygen -pub -o "$DATA_DIR/keys/ca-cosigner.seed"
-./bin/cactus-keygen -pub -o "$DATA_DIR/keys/witness-cosigner.seed"
-# Paste each PEM into the matching field of config.json (a JSON string,
-# newlines escaped as \n, ending in \n).
+# 4. Export the two public keys. `-pub` prints the PEM block whose body
+#    is the raw public key; write each to the .pem file the config points
+#    at (paths are resolved relative to data_dir).
+#    - ca_cosigner.seed  -> mirror.upstream.ca_cosigner_key_path
+#    - witness seed       -> ca_cosigner_quorum.mirrors[0].public_key_path
+./bin/cactus-keygen -pub -o "$DATA_DIR/keys/ca-cosigner.seed" > "$DATA_DIR/keys/ca-cosigner.pub.pem"
+./bin/cactus-keygen -pub -o "$DATA_DIR/keys/witness-cosigner.seed" > "$DATA_DIR/keys/witness-cosigner.pub.pem"
 
 # 5. Run.
 ./bin/cactus -config config.json
