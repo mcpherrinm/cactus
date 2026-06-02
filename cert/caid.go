@@ -6,17 +6,19 @@ import "fmt"
 // identifier model. A CA has a single CA ID (a trust anchor ID). All
 // other identifiers — log IDs, landmark IDs, landmark group IDs — are
 // derived from it by appending OID components. cactus stores trust
-// anchor IDs as full dotted-decimal OID strings (e.g.
-// "1.3.6.1.4.1.44363.47.1.99"), so derivation is string concatenation
-// of dotted components.
+// anchor IDs in the relative dotted-decimal form (e.g. "44363.47.1.99",
+// the arcs below the 1.3.6.1.4.1 enterprise base), so derivation is
+// string concatenation of dotted components. See TrustAnchorID and
+// OIDName for how the form maps to the wire and to "oid/" names.
 
 // MaxLogNumber is the largest permitted log number (§5.2: at most
-// 2^16-1). Log numbers start at 1.
+// 2^16-1). Log numbers start at 1. The ceiling is enforced by the
+// uint16 type used for log numbers throughout (config and LogID).
 const MaxLogNumber = 1<<16 - 1
 
 // LogID derives an issuance log's log ID from the CA ID and log number
 // per §5.2: logID = CA-ID ‖ 0 ‖ logNumber. logNumber MUST be in
-// [1, 65535].
+// [1, MaxLogNumber]; the upper bound holds by construction (uint16).
 func LogID(caID TrustAnchorID, logNumber uint16) (TrustAnchorID, error) {
 	if logNumber == 0 {
 		return nil, fmt.Errorf("cert: log number must be >= 1")

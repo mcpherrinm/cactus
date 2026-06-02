@@ -1,264 +1,278 @@
 # Cactus literature review
 
-**Date:** 2026-05-04. **Scope:** every normative reference in
-`draft-ietf-plants-merkle-tree-certs-04` §14.1, plus the draft itself.
+**Date:** 2026-06-02. **Scope:** every spec cactus depends on, as
+catalogued in `specs/README.md` — the MTC draft and its tiled-log
+profile, the C2SP transparency-log specs, the X.509 / PKIX stack, the
+NIST algorithm standards, and the ACME / TLS / HTTP layer.
 
-This is a snapshot review: per-spec relevance, findings, fixes that
-landed in this pass, and findings deferred for later. The 17 fetched
-specs live in `specs/`.
+This is a snapshot review: per-spec relevance, the conformance fixes
+that landed in this pass, deliberate choices and known gaps, and the
+implementation status of the MTC sections. Cactus is ML-DSA-44-only
+(no ECDSA), builds on Go 1.27's `crypto/mldsa`, and targets
+draft-ietf-plants-merkle-tree-certs-04 plus the MTC-with-tlog profile
+(`specs/mtc-tlog-draft.md`).
+
+Every conformance finding from the review (two interop SHOULD-FIXes,
+three smaller ACME/PKIX fixes, and the nits) was fixed in this pass; the
+full `-race` suite, the tagged integration tests, and the sign-subtree
+fuzzer are green afterwards.
 
 ## Method
 
-1. Pulled every normative reference cited in `draft-…-03` §14.1
-   (`specs/rfc*.txt`, `specs/draft-ietf-tls-trust-anchor-ids-03.txt`,
-   `specs/nist.fips.{180-4,186-5,204}.pdf`, `specs/x.690.pdf`).
-2. Spawned six parallel review agents, each owning one spec group:
-   ACME + HTTP, X.509 + ASN.1, Merkle / CT v2, Cryptography, MTC
-   draft proper, and a sweep of small/tangential refs.
-3. Each agent read the relevant spec sections and the specific
-   cactus packages they govern, then returned a punch list with
-   severities (BLOCKER / SHOULD-FIX / NIT / OK-NOTE).
-4. Consolidated findings, fixed the BLOCKER and SHOULD-FIX items
-   inline, captured the rest as deferred work.
+1. Grouped the vendored specs by the role they play in cactus (the
+   same grouping as `specs/README.md`).
+2. Spawned six parallel review agents, each owning one group: the MTC
+   draft + tlog profile + CT v2; the C2SP transparency-log specs; the
+   X.509 / PKIX / DER stack; the cryptographic algorithms; ACME + HTTP;
+   and the TLS-presentation / trust-anchor-IDs / encoding layer.
+3. Each agent read the relevant spec sections and the cactus packages
+   they govern, then returned a punch list with severities
+   (BLOCKER / SHOULD-FIX / NIT / OK-NOTE), each citing `file:line`.
+4. Consolidated and independently re-verified the two material interop
+   findings (the cosignature note-line layout and the property-list PEM
+   ordering) against the spec text and code.
+5. Fixed every finding, updated the tests that pinned the old wire
+   bytes, and re-ran the `-race`, integration, and fuzz suites.
 
 ## Per-spec relevance
 
+### Merkle Tree Certificates
+
 | Spec | Relevance | What cactus must honor |
 |---|---|---|
-| **draft-…-merkle-tree-certs-04** | Defines everything | Wire formats, OIDs, cert assembly, log/checkpoint signing inputs, ACME extension semantics, ASN.1 module |
-| **RFC 8555** (ACME) | High | §6 request signing/nonces/URL/Content-Type, §7 directory/account/order/finalize/cert resources, §8.1/§8.3 challenges |
-| **RFC 9162** (CT v2) | High | §2.1.1 leaf+internal hash domain separators (`0x00`/`0x01`), §2.1.3/§2.1.4 inclusion+consistency proof algorithms (specialised by MTC §4) |
-| **RFC 5280** (PKIX) | High | §4.1 TBSCertificate fields, §4.1.2.5 UTCTime/GeneralizedTime cutoff at year 2050, §4.1.2.2 serialNumber positivity+length, §4.2 extension criticality, §4.1.2.7 SPKI |
-| **X.690** (DER) | High | §8 BER, §10/§11 DER restrictions (definite-length, minimum-length, BIT STRING padding, SET ordering) |
-| **RFC 4648** (base64url) | High | §5 base64url, used by ACME JWS, JWK thumbprint (RFC 7638), CSR field |
-| **RFC 9110** (HTTP) | Medium | §10.2.3 Retry-After, §15.6.4 503, §12.5.1 Accept negotiation |
-| **FIPS 186-5** (DSS) | High | §6 ECDSA over P-256/P-384, Appendix A.2.1 rejection-sampled `k` |
-| **FIPS 180-4** (SHS) | High | §6.2 SHA-256 (used by Go stdlib via `crypto/sha256`) |
-| **FIPS 204** (ML-DSA) | Medium (Go 1.27+) | §3.4 / Algorithm 2 pure-mode prefix, deterministic mode |
-| **RFC 5912** (PKIX ASN.1) | Low | Source of `Validity`, `Name`, `Extensions`, `AlgorithmIdentifier` types imported by MTC §A.1 |
-| **draft-…-tls-trust-anchor-ids-03** | Medium | §3 binary representation of TrustAnchorID, §4.1 `opaque<1..2^8-1>` size cap, §6 CertificatePropertyList encoding |
-| **RFC 8446** (TLS 1.3) | Low | §3 presentation language is the wire-format basis MTC inherits |
-| **RFC 6960** (OCSP) | Trivial | Cited only in §10.4 to note that existing PKIX revocation continues to apply unchanged. Cactus does not implement OCSP. |
-| **RFC 3629** (UTF-8) | Trivial | Used implicitly when emitting UTF8String in DNs and in ACME JSON. |
-| **RFC 2119 / RFC 8174** | Trivial | Keyword-interpretation boilerplate. |
+| **draft-…-merkle-tree-certs-04** | Defines everything | §4 subtree math, §5 log entries/cosigners, §6 cert + landmark assembly, §7.2 verification, §9 ACME extensions, Appendix A ASN.1 |
+| **mtc-tlog-draft.md** (profile) | High | CA-prefix-URL serving, `/<log number>/` tlog-tiles layout, checkpoint origin = log ID as `oid/1.3.6.1.4.1.…`, cosigner-name derivation, `/landmarks` URL, ML-DSA-44-only cosigning |
+| **RFC 9162** (CT v2) | High | §2.1.1 leaf/interior hash prefixes (`0x00`/`0x01`) and the proof algorithms §4 specialises |
+
+### C2SP transparency-log specs
+
+| Spec | Relevance | What cactus must honor |
+|---|---|---|
+| **signed-note** | High | Signature-line format `base64(keyID ‖ signature)`; key-ID `SHA-256(name ‖ 0x0A ‖ sigType ‖ pubkey)[:4]` |
+| **tlog-checkpoint** | High | `/checkpoint` body: origin / size / base64 root |
+| **tlog-cosignature** | High | ML-DSA-44 `cosigned_message` (12-byte `subtree/v1\n\0` label); note-line `timestamped_signature` wrapper |
+| **tlog-tiles** | High | Tile path layout, `.p/<W>` partials, uint16-length-prefixed entry bundles, checkpoint endpoint |
+| **tlog-witness** (PR #245) | High | `POST /sign-subtree` request/response framing + the CA-signature DoS gate |
+| **tlog-mirror** | Medium | Follower consistency semantics (cactus uses a polling tile-follower, not the push API) |
+| **tlog-proof** | Low | Offline inclusion-proof format; cactus ships the equivalent inside the X.509 MTCProof instead |
+
+### X.509 / PKIX
+
+| Spec | Relevance | What cactus must honor |
+|---|---|---|
+| **RFC 5280** (PKIX) | High | §4.1.2.2 serial positivity/length, §4.1.2.5 UTCTime<2050 cutoff, §4.1.2.7 SPKI, §4.2 extension criticality |
+| **RFC 9881** (ML-DSA in PKIX) | High | `id-ml-dsa-44` OID, absent parameters, raw FIPS 204 key in the SPKI BIT STRING, pure-mode signatures |
+| **RFC 9925** (Unsigned X.509) | High | `id-alg-unsigned` + zero-length `signatureValue` on the CA certificate |
+| **X.690** (DER) | High | Definite/minimal lengths, BIT STRING unused-bits octet, SET-OF ordering |
+| **RFC 5912** (PKIX ASN.1) | Low | Reference for `AlgorithmIdentifier` / `Extensions` / `Validity` types; no code maps to it directly |
+| **RFC 6960** (OCSP) | Trivial | Cited only for the domain-separation argument (cosignature label ≠ `ResponseData` SEQUENCE); cactus does not implement OCSP |
+
+### Cryptographic algorithms
+
+| Spec | Relevance | What cactus must honor |
+|---|---|---|
+| **FIPS 204** (ML-DSA) | High | Pure-mode ML-DSA-44 with empty context; 32-byte key-gen seed |
+| **FIPS 180-4** (SHA-2) | High | SHA-256 for tree hashing, SPKI/key-ID hashing, HKDF PRF |
+| **RFC 8032** (Ed25519) | Low | Only as an accepted ACME *account-key* JWS algorithm via go-jose |
+| **FIPS 186-5** (DSS) | Background | ECDSA is gone from cactus's own signing; relevant only to ECDSA ACME account keys |
+
+### ACME, TLS, and HTTP
+
+| Spec | Relevance | What cactus must honor |
+|---|---|---|
+| **RFC 8555** (ACME) | High | §6 JWS/nonce/url/Content-Type, §7 resource state machine, §7.4 finalize/badCSR, plus the MTC §9 download extensions |
+| **draft-…-tls-trust-anchor-ids-03** | Medium | §3 TrustAnchorID binary rep, §4.1 `opaque<1..2^8-1>` cap, §6 property-list encoding, §6.1 PEM layout |
+| **RFC 9110** (HTTP) | Medium | Retry-After, 503, Accept negotiation |
+| **RFC 4648** (base64) | High | base64url (no pad) for ACME JWS; standard base64 for C2SP note bodies |
+| **RFC 7807** (Problem Details) | Medium | ACME error documents (`application/problem+json`) |
+| **RFC 7638** (JWK Thumbprint) | Medium | Account identity + key authorization |
+| **RFC 3339** (timestamps) | Low | ACME `expires` / `notBefore` / `notAfter` |
+| **RFC 1035** (DNS names) | Low | `dns` identifier validation |
+| **RFC 8446** (TLS 1.3) | Low | §3 presentation language MTC wire formats inherit |
+| **RFC 3629** (UTF-8) | Trivial | UTF8String DN attribute value |
+| **RFC 2119 / RFC 8174** | Trivial | Requirement-keyword boilerplate |
 
 ## Fixes landed in this pass
 
-### BLOCKERs (3)
+The overwhelming majority of the surface was already conformant (see
+"Verified conformant" below). The review surfaced two interop
+SHOULD-FIXes, three smaller ACME/PKIX fixes, and a set of nits — all
+fixed here.
 
-- **`url` header check (RFC 8555 §6.4)** — `acme/handler.go` now
-  compares the JWS protected `url` to the absolute request URL
-  (`s.urlFor(r.URL.Path)`) and rejects mismatches with `unauthorized`
-  (HTTP 401). Previously `ParsedJWS.URL` was captured but never
-  validated, allowing a JWS signed for one ACME endpoint to be
-  replayed at a different endpoint.
-- **POST-as-GET for cert download (RFC 8555 §6.3)** —
-  `/cert/{id}` and `/cert/{id}/alternate` switched from `GET` to
-  `POST`, and the handlers now require a signed JWS with empty
-  payload, validate that the cert belongs to the requesting
-  account, and emit a fresh `Replay-Nonce`. All eight test sites
-  that previously did `http.Get` on these URLs now use a new
-  `postAsGet` / `postAsGetWithAccept` helper.
-- **UTCTime / GeneralizedTime cutoff (RFC 5280 §4.1.2.5)** —
-  `cert/entry.go` and `ca/issuer.go` previously emitted
-  GeneralizedTime unconditionally, in violation of the MUST that
-  validity dates < 2050 use UTCTime. Replaced with
-  `encodeRFC5280Time` that picks UTCTime (`0x17`,
-  `YYMMDDHHMMSSZ`) for years 1950–2049 and GeneralizedTime
-  (`0x18`, `YYYYMMDDHHMMSSZ`) for 2050+.
+### Interop SHOULD-FIX
 
-### SHOULD-FIX (10)
+- **Cosignature note lines now carry the `timestamped_signature`
+  timestamp (tlog-cosignature).** The signed-note line value for an
+  ML-DSA-44 cosignature must be `base64(keyID ‖ timestamped_signature)`,
+  where `timestamped_signature` is `u64 timestamp ‖ ml_dsa_44_signature`.
+  The code previously emitted `keyID ‖ sig`, dropping the 8-byte (zero)
+  timestamp. Added `cert.MarshalTimestampedSignature` /
+  `cert.ParseTimestampedSignature` (`cert/keyid.go`) and routed every
+  build/parse site through them: the checkpoint signature line
+  (`log/note.go`), the sign-subtree response (`mirror/server.go`), the
+  CA DoS-gate cosignature line (`cert/cosigner_request.go`), and all
+  three parsers (`log/note.go`, `mirror/note.go`, `mirror/server.go`,
+  `cert/cosigner_request.go`). The signed `cosigned_message` was already
+  correct (`timestamp = 0`), so existing signatures stay valid — only
+  the wire framing changed. The MTCProof signature inside the X.509 cert
+  was already a bare PKIX signature (§6.1) and is untouched. Tests that
+  pinned the old layout (`log/checkpoint_sig_test.go`,
+  `integration/{witness_helpers,mirror_server}_test.go`) were updated to
+  assert the timestamp and a zero value.
 
-- **`badNonce` error type (RFC 8555 §6.5)** — `readJWS` now
-  returns a typed `*jwsError` and the nonce-failure path maps to
-  `urn:ietf:params:acme:error:badNonce` (instead of the previous
-  `malformed`). `Replay-Nonce` is still always issued via
-  `s.problem`/`problemFull`.
-- **`badSignatureAlgorithm` with `algorithms` field (RFC 8555
-  §6.2)** — `peekJOSEHeader` now extracts the protected header's
-  `alg`. If it isn't in `AcceptedJWSAlgs`, `readJWS` returns a
-  `badSignatureAlgorithm` problem with the `algorithms` array
-  populated (added as a new `Algorithms []string` field on
-  `Problem`).
-- **Content-Type 415 (RFC 8555 §6.2)** — `readJWS` rejects
-  anything other than `application/jose+json` with HTTP 415 +
-  `malformed`, before reading the body.
-- **`badCSR` mapping (RFC 8555 §7.4)** — `ca.Validator.Validate`
-  now wraps its identifier-mismatch / signature / no-SAN errors
-  with `errors.Is`-detectable `ca.ErrBadCSR`, and
-  `handleFinalize` maps that to the `badCSR` problem type with
-  HTTP 400 (instead of 500 + serverInternal).
-- **ECDSA curve check (MTC §5.4.2)** — `cert/sigverify.go`
-  `verifyECDSA` now takes the expected `elliptic.Curve` and
-  rejects keys whose curve doesn't match the configured
-  algorithm. Previously a P-384 SPKI tagged as
-  `AlgECDSAP256SHA256` would silently use the P-384 curve.
-- **Checkpoint signature verified on load (MTC §C.1)** —
-  `log/log.go` `loadCheckpoint` now reconstructs the §5.4.1
-  `MTCSubtreeSignatureInput` for `[0, size, root)` and verifies
-  it against the configured CA cosigner's public key before
-  trusting the on-disk state. New helper
-  `parseSignedNoteFull` in `log/note.go` extracts the signature
-  records.
-- **`trust_anchor_id` property body fix (TAI §6)** —
-  `cert/properties.go` was double-wrapping the value with an
-  inner `uint8` length prefix. The body now carries the raw
-  binary representation of the trust anchor ID directly. The
-  255-byte cap from TAI §4.1 (`opaque<1..2^8-1>`) is still
-  enforced as a sanity check.
-- **Property list sorting + dedupe (TAI §6)** —
-  `BuildPropertyList` now sorts entries by Type before encoding
-  and rejects duplicates. `ParsePropertyList` now enforces
-  ascending-Type order on read and rejects duplicates.
-- **`issuerUniqueID` / `subjectUniqueID` parsing (RFC 5280
-  §4.1, MTC §7.2)** — `cert/verify.go`
-  `RebuildLogEntryFromTBS` previously parsed only one trailing
-  context-specific element (assumed to be `[3] extensions`).
-  Now it dispatches on tag number for `[1]`, `[2]`, `[3]`
-  individually, preserves them in the rebuilt log entry, and
-  rejects duplicates / unknown tags. The cactus issuer never
-  emits `[1]`/`[2]` itself, so this is a verifier-side latent
-  bug fix.
-- **`serialNumber` uint64 encoding (RFC 5280 §4.1.2.2)** — the
-  issuer's `AddASN1Int64(int64(serial))` would silently encode a
-  log index ≥ 2^63 as a negative INTEGER. Switched to
-  `AddASN1BigInt(new(big.Int).SetUint64(...))`. The verifier
-  switched from `int64` to `big.Int` and accepts the 9-byte
-  high-bit form, with `IsUint64()` as the cap.
+- **`application/pem-certificate-chain-with-properties` element order
+  and label fixed (TAI §6.1).** The property list is now the first PEM
+  element and the certificate the second, and the block label is now
+  `CERTIFICATE PROPERTIES` (was `MTC PROPERTIES`); see
+  `cert/properties.go` (`EncodePEMWithProperties`, `PEMBlockProperties`).
+  Tests in `cert/properties_test.go` and
+  `integration/landmark_properties_test.go` were updated to the
+  spec-mandated order.
 
-### Test infrastructure changes
+### ACME (RFC 8555)
 
-- `acme.handler_test.go` got a `postAsGet` helper used by all in-package
-  tests that download a cert.
-- `integration_test.go` got `postAsGetWithAccept` for tests that need
-  to specify a custom Accept media type, plus an `acmeIssueOneWithKeys`
-  variant that exposes the account key + kid so per-test cert
-  re-downloads can authenticate.
-- `acme.persist_test.go` `finalizeOneCert` now returns the account
-  key + kid alongside the cert URL, so the post-restart cert fetch
-  can do POST-as-GET against the rehydrated account.
-- 11 test sites (8 in `acme`/`integration`, 3 in `landmark_*` tests)
-  were updated from plain `http.Get` to POST-as-GET against
-  `/cert/{id}` and `/cert/{id}/alternate`.
+- **Cert-download ownership now returns 401, not 403** (`acme/handler.go`),
+  matching the `unauthorized` error type (§7.5 / §6.4).
+- **Account resource is now addressable with a required `orders` member**
+  (§7.1.2 / §7.1.2.1). Added `POST /account/{id}` (POST-as-GET of the
+  account object) and `POST /account/{id}/orders` (the orders list),
+  plus `State.GetAccount` / `State.OrderIDsForAccount` and the
+  `OrdersList` type. The account object always emits `orders`. Account
+  update/deactivation remains intentionally out of scope for this test
+  server (documented on the handler).
+- **`notBefore` / `notAfter` are now validated** (§7.4): a malformed
+  RFC 3339 value returns `malformed` instead of being silently dropped
+  (`acme/handler.go`).
+- **Replay-Nonce is now base64url of random octets** (§6.5.1), via
+  `base64.RawURLEncoding` (`acme/state.go`); opaque resource IDs still
+  use hex.
 
-All 15 packages green after the rewrite.
+### Hardening / hygiene
 
-## Findings deferred to a later pass
+- **Public-key length validated** in `cert.CosignatureKeyID` against the
+  FIPS 204 size for the algorithm (`cert/keyid.go`).
+- **SPKI algorithm checked** in `rawKeyFromSPKI`: the inner
+  AlgorithmIdentifier OID must equal the expected sig-alg and parameters
+  must be absent (RFC 9881 §3) (`cert/rpverify.go`).
+- **Stale docstrings corrected** to describe the relative-OID
+  TrustAnchorID form (`cert/caid.go`, `ca/issuer.go`), and the
+  `MaxLogNumber` ceiling is documented as enforced by the `uint16` type.
 
-The following are real but were left out of this pass either because
-they're cosmetic, latent (not exercised by current callers), or
-require ecosystem-side decisions that haven't settled:
+The DN SET-OF ordering (`cert/dn.go`) was reviewed and left as-is: it is
+correct by single-element construction, and adding canonical SET
+ordering now would be dead code. It is noted under "Deliberate choices"
+as a latent item should a second RDN attribute ever be added.
 
-- **Trust-anchor-ID binary representation everywhere on the wire**
-  (TAI §3) — cactus stores `TrustAnchorID` as ASCII bytes (e.g.
-  `"32473.1"`) and feeds those bytes into TLS-presentation
-  length-prefixed fields (`MTCSubtreeSignatureInput.cosigner_id`,
-  `MTCSubtree.log_id`, the `trust_anchor_id` property body, the
-  `MTCSignature.cosigner_id`). The interop-correct form is the
-  binary representation = contents-octets of the relative-OID DER
-  per TAI §3. This is a future-spec interop blocker, not a security
-  bug; everyone in the cactus deployment agrees on ASCII for now.
-  Tracking-issue territory.
-- **PEM block label `MTC PROPERTIES` vs `CERTIFICATE PROPERTIES`**
-  — TAI §6.1 fixes the label to `CERTIFICATE PROPERTIES`. Cactus
-  uses `MTC PROPERTIES` deliberately while the spec is unstable
-  (already commented in `cert/properties.go`).
-- **`PropertyTrustAnchorID = 0` codepoint** — TAI §6 hasn't
-  formally pinned the trust_anchor_id property type number; cactus
-  uses 0 as a best guess. Confirm and align once trust-anchor-ids
-  reaches WGLC.
-- **Strict DER reparse of CSR bytes (MTC §12.6)** — cactus passes
-  `csr.RawSubject`, `csr.RawSubjectPublicKeyInfo`, and each
-  `csr.Extensions[i].Value` through verbatim into the log entry.
-  Go's `encoding/asn1` produces DER on output and is reasonably
-  strict on input, but a non-DER BER CSR could (in theory)
-  produce a non-DER `TBSCertificateLogEntry`. A defensive
-  re-encode pass would close this gap.
-- **`SubjectPublicKeyInfo` hash hard-coded to SHA-256** —
-  `cert/verify.go` line 126 uses `sha256.Sum256` directly. When a
-  log uses a non-SHA-256 hash this needs to be parameterised.
-- **Account `orders` URL not implemented (RFC 8555 §7.1.2.1)** —
-  `AccountResp.Orders` is unset and there is no
-  `/account/{id}/orders` POST-as-GET handler. Optional per the
-  spec when there are no orders to enumerate; cactus has the
-  data already (orders carry `AccountID`).
-- **CORS `Access-Control-Allow-Origin: *` (RFC 8555 §6.1)** —
-  not emitted; SHOULD per spec.
-- **Replay-Nonce uses hex encoding** (RFC 8555 §6.5.1) — value is
-  hex-encoded random rather than `base64url(rand)`. The wire
-  characters happen to be a subset of the base64url alphabet so
-  parsers won't reject, but it isn't a base64url encoding of an
-  octet string.
-- **Accept header q-value parsing (RFC 9110 §12.5.1)** — cactus
-  uses `strings.Contains` on the Accept header rather than a
-  parser; a client sending `q=0` would still get the
-  with-properties form.
-- **MTC.md / TODO.md spec references** — MTC.md mentions
-  Appendix C.3 (cosig). The draft Appendix C only has C.1 and
-  C.2 today. Update MTC.md if/when the cosig appendix lands.
-- **Spec editorial nit upstream** — MTC §7.2 single-pass
-  algorithm omits the leading `0x00` RFC-9162 leaf prefix that
-  the prose definition requires. Cactus's `EntryHash` and
-  `SinglePassEntryHash` correctly include the prefix; worth
-  flagging upstream.
-- **Test vectors** — the draft contains no test vectors;
-  Appendix B is non-normative explanatory text. Cactus's lack of
-  upstream test vectors is therefore not a gap, but its own
-  integration tests (`TestParallelIssuance`,
-  `TestRelyingPartyFastPath`, `TestEndToEndCAWithThreeMirrors`)
-  serve as the de-facto fixture suite.
+## Verified conformant
 
-## Sections fully implemented / partially implemented / not implemented
+These were checked in depth and match their specs; recording them so
+the next review needn't re-derive them:
 
-**Fully implemented:** §3 Overview · §4.1 Subtree definition · §4.3
-Subtree inclusion proofs (gen + eval) · §4.4 Subtree consistency
-proofs (gen + verify) · §4.5 Arbitrary intervals (FindSubtrees) ·
-§5.1 Log parameters · §5.2 Log IDs (experimental DN form) · §5.3 Log
-entries (null + tbs_cert_entry, ASN.1 module conformance, single-pass
-hash) · §5.4 Cosigners · §5.4.1 Signature format · §5.5 CA cosigner ·
-§6.1 Certificate format · §6.2 Standalone certs · §6.3.1 Landmark tree
-sizes · §6.3.2 Landmark allocation · §6.3.3 Landmark-relative cert
-construction · §7.2 Verifying cert signatures · §9 ACME extensions ·
-§A ASN.1 module (experimental-OID form) · §C.1 Subtree signed-note
-format · §C.2 sign-subtree endpoint (mirror server side) and request
-building (CA side).
+- **Subtree math (MTC §4):** `tlogx/subtree.go`, `inclusion.go`,
+  `consistency.go` match the draft's §4.1/§4.3.2/§4.4/§4.5 algorithms
+  and the RFC 9162 §2.1.1 hash prefixes.
+- **Entry hashing & §7.2 verification:** `cert/entry.go` single-pass
+  leaf hash and `cert/rpverify.go` verify steps 1–12, including the
+  landmark trusted-subtree fast path.
+- **`cosigned_message` byte layout** (`cert/proof.go:56-77`), **key-ID
+  derivation** (`cert/keyid.go:39-42`, sigType `0x06`), **checkpoint
+  body** (`log/note.go`), **tile/entry-bundle framing**
+  (`log/tilewriter`, `tile/server.go`), and **sign-subtree framing +
+  DoS gate** (`mirror/server.go`) all match the C2SP specs.
+- **MTC-with-tlog profile:** origin/cosigner-name derivation
+  (`oid/1.3.6.1.4.1.<relative-OID>`), `caID.0.logNumber` log ID,
+  CA-prefix `/<log number>/…` serving, and `/landmarks` URL all match
+  `mtc-tlog-draft.md`.
+- **X.509:** RFC 5280 serial (`(logNumber<<48)|index`, positive,
+  minimal), UTCTime/GeneralizedTime cutoff, critical-extension flags;
+  RFC 9881 `id-ml-dsa-44` OID + absent-parameter SPKI; RFC 9925
+  `id-alg-unsigned` zero-length signature on the CA cert; minimal DER
+  throughout.
+- **Crypto:** pure ML-DSA-44 with empty context (FIPS 204 / RFC 9881),
+  deterministic HKDF-SHA256 seed derivation, consistent SHA-256 usage.
+- **TrustAnchorID binary representation** (RELATIVE-OID content octets,
+  spec example `32473.1 → 81 fd 59 01`) and **property-list
+  sort/dedup/framing** (`cert/properties.go`, `cert/trustanchorid.go`).
+- **ACME §6 JWS validation** (url/nonce/badNonce/alg allow-list +
+  `badSignatureAlgorithm`/Content-Type 415/jwk-kid exclusivity), **§6.3
+  POST-as-GET**, **§7.4 finalize + badCSR**, **§9 download extensions**
+  (property list, alternate URL with 503+Retry-After, order→valid on
+  sequencing), **RFC 7807/7638** usage, and the **base64url vs base64
+  split** (`acme/jose.go` vs `mirror/note.go`).
 
-**Partial / known gaps:** §5.4.2 ML-DSA verification (build-tag-gated)
-· §5.6.1 Log pruning (not implemented) · §7.1 Trust anchors (no
-formal trust-anchor representation; cactus is the issuer, not a
-relying-party library beyond the CLI) · §7.3 Trusted cosigners
-policy (single CA cosigner + N mirrors; no quorum-of-different-roles
-policy engine) · §7.4 Trusted subtree predistribution (CA serves
-`/landmarks`; RP-side ingest is in the integration test only) ·
-§7.5 Revocation by index (stub list).
+## Deliberate choices and known gaps
 
-**Out of scope:** §8 Use in TLS (Phase-10+, the TLS stack lives
-elsewhere).
+- **Experimental placeholder OIDs** — `id-alg-mtcProof`,
+  `id-rdna-trustAnchorID`, `id-pe-mtcCertificationAuthority` use the
+  `1.3.6.1.4.1.44363.47.*` private arc pending IANA assignment, matching
+  draft-04's experimental status (`cert/oid.go`).
+- **ASCII TrustAnchorID in the DN UTF8String** — deliberate "for initial
+  experimentation" form (`cert/dn.go`, `cert/oid.go`); the binary
+  RELATIVE-OID rep is used on the wire fields that require it.
+- **Pull-mode mirror** — `mirror/follower.go` polls an upstream via
+  tlog-tiles and verifies append-only by root recomputation; it does not
+  implement the tlog-mirror push API (`add-checkpoint`/`add-entries`).
+  Intentional.
+- **`auto-pass` challenge mode** is test-only; `http-01` is real;
+  DNS-01 is not implemented.
+- **FIPS 186-5 demoted** — ECDSA was removed from cactus's own signing,
+  so 186-5 is background only (ECDSA ACME account keys via go-jose).
+- **Log pruning (MTC §5.2.3 / profile pruning rules)** not implemented.
+- **Revocation by serial range (§7.5)** carries the data model but only
+  a stub list.
+- **Account update / deactivation (RFC 8555 §7.3.2/§7.3.6)** — the
+  account resource is now addressable (POST-as-GET) and exposes the
+  orders list, but mutating an account is out of scope for an
+  issuance-only test server.
+- **DN SET-OF ordering (`cert/dn.go`)** — correct by single-element
+  construction; would need canonical ordering only if a second RDN
+  attribute is ever added.
+
+## Implementation status by MTC section
+
+**Fully implemented:** §4.1–§4.5 subtrees (validity, inclusion +
+consistency proof gen/verify, FindSubtrees) · §5.1 CA / log parameters ·
+§5.2 log IDs + entries (null + tbs_cert_entry, ASN.1 module, single-pass
+hash) · §5.3/§5.3.1 cosigner signature format (the signed message) ·
+§5.5 CA cosigner + CA-certificate extension · §6.1 certificate format /
+MTCProof / serial · §6.2 standalone certs · §6.3.1–§6.3.3 landmark
+sizes, allocation, publishing, and landmark-relative cert construction ·
+§7.1/§7.2/§7.4/§7.5 relying-party verification (config from CA cert,
+verify steps 1–12, trusted subtrees, revoked-range data model) · §9 ACME
+extensions · Appendix A ASN.1 module (experimental-OID form). The
+MTC-with-tlog profile's serving layout, identity mapping, and
+ML-DSA-44-only requirement are all met.
+
+**Partial / known gaps:** §5.2.3 log pruning (none) · §7.3 trusted
+cosigner policy (single CA cosigner + N mirrors; no quorum-of-roles
+engine) · §7.5 revocation (stub list) · ACME account update /
+deactivation (out of scope). The cosignature note-line wrapper and the
+property-list PEM serialization, listed as gaps in the review, were
+fixed in this pass.
+
+**Out of scope:** §8 use in TLS — the TLS stack lives elsewhere.
 
 ## Files reviewed
 
-Specs (under `specs/`): all 17 normative refs.
+**Specs:** all of `specs/` (the four groups in `specs/README.md`).
 
-Code (under repo root):
+**Code (non-test):**
 
 - `acme/{handler,jose,keyauth,persist,readdir,state,types}.go`
-  + tests
-- `ca/{issuer,validator}.go` + tests
-- `cert/{cosigner_request,dn,entry,landmark,oid,proof,properties,
-   sha256_helper,sigverify,verify}.go` + tests
+- `ca/{issuer,validator}.go`
+- `cert/{cacert,caid,cosigner_request,dn,entry,keyid,landmark,oid,proof,properties,rpverify,sigverify,trustanchorid,verify}.go`
 - `cmd/cactus/main.go`, `cmd/cactus-cli/{main,treeverify}.go`,
   `cmd/cactus-keygen/main.go`
 - `config/config.go`
-- `landmark/{handler,sequence}.go` + tests
-- `log/{log,note}.go`, `log/tilewriter/tilewriter.go` + tests
-- `mirror/{follower,note,note_parse,server}.go` + tests
-- `signer/{mldsa,seed,signer,spki}.go` + tests
+- `landmark/{handler,sequence}.go`
+- `log/{log,note}.go`, `log/tilewriter/tilewriter.go`
+- `mirror/{follower,note,note_parse,server}.go`
+- `signer/{mldsa,seed,signer}.go`
 - `tile/server.go`
-- `tlogx/{consistency,inclusion,subtree}.go` + tests
-- `integration/*.go` (15 integration tests)
+- `tlogx/{consistency,inclusion,subtree}.go`
 
-Docs reviewed and updated: this report. `MTC.md`, `README.md`,
-`PROJECT_PLAN.md`, `TODO.md`, `docs/disk-layout.md`,
-`docs/threat-model.md` were read; nothing in them is wrong against
-the post-fix code, but the deferred items listed above remain
-documented in `TODO.md`'s "Notes for future contributors" section.
+**Tests** consulted for behavior confirmation, including the 22
+`integration/*_test.go` end-to-end tests (`TestParallelIssuance`,
+`TestRelyingPartyFastPath`, `TestEndToEndCAWithThreeMirrors`,
+`TestMirrorRestartResume`, and the binary smoke tests), which serve as
+the de-facto fixture suite — the draft itself ships no test vectors.

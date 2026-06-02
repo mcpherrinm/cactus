@@ -238,7 +238,10 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		if [4]byte(raw[:4]) != wantKeyID {
 			continue // same name, different key ID: not our key.
 		}
-		rawSig := raw[4:]
+		_, rawSig, err := ParseTimestampedSignature(raw[4:])
+		if err != nil {
+			return MTCSignature{}, err
+		}
 		// Verify against the §5.3.1 CosignedMessage.
 		msg, err := MarshalSignatureInput(m.Key.ID, subtree)
 		if err != nil {
@@ -258,7 +261,7 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 //
 //	subtree <start> <end>
 //	<base64 subtree hash>
-//	[— <CA key> <base64(keyID || sig)>]   (0..8 subtree cosignature lines)
+//	[— <CA key> <base64(keyID || timestamped_signature)>]   (0..8 subtree cosignature lines)
 //	<base64 consistency-proof hash>        (0..63 lines)
 //	...
 //	<empty line>
@@ -286,7 +289,7 @@ func buildSignSubtreeBody(req *SubtreeRequest) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cert: CA subtree cosignature key ID: %w", err)
 		}
-		blob := append(append([]byte(nil), keyID[:]...), req.CASignature.Signature...)
+		blob := append(append([]byte(nil), keyID[:]...), MarshalTimestampedSignature(0, req.CASignature.Signature)...)
 		fmt.Fprintf(&b, "— %s %s\n", caKey, base64.StdEncoding.EncodeToString(blob))
 	}
 

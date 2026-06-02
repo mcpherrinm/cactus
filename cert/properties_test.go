@@ -98,19 +98,20 @@ func TestEncodePEMWithProperties(t *testing.T) {
 	}
 	body := EncodePEMWithProperties(certDER, pl)
 
-	// Decode both blocks.
+	// Decode both blocks. Per trust-anchor-ids §6.1 the property list
+	// comes first and the certificate second.
 	rest := body
 	block1, rest := pem.Decode(rest)
-	if block1 == nil || block1.Type != "CERTIFICATE" {
+	if block1 == nil || block1.Type != PEMBlockProperties {
 		t.Fatalf("first block bad: %+v", block1)
 	}
 	block2, _ := pem.Decode(rest)
-	if block2 == nil || block2.Type != PEMBlockProperties {
+	if block2 == nil || block2.Type != "CERTIFICATE" {
 		t.Fatalf("second block bad: %+v", block2)
 	}
 
 	// Property block decodes back to original property list.
-	got, err := ParsePropertyList(block2.Bytes)
+	got, err := ParsePropertyList(block1.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -122,6 +122,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("HEAD /new-nonce", s.handleNewNonce)
 	mux.HandleFunc("GET /new-nonce", s.handleNewNonce)
 	mux.HandleFunc("POST /new-account", s.handleNewAccount)
+	mux.HandleFunc("POST /account/{id}", s.handleAccount)
+	mux.HandleFunc("POST /account/{id}/orders", s.handleAccountOrders)
 	mux.HandleFunc("POST /new-order", s.handleNewOrder)
 	mux.HandleFunc("POST /authz/{id}", s.handleAuthz)
 	mux.HandleFunc("POST /chall/{id}", s.handleChallenge)
@@ -426,10 +428,59 @@ func (s *Server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	_ = json.NewEncoder(w).Encode(AccountResp{
+	_ = json.NewEncoder(w).Encode(s.accountJSON(acct))
+}
+
+// accountJSON builds the RFC 8555 §7.1.2 account object, including the
+// required `orders` URL.
+func (s *Server) accountJSON(acct *account) AccountResp {
+	return AccountResp{
 		Status:  acct.Status,
 		Contact: acct.Contact,
-	})
+		Orders:  s.urlFor("/account/" + acct.ID + "/orders"),
+	}
+}
+
+// handleAccount serves the account resource (RFC 8555 §7.1.2). It
+// supports POST-as-GET; account update/deactivation is out of scope for
+// this test server, so a non-empty payload is accepted but ignored.
+func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
+	_, acct, err := s.readJWS(r, true)
+	if err != nil {
+		s.writeJWSError(w, err)
+		return
+	}
+	if r.PathValue("id") != acct.ID {
+		s.problem(w, http.StatusUnauthorized, "urn:ietf:params:acme:error:unauthorized",
+			"account does not match the authenticated key")
+		return
+	}
+	s.issueNonce(w)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.accountJSON(acct))
+}
+
+// handleAccountOrders serves the orders list for an account
+// (RFC 8555 §7.1.2.1), as a POST-as-GET resource.
+func (s *Server) handleAccountOrders(w http.ResponseWriter, r *http.Request) {
+	_, acct, err := s.readJWS(r, true)
+	if err != nil {
+		s.writeJWSError(w, err)
+		return
+	}
+	if r.PathValue("id") != acct.ID {
+		s.problem(w, http.StatusUnauthorized, "urn:ietf:params:acme:error:unauthorized",
+			"account does not match the authenticated key")
+		return
+	}
+	ids := s.state.OrderIDsForAccount(acct.ID)
+	urls := make([]string, 0, len(ids))
+	for _, id := range ids {
+		urls = append(urls, s.urlFor("/order/"+id))
+	}
+	s.issueNonce(w)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(OrdersList{Orders: urls})
 }
 
 func (s *Server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
@@ -467,15 +518,21 @@ func (s *Server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NotBefore != "" {
 		t, err := time.Parse(time.RFC3339, req.NotBefore)
-		if err == nil {
-			o.NotBefore = t
+		if err != nil {
+			s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:malformed",
+				"notBefore is not a valid RFC 3339 timestamp")
+			return
 		}
+		o.NotBefore = t
 	}
 	if req.NotAfter != "" {
 		t, err := time.Parse(time.RFC3339, req.NotAfter)
-		if err == nil {
-			o.NotAfter = t
+		if err != nil {
+			s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:malformed",
+				"notAfter is not a valid RFC 3339 timestamp")
+			return
 		}
+		o.NotAfter = t
 	}
 
 	for _, id := range req.Identifiers {
@@ -894,7 +951,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.certBelongsToAccount(id, acct.ID) {
-		s.problem(w, http.StatusForbidden, "urn:ietf:params:acme:error:unauthorized",
+		s.problem(w, http.StatusUnauthorized, "urn:ietf:params:acme:error:unauthorized",
 			"certificate does not belong to this account")
 		return
 	}
@@ -956,7 +1013,7 @@ func (s *Server) handleCertAlternate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.certBelongsToAccount(id, acct.ID) {
-		s.problem(w, http.StatusForbidden, "urn:ietf:params:acme:error:unauthorized",
+		s.problem(w, http.StatusUnauthorized, "urn:ietf:params:acme:error:unauthorized",
 			"certificate does not belong to this account")
 		return
 	}

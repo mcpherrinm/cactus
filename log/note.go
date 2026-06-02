@@ -24,8 +24,11 @@ import (
 //
 // Origin is "oid/<logID>".
 //
-// Trailing signature line: "— <key-name> <base64(keyID || sig)>\n", where
-// keyID is the c2sp.org/signed-note key ID for (cosigner name, alg, pub).
+// Trailing signature line:
+// "— <key-name> <base64(keyID || timestamped_signature)>\n", where keyID
+// is the c2sp.org/signed-note key ID for (cosigner name, alg, pub) and
+// timestamped_signature is the c2sp.org/tlog-cosignature wrapper
+// (u64 timestamp || sig) with timestamp 0 for MTC subtree cosignatures.
 func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
 	size uint64, root tlogx.Hash, alg cert.SignatureAlgorithm, pub, sig []byte) ([]byte, error) {
 	if len(logID) == 0 {
@@ -41,7 +44,7 @@ func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
 	if err != nil {
 		return nil, fmt.Errorf("buildSignedNote: %w", err)
 	}
-	sigWithID := append(append([]byte(nil), keyID[:]...), sig...)
+	sigWithID := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(0, sig)...)
 	sigB64 := base64.StdEncoding.EncodeToString(sigWithID)
 
 	out := body + "\n" // blank line separating body from signatures
@@ -113,10 +116,14 @@ func parseSignedNoteFull(data []byte, logID cert.TrustAnchorID) (uint64, tlogx.H
 			if len(raw) < 4 {
 				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: sig too short for keyID")
 			}
+			_, bareSig, err := cert.ParseTimestampedSignature(raw[4:])
+			if err != nil {
+				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: %w", err)
+			}
 			sigs = append(sigs, parsedNoteSig{
 				keyName: fields[0],
 				keyID:   [4]byte{raw[0], raw[1], raw[2], raw[3]},
-				sig:     raw[4:],
+				sig:     bareSig,
 			})
 		}
 	}

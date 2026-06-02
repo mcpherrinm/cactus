@@ -212,8 +212,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 8) Emit the c2sp.org/signed-note signature line: em-dash, key
-	// name, base64(keyID || signature), with the ML-DSA-44 cosignature
-	// key ID from c2sp.org/tlog-cosignature.
+	// name, base64(keyID || timestamped_signature), with the ML-DSA-44
+	// cosignature key ID and the u64-timestamp wrapper (timestamp 0 for
+	// MTC subtree cosignatures) from c2sp.org/tlog-cosignature.
 	keyName := cert.OIDName(s.cfg.CosignerID)
 	keyID, err := cert.CosignatureKeyID(keyName,
 		cert.SignatureAlgorithm(s.cfg.Signer.Algorithm()), s.cfg.Signer.PublicKey())
@@ -221,7 +222,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "key id: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sigWithID := append(append([]byte(nil), keyID[:]...), sig...)
+	sigWithID := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(0, sig)...)
 	line := fmt.Sprintf("%s %s %s\n", emDash, keyName, base64.StdEncoding.EncodeToString(sigWithID))
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -397,7 +398,10 @@ func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
 		if len(c.sigBytes) < 4 || [4]byte(c.sigBytes[:4]) != wantKeyID {
 			continue // same name, different key ID: ignore.
 		}
-		rawSig = c.sigBytes[4:]
+		_, rawSig, err = cert.ParseTimestampedSignature(c.sigBytes[4:])
+		if err != nil {
+			return fmt.Errorf("CA subtree cosignature: %w", err)
+		}
 		break
 	}
 	if rawSig == nil {

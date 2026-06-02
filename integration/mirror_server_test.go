@@ -132,7 +132,8 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, respBody)
 	}
 
-	// The body is one signature line: "— oid/<mirrorID> base64(keyID || sig)\n".
+	// The body is one signature line:
+	// "— oid/<mirrorID> base64(keyID || timestamped_signature)\n".
 	line := strings.TrimRight(string(respBody), "\n")
 	wantPrefix := "— " + cert.OIDName(mirrorID) + " "
 	if !strings.HasPrefix(line, wantPrefix) {
@@ -145,6 +146,10 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 	if len(rawWithKeyID) < 5 {
 		t.Fatalf("sig too short: %d", len(rawWithKeyID))
 	}
+	_, rawSig, err := cert.ParseTimestampedSignature(rawWithKeyID[4:])
+	if err != nil {
+		t.Fatalf("parse timestamped_signature: %v", err)
+	}
 	// Verify the signature against CosignedMessage.
 	subtree := &cert.MTCSubtree{
 		LogID: ca.logID,
@@ -155,7 +160,7 @@ func TestMirrorSignSubtreeHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := cert.VerifyMTCSignature(mKey,
-		cert.MTCSignature{CosignerID: mirrorID, Signature: rawWithKeyID[4:]}, msg); err != nil {
+		cert.MTCSignature{CosignerID: mirrorID, Signature: rawSig}, msg); err != nil {
 		t.Errorf("mirror cosignature verify: %v", err)
 	}
 }

@@ -19,7 +19,8 @@ type signedNote struct {
 type noteSignature struct {
 	keyName string
 	// sigBytes includes the 4-byte c2sp keyID followed by the
-	// algorithm-specific signature.
+	// timestamped_signature (u64 timestamp || algorithm-specific
+	// signature), per c2sp.org/tlog-cosignature.
 	sigBytes []byte
 }
 
@@ -95,7 +96,7 @@ func readSignedNote(r *bufio.Reader) (*signedNote, error) {
 }
 
 // parseNoteSignatureLine parses a single c2sp.org/signed-note signature
-// line ("— <key name> <base64(keyID || sig)>") into a noteSignature.
+// line ("— <key name> <base64(keyID || timestamped_signature)>") into a noteSignature.
 func parseNoteSignatureLine(line string) (noteSignature, error) {
 	rest, ok := strings.CutPrefix(line, emDash+" ")
 	if !ok {

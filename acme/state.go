@@ -2,8 +2,10 @@ package acme
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -26,7 +28,9 @@ const nonceLifetime = 5 * time.Minute
 func (s *State) NewNonce() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
-	id := hex.EncodeToString(b[:])
+	// RFC 8555 §6.5.1: the Replay-Nonce is the base64url encoding (no
+	// padding) of an octet string.
+	id := base64.RawURLEncoding.EncodeToString(b[:])
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nonces[id] = time.Now()
@@ -80,6 +84,29 @@ func (s *State) GetOrCreateAccount(thumbprint string, jwkBytes []byte, contact [
 		return nil, false, err
 	}
 	return a, true, nil
+}
+
+// GetAccount returns the account for the given ID (JWK thumbprint).
+func (s *State) GetAccount(id string) (*account, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.accounts[id]
+	return a, ok
+}
+
+// OrderIDsForAccount returns the IDs of every order owned by accountID,
+// in sorted order for a stable response.
+func (s *State) OrderIDsForAccount(accountID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for id, o := range s.orders {
+		if o.AccountID == accountID {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // PutOrder records a new order, returning its assigned ID.

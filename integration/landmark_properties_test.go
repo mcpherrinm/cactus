@@ -19,9 +19,9 @@ import (
 // TestPEMWithPropertiesContent confirms that when the client sends
 // `Accept: application/pem-certificate-chain-with-properties`, both
 // the standalone /cert/{id} and the landmark-relative /alternate URL
-// reply with a PEM CERTIFICATE block followed by a PEM `MTC PROPERTIES`
-// block whose contents round-trip back to the expected
-// CertificatePropertyList.
+// reply with a PEM `CERTIFICATE PROPERTIES` block (whose contents
+// round-trip back to the expected CertificatePropertyList) followed by
+// the PEM CERTIFICATE block, per trust-anchor-ids §6.1.
 func TestPEMWithPropertiesContent(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := storage.New(dir)
@@ -87,13 +87,14 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "application/pem-certificate-chain-with-properties" {
 		t.Errorf("Content-Type = %q", got)
 	}
-	cBlock, rest := pem.Decode(body)
-	if cBlock == nil || cBlock.Type != "CERTIFICATE" {
-		t.Fatalf("first block not CERTIFICATE: %+v", cBlock)
-	}
-	pBlock, _ := pem.Decode(rest)
+	// Per trust-anchor-ids §6.1 the property list is first, cert second.
+	pBlock, rest := pem.Decode(body)
 	if pBlock == nil || pBlock.Type != cert.PEMBlockProperties {
-		t.Fatalf("missing %s block: %+v", cert.PEMBlockProperties, pBlock)
+		t.Fatalf("first block not %s: %+v", cert.PEMBlockProperties, pBlock)
+	}
+	cBlock, _ := pem.Decode(rest)
+	if cBlock == nil || cBlock.Type != "CERTIFICATE" {
+		t.Fatalf("missing CERTIFICATE block: %+v", cBlock)
 	}
 	props, err := cert.ParsePropertyList(pBlock.Bytes)
 	if err != nil {
@@ -110,13 +111,13 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if altResp.StatusCode != 200 {
 		t.Fatalf("alt status = %d body=%s", altResp.StatusCode, altBody)
 	}
-	c2, rest2 := pem.Decode(altBody)
-	if c2 == nil || c2.Type != "CERTIFICATE" {
-		t.Fatalf("alt: first block not CERTIFICATE")
-	}
-	p2, _ := pem.Decode(rest2)
+	p2, rest2 := pem.Decode(altBody)
 	if p2 == nil || p2.Type != cert.PEMBlockProperties {
-		t.Fatalf("alt: missing properties block")
+		t.Fatalf("alt: first block not %s", cert.PEMBlockProperties)
+	}
+	c2, _ := pem.Decode(rest2)
+	if c2 == nil || c2.Type != "CERTIFICATE" {
+		t.Fatalf("alt: missing CERTIFICATE block")
 	}
 	altProps, err := cert.ParsePropertyList(p2.Bytes)
 	if err != nil {

@@ -33,11 +33,15 @@ func TestCosignatureKeyID(t *testing.T) {
 	})
 
 	t.Run("mldsa-65/87 use the 0xff escape with the key", func(t *testing.T) {
-		pub := []byte("raw-mldsa-key-bytes")
 		for _, tc := range []struct {
-			alg SignatureAlgorithm
-			id  string
-		}{{AlgMLDSA65, "ml-dsa-65"}, {AlgMLDSA87, "ml-dsa-87"}} {
+			alg    SignatureAlgorithm
+			id     string
+			keyLen int
+		}{{AlgMLDSA65, "ml-dsa-65", 1952}, {AlgMLDSA87, "ml-dsa-87", 2592}} {
+			pub := make([]byte, tc.keyLen) // raw FIPS 204 key; contents irrelevant here
+			for i := range pub {
+				pub[i] = byte(i)
+			}
 			h := sha256.New()
 			h.Write([]byte(name))
 			h.Write([]byte{0x0A, 0xff})

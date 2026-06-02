@@ -220,7 +220,7 @@ func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdenti
 	// FIPS 204 key bytes carried in the SPKI BIT STRING. Extract that BIT
 	// STRING so VerifyMTCSignature (via the crypto/mldsa verifier) gets the
 	// same raw key encoding signer.Signer emits.
-	raw, err := rawKeyFromSPKI(spki)
+	raw, err := rawKeyFromSPKI(spki, sigAlg)
 	if err != nil {
 		return CosignerKey{}, fmt.Errorf("cert: extract ML-DSA key: %w", err)
 	}
@@ -230,16 +230,30 @@ func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdenti
 // rawKeyFromSPKI extracts the subjectPublicKey BIT STRING contents from a
 // DER SubjectPublicKeyInfo (SEQUENCE { AlgorithmIdentifier, BIT STRING }).
 // For ML-DSA (which crypto/x509 cannot parse) the raw key bytes are
-// exactly the BIT STRING value.
-func rawKeyFromSPKI(spki []byte) ([]byte, error) {
+// exactly the BIT STRING value. It enforces RFC 9881 §3: the SPKI
+// AlgorithmIdentifier OID MUST equal wantOID and its parameters MUST be
+// absent.
+func rawKeyFromSPKI(spki []byte, wantOID asn1.ObjectIdentifier) ([]byte, error) {
 	var seq asn1.RawValue
 	if _, err := asn1.Unmarshal(spki, &seq); err != nil {
 		return nil, err
 	}
-	var alg asn1.RawValue
-	rest, err := asn1.Unmarshal(seq.Bytes, &alg) // skip AlgorithmIdentifier
+	var algID asn1.RawValue
+	rest, err := asn1.Unmarshal(seq.Bytes, &algID)
 	if err != nil {
 		return nil, err
+	}
+	// AlgorithmIdentifier ::= SEQUENCE { algorithm OID }, parameters absent.
+	var algOID asn1.ObjectIdentifier
+	algRest, err := asn1.Unmarshal(algID.Bytes, &algOID)
+	if err != nil {
+		return nil, fmt.Errorf("cert: parse SPKI algorithm: %w", err)
+	}
+	if len(algRest) != 0 {
+		return nil, errors.New("cert: SPKI algorithm identifier has unexpected parameters")
+	}
+	if !algOID.Equal(wantOID) {
+		return nil, fmt.Errorf("cert: SPKI algorithm %v does not match expected %v", algOID, wantOID)
 	}
 	var bits asn1.BitString
 	if _, err := asn1.Unmarshal(rest, &bits); err != nil {

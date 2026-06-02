@@ -41,11 +41,17 @@ type NewAccountReq struct {
 	OnlyReturnExisting   bool     `json:"onlyReturnExisting,omitempty"`
 }
 
-// AccountResp is the body returned from new-account / GET account.
+// AccountResp is the body returned from new-account / GET account. The
+// `orders` member is required by RFC 8555 §7.1.2.
 type AccountResp struct {
 	Status  string   `json:"status"`
 	Contact []string `json:"contact,omitempty"`
-	Orders  string   `json:"orders,omitempty"`
+	Orders  string   `json:"orders"`
+}
+
+// OrdersList is the account orders list (RFC 8555 §7.1.2.1).
+type OrdersList struct {
+	Orders []string `json:"orders"`
 }
 
 // NewOrderReq is the JWS payload for new-order.

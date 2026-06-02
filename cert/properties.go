@@ -149,25 +149,25 @@ func ParsePropertyList(data []byte) ([]CertificateProperty, error) {
 	return props, nil
 }
 
-// PEMBlockProperties is the type label used for the cactus
-// CertificatePropertyList PEM block. The "MTC " prefix is intentional
-// — it scopes our experimental layout away from any well-known PEM
-// types — and we'll switch to whatever the trust-anchor-ids draft
-// pins down once that spec settles.
-const PEMBlockProperties = "MTC PROPERTIES"
+// PEMBlockProperties is the type label used for the
+// CertificatePropertyList PEM block, fixed by trust-anchor-ids §6.1.
+const PEMBlockProperties = "CERTIFICATE PROPERTIES"
 
 // EncodePEMWithProperties returns the body for the
-// `application/pem-certificate-chain-with-properties` content type:
-// a PEM CERTIFICATE block followed by an MTC PROPERTIES block.
+// `application/pem-certificate-chain-with-properties` content type.
+// Per trust-anchor-ids §6.1 the first PEM element MUST be the encoded
+// CertificatePropertyList and the second MUST be the end-entity
+// certificate, so the CERTIFICATE PROPERTIES block is emitted first.
 //
 // If propertyList is nil the function returns just the cert PEM.
 func EncodePEMWithProperties(certDER, propertyList []byte) []byte {
-	out := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	var out []byte
 	if propertyList != nil {
-		out = append(out, pem.EncodeToMemory(&pem.Block{
+		out = pem.EncodeToMemory(&pem.Block{
 			Type:  PEMBlockProperties,
 			Bytes: propertyList,
-		})...)
+		})
 	}
+	out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})...)
 	return out
 }

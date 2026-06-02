@@ -171,7 +171,7 @@ func TestSignedNoteRoundTrip(t *testing.T) {
 	nb, err := buildSignedNote(
 		cert.TrustAnchorID("32473.1"),
 		cert.TrustAnchorID("32473.1"),
-		42, root, cert.AlgMLDSA44, []byte("pubkey"), []byte("signature"),
+		42, root, cert.AlgMLDSA44, make([]byte, 1312), []byte("signature"),
 	)
 	if err != nil {
 		t.Fatal(err)

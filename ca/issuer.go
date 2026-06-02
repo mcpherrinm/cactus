@@ -41,8 +41,9 @@ type Issuer struct {
 }
 
 // New returns an Issuer configured with the given CA ID and log number.
-// caID is the trust anchor ID's ASCII representation (e.g.
-// "1.3.6.1.4.1.44363.47.1.99") — see §5.1. logNumber must be >= 1.
+// caID is the trust anchor ID in relative dotted-decimal form (e.g.
+// "44363.47.1.99", the arcs below the 1.3.6.1.4.1 enterprise base) —
+// see §5.1. logNumber must be >= 1.
 func New(log LogAPI, caID string, logNumber uint16) (*Issuer, error) {
 	if log == nil {
 		return nil, errors.New("ca: log required")

@@ -79,7 +79,7 @@ func buildSignSubtreeRequestWithCASig(
 		if err != nil {
 			t.Fatalf("CA key ID: %v", err)
 		}
-		blob := append(append([]byte(nil), keyID[:]...), caSig...)
+		blob := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(0, caSig)...)
 		fmt.Fprintf(&b, "— %s %s\n", caKey, base64.StdEncoding.EncodeToString(blob))
 	}
 	for _, h := range proof {

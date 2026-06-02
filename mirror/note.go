@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
@@ -65,8 +66,12 @@ func parseSignedNote(data []byte, expectKey string) (
 		if len(raw) < 5 {
 			return 0, tlogx.Hash{}, nil, fmt.Errorf("mirror: sig too short")
 		}
-		// First 4 bytes are the c2sp keyID; the rest is the signature.
-		sig = raw[4:]
+		// First 4 bytes are the c2sp keyID; the rest is the
+		// timestamped_signature (u64 timestamp || signature).
+		_, sig, err = cert.ParseTimestampedSignature(raw[4:])
+		if err != nil {
+			return 0, tlogx.Hash{}, nil, fmt.Errorf("mirror: %w", err)
+		}
 		return size, root, sig, nil
 	}
 	return 0, tlogx.Hash{}, nil, fmt.Errorf("mirror: no signature line for %q", expectKey)
