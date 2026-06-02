@@ -5,6 +5,9 @@
 //	tree show <log-url>            — fetch checkpoint, print size + root.
 //	entry <log-url> <index>        — fetch entry, decode, pretty-print.
 //	cert verify <cert.pem> <log-url> — full §7.2 verification of a cert.
+//	cert text <cert.pem>           — print a text representation of a cert.
+//	cert landmark-relative <cert.pem> <log-url> — convert a standalone
+//	                                 cert to its landmark-relative form.
 package main
 
 import (
@@ -53,8 +56,15 @@ func main() {
 		}
 		entryShow(os.Args[2], idx)
 	case "cert":
-		if len(os.Args) >= 5 && os.Args[2] == "verify" {
+		switch {
+		case len(os.Args) >= 5 && os.Args[2] == "verify":
 			certVerify(os.Args[3], os.Args[4])
+			return
+		case len(os.Args) >= 4 && os.Args[2] == "text":
+			certText(os.Args[3])
+			return
+		case len(os.Args) >= 5 && os.Args[2] == "landmark-relative":
+			certLandmarkRelative(os.Args[3], os.Args[4])
 			return
 		}
 		usage()
@@ -81,11 +91,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `cactus-cli — Merkle Tree Certificate debugging client
 
 Usage:
-  cactus-cli tree show   <log-url>
-  cactus-cli tree verify <log-url>
-  cactus-cli entry       <log-url> <index>
-  cactus-cli cert verify <cert.pem> <log-url>
-  cactus-cli prove       <log-url> <index>
+  cactus-cli tree show          <log-url>
+  cactus-cli tree verify        <log-url>
+  cactus-cli entry              <log-url> <index>
+  cactus-cli cert verify        <cert.pem> <log-url>
+  cactus-cli cert text          <cert.pem>
+  cactus-cli cert landmark-relative <cert.pem> <log-url>
+  cactus-cli prove              <log-url> <index>
 `)
 }
 
