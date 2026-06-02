@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/mirror"
-	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tlogx"
 
@@ -47,23 +45,21 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = follower.Run(ctx) }()
+	startFollower(t, ctx, follower)
 	caSize := waitFollowerCatchUp(t, follower, ca.log.CurrentCheckpoint().Size, 3*time.Second)
 
-	// Mirror with the gate ON.
-	mSeed := bytes.Repeat([]byte{0xDE}, signer.SeedSize)
-	mSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, mSeed)
+	// Mirror with the gate ON. The witness key is ML-DSA-44. The CA's
+	// subtree cosigner is also ML-DSA-44 (distinct from its ECDSA
+	// checkpoint key); the gate requires that cosignature.
 	mirrorID := cert.TrustAnchorID("32473.23")
+	mSigner, _ := mldsaCosigner(t, mirrorID, 0xDE)
+	caSubSigner, caSubKey := mldsaCosigner(t, ca.cosigner, 0x77)
 	srv, err := mirror.NewServer(mirror.ServerConfig{
 		Follower:                    follower,
 		Signer:                      mSigner,
 		CosignerID:                  mirrorID,
 		RequireCASignatureOnSubtree: true,
-		UpstreamCAKey: &cert.CosignerKey{
-			ID:        ca.cosigner,
-			Algorithm: cert.AlgECDSAP256SHA256,
-			PublicKey: ca.signer.PublicKey(),
-		},
+		UpstreamCAKey:               &caSubKey,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +95,7 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	cpBody := ca.log.CurrentCheckpoint().SignedNote
 
 	// (1) Request without any CA signature on the subtree → 400.
-	noCASigBody := buildSignSubtreeRequest(t, ca.logID, subtreeStart, subtreeEnd, subtreeHash, cpBody, proof)
+	noCASigBody := buildSignSubtreeRequest(t, subtreeStart, subtreeEnd, subtreeHash, cpBody, proof)
 	resp1, err := http.Post(hSrv.URL, "text/plain", bytes.NewReader(noCASigBody))
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +105,10 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 		t.Errorf("no-CA-sig: status = %d, want 400", resp1.StatusCode)
 	}
 
-	// (2) Request with a *bogus* CA signature (corrupt bytes) → 400.
+	// (2) Request with a *bogus* CA signature (right key ID, corrupt
+	// bytes that fail to verify) → 400.
 	bogusCASig := bytes.Repeat([]byte{0xFF}, 64)
-	bogusBody := buildSignSubtreeRequestWithCASig(t, ca.logID, ca.cosigner,
+	bogusBody := buildSignSubtreeRequestWithCASig(t, ca.cosigner, cert.AlgMLDSA44, caSubKey.PublicKey,
 		subtreeStart, subtreeEnd, subtreeHash, bogusCASig, cpBody, proof)
 	resp2, err := http.Post(hSrv.URL, "text/plain", bytes.NewReader(bogusBody))
 	if err != nil {
@@ -130,11 +127,11 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caSig, err := ca.signer.Sign(rand.Reader, caMsg)
+	caSig, err := caSubSigner.Sign(rand.Reader, caMsg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	goodBody := buildSignSubtreeRequestWithCASig(t, ca.logID, ca.cosigner,
+	goodBody := buildSignSubtreeRequestWithCASig(t, ca.cosigner, cert.AlgMLDSA44, caSubKey.PublicKey,
 		subtreeStart, subtreeEnd, subtreeHash, caSig, cpBody, proof)
 	resp3, err := http.Post(hSrv.URL, "text/plain", bytes.NewReader(goodBody))
 	if err != nil {
@@ -148,51 +145,4 @@ func TestMirrorRequireCASignatureGate(t *testing.T) {
 	if !strings.Contains(string(body3), cert.OIDName(mirrorID)) {
 		t.Errorf("valid-CA-sig: response missing mirror sig line: %q", body3)
 	}
-}
-
-// buildSignSubtreeRequestWithCASig is the same as
-// buildSignSubtreeRequest but injects a CA signature line into the
-// subtree note's signature section.
-func buildSignSubtreeRequestWithCASig(
-	t *testing.T,
-	logID, caCosignerID cert.TrustAnchorID,
-	start, end uint64, subtreeHash tlogx.Hash,
-	caSig []byte,
-	cpBody []byte, proof []tlogx.Hash,
-) []byte {
-	t.Helper()
-	caKey := cert.OIDName(caCosignerID)
-	keyID := mtcSubtreeKeyIDInline(caKey)
-	blob := append(append([]byte(nil), keyID[:]...), caSig...)
-
-	var b bytes.Buffer
-	b.WriteString(cert.OIDName(logID) + "\n")
-	fmt.Fprintf(&b, "%d %d\n", start, end)
-	b.WriteString(base64.StdEncoding.EncodeToString(subtreeHash[:]) + "\n")
-	b.WriteString("\n") // body/sigs delimiter
-	fmt.Fprintf(&b, "— %s %s\n", caKey, base64.StdEncoding.EncodeToString(blob))
-	b.WriteString("\n") // §C.2 inter-section blank line
-	b.Write(cpBody)
-	if !bytes.HasSuffix(cpBody, []byte("\n")) {
-		b.WriteString("\n")
-	}
-	if !bytes.HasSuffix(cpBody, []byte("\n\n")) {
-		b.WriteString("\n")
-	}
-	for _, h := range proof {
-		b.WriteString(base64.StdEncoding.EncodeToString(h[:]) + "\n")
-	}
-	return b.Bytes()
-}
-
-// mtcSubtreeKeyIDInline computes the §C.1 keyID for a subtree
-// signature. Duplicates the helper in mirror/server.go and
-// cert/cosigner_request.go but kept local to test code.
-func mtcSubtreeKeyIDInline(keyName string) [4]byte {
-	buf := append([]byte(keyName), 0x0A, 0xFF)
-	buf = append(buf, []byte("mtc-subtree/v1")...)
-	sum := sha256Sum(buf)
-	var out [4]byte
-	copy(out[:], sum[:4])
-	return out
 }

@@ -2,17 +2,12 @@ package signer
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/sha256"
-	"crypto/sha512"
-	"crypto/x509"
 	"path/filepath"
 	"testing"
 )
 
 func TestParseAlgorithm(t *testing.T) {
-	for _, name := range []string{"ecdsa-p256-sha256", "ecdsa-p384-sha384", "mldsa-44", "mldsa-65", "mldsa-87"} {
+	for _, name := range []string{"mldsa-44", "mldsa-65", "mldsa-87"} {
 		alg, err := ParseAlgorithm(name)
 		if err != nil {
 			t.Errorf("ParseAlgorithm(%q): %v", name, err)
@@ -22,18 +17,20 @@ func TestParseAlgorithm(t *testing.T) {
 			t.Errorf("alg.String() = %q, want %q", alg.String(), name)
 		}
 	}
-	if _, err := ParseAlgorithm("rsa"); err == nil {
-		t.Error("ParseAlgorithm(rsa): want error")
+	for _, bad := range []string{"rsa", "ecdsa-p256-sha256", "ed25519", ""} {
+		if _, err := ParseAlgorithm(bad); err == nil {
+			t.Errorf("ParseAlgorithm(%q): want error", bad)
+		}
 	}
 }
 
-func TestECDSAP256SeedDeterministic(t *testing.T) {
+func TestSeedDeterministic(t *testing.T) {
 	seed := bytes.Repeat([]byte{0x42}, SeedSize)
-	a, err := FromSeed(AlgECDSAP256SHA256, seed)
+	a, err := FromSeed(AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := FromSeed(AlgECDSAP256SHA256, seed)
+	b, err := FromSeed(AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,63 +39,13 @@ func TestECDSAP256SeedDeterministic(t *testing.T) {
 	}
 }
 
-func TestECDSAP256SeedDifferentSeedsDifferKey(t *testing.T) {
+func TestSeedDifferentSeedsDifferKey(t *testing.T) {
 	seed1 := bytes.Repeat([]byte{0x01}, SeedSize)
 	seed2 := bytes.Repeat([]byte{0x02}, SeedSize)
-	a, _ := FromSeed(AlgECDSAP256SHA256, seed1)
-	b, _ := FromSeed(AlgECDSAP256SHA256, seed2)
+	a, _ := FromSeed(AlgMLDSA44, seed1)
+	b, _ := FromSeed(AlgMLDSA44, seed2)
 	if bytes.Equal(a.PublicKey(), b.PublicKey()) {
 		t.Errorf("expected distinct keys for distinct seeds")
-	}
-}
-
-func TestECDSAP256SignVerify(t *testing.T) {
-	seed := bytes.Repeat([]byte{0xab}, SeedSize)
-	s, err := FromSeed(AlgECDSAP256SHA256, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := []byte("hello-mtc")
-	sig, err := s.Sign(nil, msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pubAny, err := x509.ParsePKIXPublicKey(s.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	pub := pubAny.(*ecdsa.PublicKey)
-	digest := sha256.Sum256(msg)
-	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
-		t.Errorf("signature failed to verify")
-	}
-}
-
-func TestECDSAP384SignVerify(t *testing.T) {
-	seed := bytes.Repeat([]byte{0xcd}, SeedSize)
-	s, err := FromSeed(AlgECDSAP384SHA384, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Algorithm() != AlgECDSAP384SHA384 {
-		t.Errorf("Algorithm() = %v, want ecdsa-p384-sha384", s.Algorithm())
-	}
-	msg := []byte("hello-mtc-p384")
-	sig, err := s.Sign(nil, msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pubAny, err := x509.ParsePKIXPublicKey(s.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	pub := pubAny.(*ecdsa.PublicKey)
-	if pub.Curve != elliptic.P384() {
-		t.Fatalf("derived key curve = %s, want P-384", pub.Curve.Params().Name)
-	}
-	digest := sha512.Sum384(msg)
-	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
-		t.Errorf("signature failed to verify")
 	}
 }
 
@@ -123,7 +70,7 @@ func TestSeedWriteLoadRoundTrip(t *testing.T) {
 }
 
 func TestSeedWrongSize(t *testing.T) {
-	if _, err := FromSeed(AlgECDSAP256SHA256, []byte{1, 2, 3}); err == nil {
+	if _, err := FromSeed(AlgMLDSA44, []byte{1, 2, 3}); err == nil {
 		t.Error("expected error for wrong-size seed")
 	}
 }

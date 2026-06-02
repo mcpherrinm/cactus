@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -103,10 +104,6 @@ func buildMirrorEndpoints(mirrors []config.MirrorEndpointConfig) ([]cert.MirrorE
 // systems are distinct.
 func signerAlgToCertAlg(a signer.Algorithm) cert.SignatureAlgorithm {
 	switch a {
-	case signer.AlgECDSAP256SHA256:
-		return cert.AlgECDSAP256SHA256
-	case signer.AlgECDSAP384SHA384:
-		return cert.AlgECDSAP384SHA384
 	case signer.AlgMLDSA44:
 		return cert.AlgMLDSA44
 	case signer.AlgMLDSA65:
@@ -372,7 +369,12 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain")
 		_, _ = w.Write(caCertPEM)
 	})
-	monMux.Handle("/", tileSrv.Handler())
+	// Per the MTC-with-tlog profile, each issuance log is served as a
+	// tiled transparency log at <prefix>/<log number>, where the
+	// monitoring listener's base URL is the CA prefix. So mount the log's
+	// tile/checkpoint/landmark routes under "/<log number>/".
+	logPrefix := "/" + strconv.Itoa(int(cfg.Log.Number))
+	monMux.Handle(logPrefix+"/", http.StripPrefix(logPrefix, tileSrv.Handler()))
 	monitoringHTTP := &http.Server{
 		Addr:              cfg.Monitoring.Listen,
 		Handler:           logging.Middleware(logger)(monMux),
@@ -518,7 +520,7 @@ func startMirror(
 	if cfg.Mirror.RequireCASignatureOnSubtree {
 		mServerCfg.UpstreamCAKey = &cert.CosignerKey{
 			ID:        cert.TrustAnchorID(cfg.Mirror.Upstream.CACosignerID),
-			Algorithm: cert.AlgECDSAP256SHA256,
+			Algorithm: cert.AlgMLDSA44,
 			PublicKey: upstreamKey,
 		}
 	}
@@ -625,14 +627,19 @@ func die(format string, args ...any) {
 // (§7.1). minSerial is 0: cactus does not prune, so no serials are
 // initially revoked.
 func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) {
-	sigAlg, err := cert.SigAlgOID(cert.SignatureAlgorithm(sgn.Algorithm()))
+	alg := cert.SignatureAlgorithm(sgn.Algorithm())
+	sigAlg, err := cert.SigAlgOID(alg)
+	if err != nil {
+		return nil, err
+	}
+	cosignerSPKI, err := cert.MarshalCosignerSPKI(alg, sgn.PublicKey())
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now()
 	der, err := cert.BuildCACertificate(cert.CACertificateInput{
 		CAID:         caID,
-		CosignerSPKI: sgn.PublicKey(),
+		CosignerSPKI: cosignerSPKI,
 		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlg,
 		MinSerial:    0,

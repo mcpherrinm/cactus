@@ -49,7 +49,7 @@ func newTestLog(t *testing.T) (*cactuslog.Log, signer.Signer, cert.TrustAnchorID
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0xAB}, signer.SeedSize)
-	s, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestIssueRoundTripFullValidation(t *testing.T) {
 	if !bytes.Equal(mtcProof.Signatures[0].CosignerID, cosignerID) {
 		t.Errorf("cosigner ID = %q, want %q", mtcProof.Signatures[0].CosignerID, cosignerID)
 	}
-	if !verifySignature(t, sgn.PublicKey(), sigInput, mtcProof.Signatures[0].Signature) {
+	if !verifySignature(t, cosignerID, sgn.PublicKey(), sigInput, mtcProof.Signatures[0].Signature) {
 		t.Errorf("CA cosignature failed to verify")
 	}
 }
@@ -192,18 +192,13 @@ func algIsMTCProof(algID []byte) bool {
 
 // verifySignature verifies an ECDSA-P256-SHA256 signature given an SPKI
 // public key, message, and signature.
-func verifySignature(t *testing.T, spki []byte, msg, sig []byte) bool {
+func verifySignature(t *testing.T, id cert.TrustAnchorID, pub, msg, sig []byte) bool {
 	t.Helper()
-	pubAny, err := x509.ParsePKIXPublicKey(spki)
+	err := cert.VerifyMTCSignature(
+		cert.CosignerKey{ID: id, Algorithm: cert.AlgMLDSA44, PublicKey: pub},
+		cert.MTCSignature{CosignerID: id, Signature: sig}, msg)
 	if err != nil {
-		t.Errorf("parse SPKI: %v", err)
-		return false
+		t.Logf("verify: %v", err)
 	}
-	pub, ok := pubAny.(*ecdsa.PublicKey)
-	if !ok {
-		t.Errorf("not ECDSA")
-		return false
-	}
-	digest := sha256.Sum256(msg)
-	return ecdsa.VerifyASN1(pub, digest[:], sig)
+	return err == nil
 }

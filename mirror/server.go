@@ -70,8 +70,20 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if len(cfg.CosignerID) == 0 {
 		return nil, errors.New("mirror: ServerConfig.CosignerID required")
 	}
-	if cfg.RequireCASignatureOnSubtree && cfg.UpstreamCAKey == nil {
-		return nil, errors.New("mirror: UpstreamCAKey required when RequireCASignatureOnSubtree")
+	// The c2sp.org/tlog-witness sign-subtree response is an ML-DSA-44
+	// cosignature (c2sp.org/tlog-cosignature defines no ECDSA cosignature
+	// type), so the witness key MUST be ML-DSA-44.
+	if cert.SignatureAlgorithm(cfg.Signer.Algorithm()) != cert.AlgMLDSA44 {
+		return nil, fmt.Errorf("mirror: witness Signer must be ML-DSA-44, got %s", cfg.Signer.Algorithm())
+	}
+	if cfg.RequireCASignatureOnSubtree {
+		if cfg.UpstreamCAKey == nil {
+			return nil, errors.New("mirror: UpstreamCAKey required when RequireCASignatureOnSubtree")
+		}
+		if cfg.UpstreamCAKey.Algorithm != cert.AlgMLDSA44 {
+			return nil, fmt.Errorf("mirror: UpstreamCAKey must be ML-DSA-44 for subtree cosignatures, got 0x%04x",
+				uint16(cfg.UpstreamCAKey.Algorithm))
+		}
 	}
 	return &Server{cfg: cfg}, nil
 }
@@ -119,7 +131,24 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1) DoS mitigation: subtree note must carry the CA's signature.
+	// 1) Range validity (c2sp.org/tlog-witness): start < end and end <=
+	// the reference checkpoint size, else 400.
+	if parsed.start >= parsed.end || parsed.end > parsed.checkpointSize {
+		result = "bad_range"
+		http.Error(w, "invalid subtree range", http.StatusBadRequest)
+		return
+	}
+
+	// 2) Origin: the reference checkpoint MUST be for the log we mirror,
+	// else 404 (unknown checkpoint origin).
+	wantOrigin := cert.OIDName(s.cfg.Follower.cfg.Upstream.LogID)
+	if parsed.checkpointOrigin != wantOrigin {
+		result = "unknown_origin"
+		http.Error(w, "unknown checkpoint origin", http.StatusNotFound)
+		return
+	}
+
+	// 3) DoS mitigation: a valid CA subtree cosignature must be present.
 	if s.cfg.RequireCASignatureOnSubtree {
 		if err := s.verifyCAOnSubtree(parsed); err != nil {
 			result = "ca_sig_error"
@@ -128,9 +157,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2) Stateful checkpoint check: compare to our verified upstream
-	// state. If the requester's checkpoint is older than ours, return
-	// 409 with our current checkpoint (Appendix C.2).
+	// 4) Stateful checkpoint check: compare to our verified upstream
+	// state. If the requester's checkpoint is not ours, return 409 with
+	// our current checkpoint (c2sp.org/tlog-witness).
 	currentSize, currentRoot, currentNote := s.cfg.Follower.Current()
 	if parsed.checkpointSize != currentSize || parsed.checkpointRoot != currentRoot {
 		result = "checkpoint_conflict"
@@ -140,19 +169,20 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3) Verify consistency proof: subtree → checkpoint.
+	// 5) Verify the subtree consistency proof against the checkpoint.
+	// A failed Merkle proof is 422 (c2sp.org/tlog-witness).
 	if err := tlogx.VerifyConsistencyProof(
 		sha256Hash, parsed.start, parsed.end, currentSize, parsed.proof,
 		parsed.subtreeHash, currentRoot,
 	); err != nil {
 		result = "consistency_error"
-		http.Error(w, "consistency proof: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "consistency proof: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 
-	// 4) Cross-check the requester's claimed subtree hash against
-	// our local copy. Already implicit in step 3, but explicit here
-	// catches a different class of bug (hash mismatch with no proof).
+	// 6) Cross-check the requester's claimed subtree hash against our
+	// local copy. Already implicit in step 5, but explicit here catches a
+	// different class of bug (hash mismatch with no proof).
 	localHash, err := s.cfg.Follower.SubtreeHash(parsed.start, parsed.end)
 	if err != nil {
 		result = "subtree_hash_error"
@@ -165,7 +195,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5) Sign the §5.3.1 CosignedMessage.
+	// 7) Sign the §5.3.1 CosignedMessage.
 	subtree := &cert.MTCSubtree{
 		LogID: s.cfg.Follower.cfg.Upstream.LogID,
 		Start: parsed.start, End: parsed.end, Hash: parsed.subtreeHash,
@@ -181,26 +211,21 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6) Emit the signature line per [tlog-cosignature]: em-dash,
-	// key name, base64(keyID || signature). Use the §C.1 subtree key
-	// ID derivation: SHA-256(keyName || 0x0A || 0xFF || "mtc-subtree/v1")[:4].
+	// 8) Emit the c2sp.org/signed-note signature line: em-dash, key
+	// name, base64(keyID || signature), with the ML-DSA-44 cosignature
+	// key ID from c2sp.org/tlog-cosignature.
 	keyName := cert.OIDName(s.cfg.CosignerID)
-	keyID := subtreeKeyID(keyName)
+	keyID, err := cert.CosignatureKeyID(keyName,
+		cert.SignatureAlgorithm(s.cfg.Signer.Algorithm()), s.cfg.Signer.PublicKey())
+	if err != nil {
+		http.Error(w, "key id: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	sigWithID := append(append([]byte(nil), keyID[:]...), sig...)
 	line := fmt.Sprintf("%s %s %s\n", emDash, keyName, base64.StdEncoding.EncodeToString(sigWithID))
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(line))
-}
-
-// subtreeKeyID computes the §C.1 keyID for a subtree signature.
-func subtreeKeyID(keyName string) [4]byte {
-	buf := append([]byte(keyName), 0x0A, 0xFF)
-	buf = append(buf, []byte("mtc-subtree/v1")...)
-	sum := sha256.Sum256(buf)
-	var out [4]byte
-	copy(out[:], sum[:4])
-	return out
 }
 
 // ParseSignSubtreeRequestForFuzz exposes the request parser for fuzz
@@ -214,38 +239,52 @@ func ParseSignSubtreeRequestForFuzz(body []byte) error {
 
 // parsedRequest carries everything the handler needs to make a decision.
 type parsedRequest struct {
-	subtreeNote    *signedNote
-	subtreeOrigin  string
-	start, end     uint64
-	subtreeHash    tlogx.Hash
-	checkpointNote *signedNote
-	checkpointSize uint64
-	checkpointRoot tlogx.Hash
-	proof          []tlogx.Hash
+	start, end       uint64
+	subtreeHash      tlogx.Hash
+	subtreeCosigs    []noteSignature // 0..8 subtree cosignature lines
+	proof            []tlogx.Hash
+	checkpointNote   *signedNote
+	checkpointOrigin string
+	checkpointSize   uint64
+	checkpointRoot   tlogx.Hash
 }
 
+// parseRequest parses a c2sp.org/tlog-witness sign-subtree request body:
+//
+//	subtree <start> <end>
+//	<base64 subtree hash>
+//	[— <key> <sig>]            (0..8 subtree cosignature lines)
+//	<base64 proof hash>        (0..63 consistency-proof lines)
+//	...
+//	<empty line>
+//	<reference checkpoint>
 func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	r := bufio.NewReader(bytes.NewReader(body))
-	subtreeNote, err := readSignedNote(r)
+
+	// Subtree range line.
+	rangeLine, err := readLine(r)
 	if err != nil {
-		return nil, fmt.Errorf("subtree note: %w", err)
+		return nil, fmt.Errorf("subtree range line: %w", err)
 	}
-	if len(subtreeNote.body) != 3 {
-		return nil, fmt.Errorf("subtree note has %d body lines, want 3", len(subtreeNote.body))
+	fields := strings.Split(rangeLine, " ")
+	if len(fields) != 3 || fields[0] != "subtree" {
+		return nil, fmt.Errorf("malformed subtree range line %q", rangeLine)
 	}
-	startEnd := strings.Fields(subtreeNote.body[1])
-	if len(startEnd) != 2 {
-		return nil, fmt.Errorf("subtree note body[1] %q not %q-shaped", subtreeNote.body[1], "<start> <end>")
-	}
-	start, err := strconv.ParseUint(startEnd[0], 10, 64)
+	start, err := strconv.ParseUint(fields[1], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("subtree start: %w", err)
 	}
-	end, err := strconv.ParseUint(startEnd[1], 10, 64)
+	end, err := strconv.ParseUint(fields[2], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("subtree end: %w", err)
 	}
-	hashBytes, err := base64.StdEncoding.DecodeString(subtreeNote.body[2])
+
+	// Subtree hash line.
+	hashLine, err := readLine(r)
+	if err != nil {
+		return nil, fmt.Errorf("subtree hash line: %w", err)
+	}
+	hashBytes, err := base64.StdEncoding.DecodeString(hashLine)
 	if err != nil {
 		return nil, fmt.Errorf("subtree hash b64: %w", err)
 	}
@@ -255,6 +294,56 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	var subtreeHash tlogx.Hash
 	copy(subtreeHash[:], hashBytes)
 
+	// Subtree cosignature lines (0..8), then consistency-proof lines
+	// (0..63), terminated by an empty line before the checkpoint.
+	// Cosignature lines start with the em-dash; proof lines are bare
+	// base64 hashes. Cosignatures MUST precede proof lines.
+	var cosigs []noteSignature
+	var proof []tlogx.Hash
+	sawProof := false
+	for {
+		line, err := readLine(r)
+		if err == io.EOF {
+			return nil, errors.New("request ended before checkpoint")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("subtree section: %w", err)
+		}
+		if line == "" {
+			break // empty line: end of subtree section.
+		}
+		if strings.HasPrefix(line, emDash+" ") {
+			if sawProof {
+				return nil, errors.New("subtree cosignature line after proof line")
+			}
+			if len(cosigs) >= 8 {
+				return nil, errors.New("more than 8 subtree cosignature lines")
+			}
+			ns, err := parseNoteSignatureLine(line)
+			if err != nil {
+				return nil, fmt.Errorf("subtree cosignature: %w", err)
+			}
+			cosigs = append(cosigs, ns)
+			continue
+		}
+		// Otherwise a consistency-proof hash.
+		sawProof = true
+		if len(proof) >= 63 {
+			return nil, errors.New("more than 63 proof lines")
+		}
+		raw, err := base64.StdEncoding.DecodeString(line)
+		if err != nil {
+			return nil, fmt.Errorf("proof line b64: %w", err)
+		}
+		if len(raw) != tlogx.HashSize {
+			return nil, fmt.Errorf("proof line %d bytes, want %d", len(raw), tlogx.HashSize)
+		}
+		var h tlogx.Hash
+		copy(h[:], raw)
+		proof = append(proof, h)
+	}
+
+	// Reference checkpoint: a full signed checkpoint note.
 	checkpointNote, err := readSignedNote(r)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint note: %w", err)
@@ -276,59 +365,44 @@ func (s *Server) parseRequest(body []byte) (*parsedRequest, error) {
 	var cpRoot tlogx.Hash
 	copy(cpRoot[:], cpRootBytes)
 
-	// Remaining lines are consistency proof hashes (max 63 per §C.2).
-	var proof []tlogx.Hash
-	for {
-		line, err := readLine(r)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("proof: %w", err)
-		}
-		if line == "" {
-			continue
-		}
-		if len(proof) >= 63 {
-			return nil, errors.New("more than 63 proof lines")
-		}
-		raw, err := base64.StdEncoding.DecodeString(line)
-		if err != nil {
-			return nil, fmt.Errorf("proof line b64: %w", err)
-		}
-		if len(raw) != tlogx.HashSize {
-			return nil, fmt.Errorf("proof line %d bytes, want %d", len(raw), tlogx.HashSize)
-		}
-		var h tlogx.Hash
-		copy(h[:], raw)
-		proof = append(proof, h)
-	}
-
 	return &parsedRequest{
-		subtreeNote:   subtreeNote,
-		subtreeOrigin: subtreeNote.body[0],
-		start:         start, end: end,
-		subtreeHash:    subtreeHash,
-		checkpointNote: checkpointNote,
-		checkpointSize: cpSize,
-		checkpointRoot: cpRoot,
-		proof:          proof,
+		start: start, end: end,
+		subtreeHash:      subtreeHash,
+		subtreeCosigs:    cosigs,
+		proof:            proof,
+		checkpointNote:   checkpointNote,
+		checkpointOrigin: checkpointNote.body[0],
+		checkpointSize:   cpSize,
+		checkpointRoot:   cpRoot,
 	}, nil
 }
 
-// verifyCAOnSubtree checks the upstream CA's signature on the subtree
-// note. The CA's signature is over the §5.3.1 CosignedMessage
-// for [start, end), with hash = the requester's claimed hash.
+// verifyCAOnSubtree checks the upstream CA's subtree cosignature among
+// the request's subtree cosignature lines. The CA's signature is over
+// the §5.3.1 CosignedMessage for [start, end), with hash = the
+// requester's claimed hash. The key ID MUST match the c2sp.org/signed-
+// note ML-DSA-44 key ID for the CA key.
 func (s *Server) verifyCAOnSubtree(p *parsedRequest) error {
 	wantKey := cert.OIDName(s.cfg.UpstreamCAKey.ID)
-	caSig, ok := p.subtreeNote.signatureFor(wantKey)
-	if !ok {
-		return fmt.Errorf("subtree note missing %q signature", wantKey)
+	wantKeyID, err := cert.CosignatureKeyID(wantKey,
+		s.cfg.UpstreamCAKey.Algorithm, s.cfg.UpstreamCAKey.PublicKey)
+	if err != nil {
+		return err
 	}
-	if len(caSig.sigBytes) < 5 {
-		return errors.New("subtree note CA sig too short")
+	var rawSig []byte
+	for _, c := range p.subtreeCosigs {
+		if c.keyName != wantKey {
+			continue
+		}
+		if len(c.sigBytes) < 4 || [4]byte(c.sigBytes[:4]) != wantKeyID {
+			continue // same name, different key ID: ignore.
+		}
+		rawSig = c.sigBytes[4:]
+		break
 	}
-	rawSig := caSig.sigBytes[4:]
+	if rawSig == nil {
+		return fmt.Errorf("no subtree cosignature from %q", wantKey)
+	}
 
 	// The signed message is CosignedMessage. We need the
 	// log_id, which is the upstream's log ID; we have it on Follower.

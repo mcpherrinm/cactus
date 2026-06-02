@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,12 +38,27 @@ func buildBinary(t *testing.T, pkg string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, filepath.Base(pkg))
-	cmd := exec.Command("go", "build", "-o", bin, "../"+pkg)
+	// Build with the same toolchain that's running the test, so a binary
+	// exercising ML-DSA (the witness path) is compiled with Go 1.27+ when
+	// the test itself runs under gotip.
+	cmd := exec.Command(goToolPath(), "build", "-o", bin, "../"+pkg)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("go build %s: %v", pkg, err)
 	}
 	return bin
+}
+
+// goToolPath returns the `go` binary of the toolchain running the test
+// (via GOROOT), falling back to whatever `go` is on PATH.
+func goToolPath() string {
+	if gr := runtime.GOROOT(); gr != "" {
+		cand := filepath.Join(gr, "bin", "go")
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	return "go"
 }
 
 // TestCactusBinaryStartsAndServes is an end-to-end smoke test of
@@ -70,7 +86,7 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 		},
 		"ca_cosigner": map[string]any{
 			"id":        "44363.47.1.99",
-			"algorithm": "ecdsa-p256-sha256",
+			"algorithm": "mldsa-44",
 			"seed_path": "keys/ca-cosigner.seed",
 		},
 		"acme": map[string]any{
@@ -159,7 +175,7 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	// /checkpoint on the monitoring listener — a fresh log publishes an
 	// initial empty (size 0) checkpoint (draft-04 §5.2.1: no reserved
 	// null entry).
-	cpURL := fmt.Sprintf("http://127.0.0.1:%d/checkpoint", monPort)
+	cpURL := fmt.Sprintf("http://127.0.0.1:%d/1/checkpoint", monPort)
 	resp3, err := http.Get(cpURL)
 	if err != nil {
 		t.Fatal(err)

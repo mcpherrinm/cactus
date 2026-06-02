@@ -177,7 +177,7 @@ var (
 	_ = context.Background
 	_ = cactuslog.Issued{}
 	_ = cert.MTCProof{}
-	_ = signer.AlgECDSAP256SHA256
+	_ = signer.AlgMLDSA44
 	_ = storage.New
 	_ = binary.BigEndian
 )

@@ -21,7 +21,7 @@ func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x42}, signer.SeedSize)
-	s, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestSignedNoteRoundTrip(t *testing.T) {
 	nb, err := buildSignedNote(
 		cert.TrustAnchorID("32473.1"),
 		cert.TrustAnchorID("32473.1"),
-		42, root, []byte("signature"),
+		42, root, cert.AlgMLDSA44, []byte("pubkey"), []byte("signature"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestLogReloadAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := bytes.Repeat([]byte{0x55}, signer.SeedSize)
-	s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 
 	l1, err := New(context.Background(), Config{
 		LogID:       cert.TrustAnchorID("32473.1"),

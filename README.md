@@ -52,8 +52,7 @@ operate it, and where to look in the code.
   `/landmarks` endpoint per §6.3.1, and switches the §9 alternate URL
   from a `503` stub to a real signature-less cert once a covering
   landmark exists.
-- Acts as a **CA cosigner** using ECDSA-P256 or ECDSA-P384 (or
-  ML-DSA-44/65/87 when built with Go 1.27+).
+- Acts as a **CA cosigner** using ML-DSA-44 (requires a Go 1.27+ build).
 - Optionally **runs as a cosigning mirror** for an external upstream
   log ([tlog-mirror], [tlog-cosignature]). In mirror mode cactus
   follows an upstream via tlog-tiles, verifies consistency, and
@@ -104,15 +103,19 @@ You'll see structured JSON logs on stdout. The default
 config-example listens on:
 
 - `:14000` — ACME (HTTP, plaintext for tests)
-- `:14080` — monitoring read-path (`/checkpoint`, tiles, entries)
+- `:14080` — monitoring read-path. The monitoring base URL is the **CA
+  prefix**; each issuance log is served as a tiled transparency log under
+  `/<log number>/` (`/<log number>/checkpoint`, `/<log number>/tile/…`,
+  `/<log number>/landmarks`), per the MTC-with-tlog profile. The
+  CA-level `/ca-certificate` lives at the root.
 - `127.0.0.1:14090` — Prometheus metrics + pprof
 
-Once it's up:
+Once it's up (log number `1` in the example config):
 
 ```sh
-curl http://localhost:14000/directory   # ACME directory
-curl http://localhost:14080/checkpoint  # current signed-note checkpoint
-curl http://localhost:14090/metrics     # Prometheus metrics
+curl http://localhost:14000/directory     # ACME directory
+curl http://localhost:14080/1/checkpoint   # current signed-note checkpoint
+curl http://localhost:14090/metrics        # Prometheus metrics
 ```
 
 Stop it with `Ctrl-C` (SIGINT) or `kill -TERM` — graceful shutdown
@@ -159,14 +162,15 @@ blobs):
 
 ```sh
 # After issuance, find the cert's index in the log:
-curl http://localhost:14080/checkpoint
+curl http://localhost:14080/1/checkpoint
 # (parse the second body line — that's the tree size)
 
-# Show the most recent entry, where N = (tree size - 1):
-./bin/cactus-cli entry http://localhost:14080 N
+# Show the most recent entry, where N = (tree size - 1).
+# The log base URL is the monitoring base + "/<log number>":
+./bin/cactus-cli entry http://localhost:14080/1 N
 
 # Verify the issued cert end-to-end:
-./bin/cactus-cli cert verify ./certs/example.test.crt http://localhost:14080
+./bin/cactus-cli cert verify ./certs/example.test.crt http://localhost:14080/1
 ```
 
 The cert verify path runs the full §7.2 procedure: split the
@@ -236,7 +240,7 @@ signatures per second.
 ```json
 "ca_cosigner": {
   "id": "1.3.6.1.4.1.44363.47.1.99",
-  "algorithm": "ecdsa-p256-sha256",
+  "algorithm": "mldsa-44",
   "seed_path": "keys/ca-cosigner.seed"
 }
 ```
@@ -245,13 +249,16 @@ signatures per second.
 ID to equal the CA ID, so this one value identifies the CA, seeds the
 issuer DN, and roots all derived log / landmark IDs.
 
-Use `ecdsa-p256-sha256` or `ecdsa-p384-sha384` on any toolchain;
-`mldsa-44`, `mldsa-65`, and `mldsa-87` are available when built with
-Go 1.27+, which provides the built-in `crypto/mldsa` (until 1.27 ships, a
-`gotip` 1.27-devel toolchain works). ML-DSA support compiles in
-automatically via a `//go:build go1.27` constraint — no build tag. An
-`mldsa-*` algorithm in the config still validates on an older toolchain,
-but the server exits at startup explaining the Go 1.27 requirement.
+`algorithm` **must be `mldsa-44`** (the validator rejects anything else).
+The MTC-with-tlog profile requires every MTC cosigner — including the CA
+cosigner that signs checkpoints — to use an ML-DSA-44 key and produce
+ML-DSA-44 [tlog-cosignature] signed messages, since that is currently the
+only algorithm available in both X.509 and C2SP in a subtree-capable
+form. ML-DSA-44 is the only cosigner algorithm cactus implements (with
+`mldsa-65`/`mldsa-87` available for experiments). It uses Go's built-in
+`crypto/mldsa`, so **cactus requires a Go 1.27+ build** (until 1.27
+ships, a `gotip` 1.27-devel toolchain works); there are no build tags,
+and an older toolchain simply won't compile cactus.
 
 ### `acme`
 
@@ -291,12 +298,13 @@ party state per CA. See §6.3.1 of the draft.
   "enabled": true,
   "cosigner_id": "1.3.6.1.4.1.44363.47.2.1.mirror",
   "seed_path": "keys/mirror-cosigner.seed",
-  "algorithm": "ecdsa-p256-sha256",
+  "algorithm": "mldsa-44",
   "upstream": {
     "tile_url": "https://upstream.example/log",
     "log_id": "1.3.6.1.4.1.44363.47.1.99.0.1",
     "ca_cosigner_id": "1.3.6.1.4.1.44363.47.1.99",
     "ca_cosigner_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+    "ca_cosigner_algorithm": "mldsa-44",
     "poll_interval_ms": 1000
   },
   "sign_subtree_listen": ":14081",
@@ -306,9 +314,13 @@ party state per CA. See §6.3.1 of the draft.
 ```
 
 The mirror's cosigner ID + seed must differ from the CA's (the
-validator rejects shared keys). `require_ca_signature_on_subtree`
-is the [tlog-cosignature] DoS gate — keep it on if the
-`/sign-subtree` listener is publicly reachable.
+validator rejects shared keys). The cosigner `algorithm` **must be
+`mldsa-44`**: the [tlog-witness] `sign-subtree` response is an ML-DSA-44
+[tlog-cosignature] (there is no ECDSA cosignature type), so the witness
+path requires it and a mirror cosigner therefore needs a Go 1.27+ build.
+`require_ca_signature_on_subtree` is the [tlog-witness] DoS gate — keep
+it on if the `/sign-subtree` listener is publicly reachable; the CA's
+subtree cosignature it requires must likewise be ML-DSA-44.
 
 ### `ca_cosigner_quorum` (optional, CA-side mirror requests)
 
@@ -318,7 +330,7 @@ is the [tlog-cosignature] DoS gate — keep it on if the
     {
       "id": "example.mirror.1",
       "url": "https://mirror-1.example/sign-subtree",
-      "algorithm": "ecdsa-p256-sha256",
+      "algorithm": "mldsa-44",
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"
     }
   ],
@@ -379,7 +391,7 @@ cactus/
 ├── landmark/  §6.3 landmark sequence allocator + /landmarks handler
 ├── log/       issuance log (single-writer, signed checkpoints + subtrees)
 ├── mirror/    follower + sign-subtree HTTP server
-├── signer/    cosigner abstraction (ECDSA + ML-DSA on Go 1.27+)
+├── signer/    cosigner abstraction (ML-DSA-44/65/87, Go 1.27+)
 ├── storage/   on-disk K/V (atomic-rename writes)
 ├── tile/      read-path HTTP server (tlog-tiles compatible layout)
 ├── tlogx/     §4 subtree primitives extending x/mod/sumdb/tlog
@@ -397,12 +409,14 @@ to "verifiable bytes on disk".
 
 ## Tests
 
+cactus requires **Go 1.27+** (built-in `crypto/mldsa`). Until 1.27 ships,
+use a `gotip` 1.27-devel toolchain; an older `go` won't compile cactus.
+
 ```sh
-go test -race -count=1 ./...                          # ECDSA cosigner (Go <1.27)
-gotip test -race -count=1 ./...                       # also ML-DSA cosigner (gotip 1.27-devel auto-enables it)
-go test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
-go test -fuzz=FuzzParseSignSubtreeRequest -fuzztime=30s ./mirror/...
-make integration                                       # `go test -race -count=1 -tags=integration ./integration/...`
+gotip test -race -count=1 ./...
+gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
+gotip test -fuzz=FuzzParseSignSubtreeRequest -fuzztime=30s ./mirror/...
+make integration                                       # `gotip test -race -count=1 -tags=integration ./integration/...`
 ```
 
 The cornerstone tests:

@@ -40,7 +40,7 @@ func TestMirrorFollowerHappyPath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = follower.Run(ctx) }()
+	startFollower(t, ctx, follower)
 
 	// Issue some certs on the CA.
 	const n = 5
@@ -119,7 +119,7 @@ func TestMirrorFollowerHaltsOnBadKey(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = follower.Run(ctx) }()
+	startFollower(t, ctx, follower)
 
 	// Wait for halt.
 	deadline := time.Now().Add(2 * time.Second)

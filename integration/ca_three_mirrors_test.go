@@ -45,11 +45,11 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 	}
 	mks := make([]mk, 3)
 	for i := range mks {
-		seed := make([]byte, signer.SeedSize)
-		seed[0] = byte(0x10 + i)
-		s, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
-		mks[i].signer = s
+		// Mirror cosigners are ML-DSA-44 (the witness path is ML-DSA-44
+		// only); the test skips if the toolchain can't provide it.
 		mks[i].id = cert.TrustAnchorID(fmt.Sprintf("32473.%d", 30+i+1))
+		s, _ := mldsaCosigner(t, mks[i].id, byte(0x10+i))
+		mks[i].signer = s
 	}
 
 	// 1) Bring up the CA log + tile server.
@@ -62,7 +62,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 	for i := range caSeed {
 		caSeed[i] = 0x00
 	}
-	caSigner, _ := signer.FromSeed(signer.AlgECDSAP256SHA256, caSeed)
+	caSigner, _ := signer.FromSeed(signer.AlgMLDSA44, caSeed)
 	logID := cert.TrustAnchorID("32473.5")
 	caCosigID := cert.TrustAnchorID("32473.5")
 
@@ -82,7 +82,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 			out = append(out, cert.MirrorEndpoint{
 				URL: m.url,
 				Key: cert.CosignerKey{
-					ID: m.id, Algorithm: cert.AlgECDSAP256SHA256,
+					ID: m.id, Algorithm: cert.AlgMLDSA44,
 					PublicKey: m.signer.PublicKey(),
 				},
 			})
@@ -154,7 +154,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = f.Run(ctx) }()
+		startFollower(t, ctx, f)
 		srv, err := mirror.NewServer(mirror.ServerConfig{
 			Follower: f, Signer: mks[i].signer, CosignerID: mks[i].id,
 		})
@@ -220,7 +220,7 @@ func TestEndToEndCAWithThreeMirrors(t *testing.T) {
 		for _, m := range mks {
 			if string(s.CosignerID) == string(m.id) {
 				key = cert.CosignerKey{
-					ID: m.id, Algorithm: cert.AlgECDSAP256SHA256,
+					ID: m.id, Algorithm: cert.AlgMLDSA44,
 					PublicKey: m.signer.PublicKey(),
 				}
 				mirrorSeen++

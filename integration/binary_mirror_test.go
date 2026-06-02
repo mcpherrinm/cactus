@@ -2,10 +2,6 @@ package integration
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -37,12 +33,12 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 	}
 
 	// Generate a stable seed for the CA cosigner so the smoke test
-	// can compute the SPKI for the mirror config.
+	// can compute its public key for the mirror config.
 	caSeed := make([]byte, signer.SeedSize)
 	for i := range caSeed {
 		caSeed[i] = byte(i ^ 0xAB)
 	}
-	caSigner, err := signer.FromSeed(signer.AlgECDSAP256SHA256, caSeed)
+	caSigner, err := signer.FromSeed(signer.AlgMLDSA44, caSeed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,14 +79,9 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 		t.Fatalf("CA never came up: %v", err)
 	}
 
-	// Get the CA's SPKI in PEM form (for the mirror config).
-	pubAny, err := x509.ParsePKIXPublicKey(caSigner.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := pubAny.(*ecdsa.PublicKey); !ok {
-		t.Fatal("not ECDSA")
-	}
+	// PEM-wrap the CA's raw ML-DSA-44 public key for the mirror config
+	// (parsePEMSPKI returns the PEM body verbatim, which for ML-DSA is the
+	// raw FIPS 204 key the verifier expects).
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: caSigner.PublicKey()})
 
 	// Mirror binary.
@@ -105,12 +96,14 @@ func TestCactusBinaryMirrorMode(t *testing.T) {
 		"enabled":                         true,
 		"cosigner_id":                     "44363.47.2.1",
 		"seed_path":                       "keys/mirror-cosigner.seed",
-		"algorithm":                       "ecdsa-p256-sha256",
+		"algorithm":                       "mldsa-44",
 		"sign_subtree_listen":             fmt.Sprintf("127.0.0.1:%d", mSignPort),
 		"sign_subtree_path":               "/sign-subtree",
 		"require_ca_signature_on_subtree": false,
 		"upstream": map[string]any{
-			"tile_url": caTileBase,
+			// The profile serves each log at <prefix>/<log number>; the CA's
+			// log number is 1 (standardConfig).
+			"tile_url": caTileBase + "/1",
 			// draft-04 §5.2: the upstream log ID is the CA ID with the
 			// log number appended (CA-ID.0.1); the CA cosigner ID is the
 			// CA ID (§5.4).
@@ -200,7 +193,7 @@ func standardConfig(dataDir string, acmePort, monPort, metricsPort int) map[stri
 		},
 		"ca_cosigner": map[string]any{
 			"id":        "44363.47.1.99",
-			"algorithm": "ecdsa-p256-sha256",
+			"algorithm": "mldsa-44",
 			"seed_path": "keys/ca-cosigner.seed",
 		},
 		"acme": map[string]any{
@@ -233,7 +226,3 @@ func waitForListening(url string, timeout time.Duration) error {
 	}
 	return fmt.Errorf("timed out waiting for %s", url)
 }
-
-// silence unused
-var _ = rand.Reader
-var _ = elliptic.P256

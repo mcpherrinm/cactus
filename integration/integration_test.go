@@ -60,7 +60,7 @@ func bringUp(t *testing.T, dir string) *stack {
 	for i := range seed {
 		seed[i] = byte(i * 7)
 	}
-	s, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	s, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func verifyAgainstLog(der []byte, s *stack) error {
 	}
 	return cert.VerifyMTCSignature(cert.CosignerKey{
 		ID:        s.cosigner,
-		Algorithm: cert.AlgECDSAP256SHA256,
+		Algorithm: cert.AlgMLDSA44,
 		PublicKey: s.signer.PublicKey(),
 	}, proof.Signatures[0], sigInput)
 }

@@ -36,7 +36,7 @@ func TestRestartResume(t *testing.T) {
 	for i := range seed {
 		seed[i] = byte(i)
 	}
-	logSigner, err := signer.FromSeed(signer.AlgECDSAP256SHA256, seed)
+	logSigner, err := signer.FromSeed(signer.AlgMLDSA44, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
