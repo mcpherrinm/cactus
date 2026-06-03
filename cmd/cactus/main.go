@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/json"
 	"encoding/pem"
 	"strings"
 
@@ -361,6 +362,13 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		MaxHeaderBytes:    16 * 1024,
 	}
 	tileSrv := tile.New(l, fsRoot).WithLandmarks(landmarkSeq)
+	// Expose a redacted (no paths, no secrets) export of the running config
+	// on the log's browser UI. Marshal failures are non-fatal: just skip it.
+	if cfgJSON, err := json.MarshalIndent(cfg.Redacted(), "", "  "); err != nil {
+		logger.Warn("could not marshal redacted config for /config endpoint", "err", err)
+	} else {
+		tileSrv = tileSrv.WithConfigJSON(cfgJSON)
+	}
 	monMux := http.NewServeMux()
 	monMux.HandleFunc("/ca-certificate", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain")

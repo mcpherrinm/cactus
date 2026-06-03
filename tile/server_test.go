@@ -83,6 +83,65 @@ func TestAppJSEndpoint(t *testing.T) {
 	}
 }
 
+func TestConfigEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Without WithConfigJSON the endpoint is disabled, so the index page must
+	// hide its panel and not 200 on /config.
+	resp, err := http.Get(srv.URL + "/config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("disabled /config status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestConfigEndpointEnabled(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := storage.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := bytes.Repeat([]byte{0x33}, signer.SeedSize)
+	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
+	l, err := log.New(context.Background(), log.Config{
+		LogID:       cert.TrustAnchorID("32473.1"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
+		Signer:      s,
+		FS:          fs,
+		FlushPeriod: 25 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Stop)
+
+	want := []byte(`{"hello":"world"}`)
+	srv := httptest.NewServer(New(l, fs).WithConfigJSON(want).Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, want) {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+	// The browser UI must carry the panel the config is rendered into.
+	if !bytes.Contains(indexHTML, []byte(`id="configpanel"`)) {
+		t.Errorf("index.html missing config panel")
+	}
+}
+
 // TestTilePath checks the c2sp tlog-tiles path layout: hash tiles at
 // tile/<L>/<N>, entry (data) tiles at tile/entries/<N>, with the
 // x-prefixed 3-digit index encoding and a .p/<W> partial suffix.

@@ -32,9 +32,10 @@ var appJS []byte
 
 // Server is the read-path HTTP handler.
 type Server struct {
-	log       *log.Log
-	fs        storage.FS
-	landmarks *landmark.Sequence // optional; nil disables /landmarks
+	log        *log.Log
+	fs         storage.FS
+	landmarks  *landmark.Sequence // optional; nil disables /landmarks
+	configJSON []byte             // optional; nil disables /config
 }
 
 // New returns a Server backed by l and fs.
@@ -49,6 +50,16 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 	return s
 }
 
+// WithConfigJSON attaches a redacted, public-safe JSON export of the running
+// configuration (see config.Config.Redacted) so the server exposes it at
+// /config and the browser UI can display it. The bytes are served verbatim,
+// so the caller is responsible for the redaction; passing nil leaves /config
+// disabled.
+func (s *Server) WithConfigJSON(j []byte) *Server {
+	s.configJSON = j
+	return s
+}
+
 // Handler returns the HTTP handler. Routes:
 //
 //	GET /                      — browser UI (index.html)
@@ -56,6 +67,7 @@ func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 //	GET /checkpoint            — latest signed note
 //	GET /tile/<L>/<NNN..>      — hash tiles (c2sp tlog-tiles)
 //	GET /tile/entries/<NNN..>  — entry (data) tiles (c2sp tlog-tiles)
+//	GET /config                — redacted config JSON (only if WithConfigJSON)
 //	GET /landmarks             — §6.3.1 landmark list (only if WithLandmarks)
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -63,6 +75,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /app.js", s.handleAppJS)
 	mux.HandleFunc("GET /checkpoint", s.handleCheckpoint)
 	mux.HandleFunc("GET /tile/", s.handleTile)
+	if s.configJSON != nil {
+		mux.HandleFunc("GET /config", s.handleConfig)
+	}
 	if s.landmarks != nil {
 		mux.Handle("GET /landmarks", s.landmarks.Handler())
 		mux.Handle("HEAD /landmarks", s.landmarks.Handler())
@@ -91,6 +106,12 @@ func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, max-age=0")
 	w.Write(cp.SignedNote)
+}
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, max-age=0")
+	w.Write(s.configJSON)
 }
 
 func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
