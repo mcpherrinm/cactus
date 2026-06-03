@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +73,71 @@ func TestValidationErrors(t *testing.T) {
 				t.Fatalf("Load %q: expected error, got nil", tc.name)
 			}
 		})
+	}
+}
+
+// TestRedactedOmitsSecretsAndPaths fills every secret/path-bearing field with a
+// recognizable sentinel, then asserts none of those sentinels survive into the
+// JSON of Redacted(). Because Redacted() is an allowlist, this also guards
+// against a future path/secret field being copied across by mistake.
+func TestRedactedOmitsSecretsAndPaths(t *testing.T) {
+	const secret = "SENSITIVE-DO-NOT-LEAK"
+	c := Config{
+		DataDir: "/var/lib/" + secret,
+		CACosigner: CosignerConfig{
+			ID:        "id-ca",
+			Algorithm: "mldsa-44",
+			SeedPath:  "keys/" + secret,
+		},
+		ACME: ACMEConfig{
+			Listen:        secret + ":14000",
+			ExternalURL:   "https://example.test",
+			TLSCert:       "tls/" + secret + ".crt",
+			TLSKey:        "tls/" + secret + ".key",
+			ChallengeMode: "auto-pass",
+		},
+		Monitoring: ListenerConfig{
+			Listen:      secret + ":14080",
+			ExternalURL: "https://mon.test",
+		},
+		Metrics: MetricsConfig{Listen: secret + ":14090"},
+		CACosignerQuorum: CACosignerQuorum{
+			Mirrors: []MirrorEndpointConfig{{
+				ID:            "id-mirror",
+				URL:           "https://mirror.test",
+				Algorithm:     "mldsa-44",
+				PublicKeyPath: "keys/" + secret,
+			}},
+			MinSignatures: 1,
+		},
+		Mirror: MirrorConfig{
+			Enabled:    true,
+			CosignerID: "id-mirror-cosigner",
+			Algorithm:  "mldsa-44",
+			SeedPath:   "keys/" + secret,
+			Upstream: UpstreamConfig{
+				TileURL:           "https://upstream.test",
+				LogID:             "id-log",
+				CACosignerID:      "id-upstream-ca",
+				CACosignerKeyPath: "keys/" + secret,
+				PollIntervalMS:    1000,
+			},
+			SignSubtreeListen: secret + ":14070",
+			SignSubtreePath:   "/sign-subtree",
+		},
+	}
+
+	out, err := json.Marshal(c.Redacted())
+	if err != nil {
+		t.Fatalf("marshal redacted config: %v", err)
+	}
+	if strings.Contains(string(out), secret) {
+		t.Fatalf("redacted config leaked a secret/path sentinel:\n%s", out)
+	}
+
+	// Sanity: a non-sensitive field still comes through, so the test would
+	// actually catch a leak rather than passing on an empty result.
+	if !strings.Contains(string(out), "https://example.test") {
+		t.Fatalf("redacted config dropped a public field; got:\n%s", out)
 	}
 }

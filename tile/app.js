@@ -101,6 +101,25 @@ async function loadCheckpoint() {
   }
 }
 
+// ---- config -------------------------------------------------------------
+
+// Fetch the redacted config export (see config.Config.Redacted) and show it in
+// the Configuration panel. The endpoint is optional, so hide the panel if it
+// isn't served or the fetch fails.
+async function loadConfig() {
+  const panel = $("configpanel");
+  if (!panel) return;
+  try {
+    const r = await fetch("config", { cache: "no-store" });
+    if (!r.ok) { panel.style.display = "none"; return; }
+    const text = await r.text();
+    $("configout").textContent = text;
+    panel.style.display = "";
+  } catch {
+    panel.style.display = "none";
+  }
+}
+
 // ---- tile browser -------------------------------------------------------
 
 function tileChip(level, index, width) {
@@ -815,6 +834,7 @@ function init() {
 
   populateLevels(); // seed the dropdown before the first checkpoint loads
   loadCheckpoint();
+  loadConfig();
 }
 
 // Auto-run in the browser; stay inert under Bun (which sets the test flag
@@ -824,7 +844,7 @@ if (typeof document !== "undefined" && !globalThis.__CACTUS_TEST__) init();
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     TILE_W, formatTileIndex, tileURL, treeHeight, tileLevels, tileWidth,
-    loadCheckpoint, renderTileLists, populateLevels, selectAndFetch, drillDown,
+    loadCheckpoint, loadConfig, renderTileLists, populateLevels, selectAndFetch, drillDown,
     openEntry, fetchTile, renderHashTile, splitDataTile, renderEntriesTile, fetchEntry,
     DER, tagName, decodeOID, oidName, decodeDN, decodeSAN, hexPreview,
     previewInteger, formatTime, previewPrimitive, derNode, derForest,
