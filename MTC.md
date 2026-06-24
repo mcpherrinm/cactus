@@ -322,15 +322,19 @@ In cactus:
 - `cert.BuildLandmarkRelativeCert` re-uses the existing standalone
   cert's TBS (so subject, validity, SPKI all match) and replaces
   only the signature value with a landmark MTCProof.
-- `cmd/cactus-cli cert landmark-relative` derives the landmark-relative
-  cert from a standalone cert plus the log's tiles, once a covering
-  landmark exists. The ACME API itself only serves standalone certs.
+- `acme.Server` advertises the landmark-relative cert as a
+  `rel="enhancement"` URL on the standalone cert response, served by
+  `handleCertLandmarkRelative` at `/cert/{id}/landmark-relative/{number}`
+  (see "Doing it over ACME" below).
+- `cmd/cactus-cli cert landmark-relative` derives the same cert from a
+  standalone cert plus the log's tiles, for use outside ACME.
 
 The relying-party side is exercised by
-`integration/TestCLICertLandmarkRelative`: it converts a standalone cert
-to landmark-relative form via `cactus-cli` and verifies it against the
-live log (signature-free, the inclusion proof reconstructs the log's
-subtree hash) without consulting any cosigner key.
+`integration/TestEnhancementURLSwitchover` (over ACME) and
+`integration/TestCLICertLandmarkRelative` (via cactus-cli): each obtains a
+landmark-relative cert and verifies it against the live log (signature-free,
+the inclusion proof reconstructs the log's subtree hash) without consulting
+any cosigner key.
 
 ## §7.2: Verifying a certificate
 
@@ -378,27 +382,32 @@ ACME is what the authenticating party (the cert holder) uses to
    `Accept: application/pem-certificate-chain-with-properties`. The
    server then includes a `CertificatePropertyList` alongside the
    PEM (cactus uses an adjacent `MTC PROPERTIES` PEM block; the
-   trust-anchor-ids draft hasn't pinned the wire format yet). For the
-   standalone certs the ACME API issues, the property list carries a
-   single `trust_anchor_id` — the **CA ID** (§8.1).
-
-   (The landmark-relative form, whose `trust_anchor_id` is the specific
-   landmark's ID `CA-ID.1.logNumber.L` per §8.2, is produced out-of-band
-   with `cactus-cli cert landmark-relative`, not over ACME. A relying
+   trust-anchor-ids draft hasn't pinned the wire format yet). The
+   property list carries a single `trust_anchor_id` — the **CA ID**
+   (§8.1) for a standalone cert, or the specific landmark's ID
+   `CA-ID.1.logNumber.L` (§8.2) for a landmark-relative cert. A relying
    party advertises a **landmark group** `CA-ID.2.logNumber.L` (§8.2.1)
    in its `trust_anchors` to accept the CA's standalone certs and all
-   active landmarks at once.)
+   active landmarks at once.
+3. **Enhancement URL.** The standalone cert response carries a
+   `Link: <…>; rel="enhancement"` header (trust-anchor-ids) pointing at
+   the landmark-relative variant, at
+   `/cert/{id}/landmark-relative/{number}`. The number pins the single
+   landmark the entry is relative to (`ContainingIndex`), so the URL is
+   an immutable resource: it returns `HTTP 202 (Accepted)` + `Retry-After`
+   until that landmark is allocated, then the cert. An *enhancement* is
+   an optional, non-blocking substitute — a client retries the 202 later
+   but must never let it hold up deploying the standalone cert.
+
+   This replaced an earlier `rel="alternate"` + `503 + Retry-After`
+   design. `alternate` is load-bearing: clients (e.g. lego, via
+   `go-retryablehttp`) fetch it eagerly during issuance and honour the
+   `Retry-After` on the 503, so a not-yet-available landmark stalled
+   issuance for the full interval. `enhancement` + 202 is non-blocking,
+   and pinning the landmark number keeps the URL stable.
 
 Cactus implements the above in `acme/` plus the property-list builder
 in `cert/properties.go`.
-
-> **Note.** Earlier revisions also exposed the landmark-relative cert
-> over ACME as a `rel="alternate"` URL (RFC 8555 §7.4.2) that returned
-> `503 + Retry-After` until a covering landmark existed. That was
-> removed: ACME clients (e.g. lego, via `go-retryablehttp`) follow the
-> alternate link immediately and honour the `Retry-After` on the 503,
-> stalling issuance for the full interval. The landmark-relative form is
-> now obtained from the log with `cactus-cli` instead.
 
 ## Cactus implementation map
 

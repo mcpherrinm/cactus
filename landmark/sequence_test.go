@@ -30,6 +30,32 @@ func newTestSeq(t *testing.T) (*Sequence, storage.FS, time.Time) {
 	return s, fs, t0
 }
 
+// TestTimeUntilNextLandmark checks the Retry-After source: the remainder
+// of the §6.3.2 interval since the most recent landmark, floored at zero,
+// and reset when a new landmark is allocated.
+func TestTimeUntilNextLandmark(t *testing.T) {
+	s, _, t0 := newTestSeq(t) // 1h interval, seed landmark 0 at t0
+
+	if got := s.TimeUntilNextLandmark(t0); got != time.Hour {
+		t.Errorf("at t0: %v, want 1h", got)
+	}
+	if got := s.TimeUntilNextLandmark(t0.Add(20 * time.Minute)); got != 40*time.Minute {
+		t.Errorf("at t0+20m: %v, want 40m", got)
+	}
+	// Overdue: the next landmark should already have been allocated.
+	if got := s.TimeUntilNextLandmark(t0.Add(2 * time.Hour)); got != 0 {
+		t.Errorf("at t0+2h: %v, want 0", got)
+	}
+
+	// Allocating a landmark resets the countdown to its allocation time.
+	if _, ok, err := s.Append(context.Background(), 5, t0.Add(90*time.Minute)); err != nil || !ok {
+		t.Fatalf("Append: ok=%v err=%v", ok, err)
+	}
+	if got := s.TimeUntilNextLandmark(t0.Add(2 * time.Hour)); got != 30*time.Minute {
+		t.Errorf("after allocation, at t0+2h: %v, want 30m", got)
+	}
+}
+
 // TestMaxActiveMatchesDraftFormula pins §6.3.2's formula:
 // max_active_landmarks = ceil(max_cert_lifetime / time_between_landmarks) + 1.
 // 7-day lifetime, 1-hour interval → 169.

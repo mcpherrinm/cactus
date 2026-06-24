@@ -274,6 +274,28 @@ func (s *Sequence) LandmarkSubtrees(l Landmark) []tlogx.Subtree {
 	return tlogx.FindSubtrees(prev, l.TreeSize)
 }
 
+// NextNumber returns the number the next landmark to be allocated will
+// have. Numbers are contiguous starting at 0, so this is the current
+// count of landmarks. Used to pin a not-yet-allocated landmark in the
+// enhancement URL of a freshly-issued cert.
+func (s *Sequence) NextNumber() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return uint64(len(s.landmarks))
+}
+
+// TimeUntilNextLandmark estimates how long until the next landmark is
+// allocated — i.e. when a freshly-issued, not-yet-covered entry's
+// landmark-relative cert becomes available. It is the remainder of the
+// §6.3.2 interval since the most recent landmark, floored at zero. Used
+// to set the Retry-After on the enhancement URL's 202 response.
+func (s *Sequence) TimeUntilNextLandmark(now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	last := s.landmarks[len(s.landmarks)-1]
+	return max(0, s.cfg.TimeBetweenLandmarks-now.Sub(last.AllocatedAt))
+}
+
 // LatestTreeSize returns the tree size of the most recent landmark.
 // Useful for "is there a landmark covering this index yet?" checks.
 func (s *Sequence) LatestTreeSize() uint64 {

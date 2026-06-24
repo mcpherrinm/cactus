@@ -107,11 +107,16 @@ lego --server http://localhost:14000/directory \
 
 The order's `certificate` URL is the **standalone** cert (CA + witness
 cosignatures). It is a POST-as-GET resource (RFC 8555 §6.3), so an ACME
-client — not a plain `curl` — retrieves it. The ACME API only serves the
-standalone form; the signature-free **landmark-relative** variant (which
-verifies against predistributed landmark subtree hashes) is produced
-out-of-band from the log with `cactus-cli cert landmark-relative` once a
-covering landmark exists (see below).
+client — not a plain `curl` — retrieves it. Its response carries a
+`Link: …; rel="enhancement"` header pointing at the signature-free
+**landmark-relative** variant (which verifies against predistributed
+landmark subtree hashes). That URL is pinned to the landmark the cert is
+relative to and returns `HTTP 202 (Accepted)` + `Retry-After` until that
+landmark is allocated (within ~`time_between_landmarks_ms`), then the
+cert. The enhancement is optional and non-blocking — a client must never
+let a 202 hold up deploying the standalone cert. The same landmark-relative
+cert is also derivable from the log with `cactus-cli cert
+landmark-relative` (see below).
 
 ## Verifying against the log
 

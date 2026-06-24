@@ -291,6 +291,9 @@ func (l *Log) Wait(ctx context.Context, index uint64) (Issued, error) {
 // proof + hash are computed against the latest committed tile state,
 // so callers must hold a consistent view of the tree (e.g. a tree
 // size from CurrentCheckpoint or a landmark.Sequence entry).
+//
+// Used by the ACME enhancement-URL handler and cactus-cli to assemble
+// landmark-relative certs.
 func (l *Log) SubtreeProof(start, end, index uint64) (tlogx.Hash, []tlogx.Hash, error) {
 	l.mu.Lock()
 	hashes := l.tw.SnapshotHashes()

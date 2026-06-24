@@ -334,6 +334,9 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		LogID:          logID,
 		CAID:           caID,
 	}
+	acmeCfg.Landmarks = landmarkSeq
+	acmeCfg.SubtreeProof = l.SubtreeProof
+	acmeCfg.LogNumber = cfg.Log.Number
 	acmeSrv, err := acme.New(acmeCfg)
 	if err != nil {
 		return fmt.Errorf("acme: %w", err)
