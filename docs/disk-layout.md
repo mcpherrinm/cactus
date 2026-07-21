@@ -15,25 +15,32 @@ $DATA_DIR/
 │   │   ├── 0/000.p/<W>           partial tiles (W < 256)
 │   │   ├── 1/...                 level-1 hash tiles
 │   │   └── entries/...           entry ("data") tiles
-│   └── subtrees/
-│       └── <start>-<end>         per-subtree signature blob
+├── mirrorpush/
+│   └── <8-byte-hash>.json        per-(log,mirror) resumable push state
 └── state/
     ├── accounts/<id>.json        ACME accounts
     ├── orders/<id>.json          ACME orders
     ├── authzs/<id>.json          ACME authorizations
     ├── challs/<id>.json          ACME challenges
-    └── certs/<cert-id>.der       issued cert DERs
+    ├── certs/<cert-id>.der       issued cert DERs
+    └── landmarks/sequence.jsonl  append-only landmark sequence (§6.4)
 ```
+
+Note: the per-subtree cosigner signatures are **not** persisted. They are
+kept only in memory and travel inside issued certs (the MTCProof); see
+`log/log.go` (`persistCheckpoint`). Only the mutable `log/checkpoint`
+signed note is written.
 
 ## File semantics
 
-- All non-exclusive writes go via `os.CreateTemp` + `os.Rename`, so
-  readers never see a half-written file.
-- `log/checkpoint` is the only file that gets rewritten in place
-  (mutable), and the rename invariant covers it.
-- `log/tile/<L>/...` files are written exclusive (`O_EXCL`) once they
-  reach the full width; partial widths (`*.p/<W>`) are append-only by
-  width but each width has its own immutable file.
+- Every write goes via `os.CreateTemp` + `os.Rename` (the non-exclusive
+  `storage.Put` path), so readers never see a half-written file.
+- `log/checkpoint` is rewritten in place on every flush (mutable); the
+  rename invariant covers it.
+- Full hash/data tiles are immutable once written; partial data tiles
+  (`*.p/<W>`) get a distinct file per width `W`, each written by the same
+  temp-file + rename path. cactus does not currently use `storage.Put`'s
+  exclusive (`O_EXCL`) mode for tiles.
 
 ## Hash-tile bytes
 

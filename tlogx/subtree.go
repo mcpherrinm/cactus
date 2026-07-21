@@ -1,5 +1,5 @@
 // Package tlogx implements the subtree primitives from §4 of
-// draft-ietf-plants-merkle-tree-certs-04.
+// draft-ietf-plants-merkle-tree-certs-05.
 //
 // It complements golang.org/x/mod/sumdb/tlog (used elsewhere as the
 // authoritative tile/Merkle implementation) with the few operations the

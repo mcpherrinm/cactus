@@ -145,7 +145,7 @@ that means the read-path (HTTP) serves files at:
   position within the tile; there is no per-entry endpoint.
 
 Cactus's `log/` and `tile/` packages own this. The log is a
-single-writer affair: one goroutine ticks every `flush_period_ms`,
+single-writer affair: one goroutine ticks every `checkpoint_period_ms`,
 appends pooled entries to the tilewriter, signs the new checkpoint
 + covering subtrees, and writes the checkpoint and tiles to disk via
 temp-file + rename. The covering-subtree cosigner signatures are kept
@@ -263,7 +263,7 @@ The CA:
 1. Calls `tlogx.FindSubtrees(95, 100)` → it returns
    `[(start: 88, end: 96), (start: 96, end: 100)]`.
 
-   Note that `(88, 96)` covers indices 88–95, three of which (88, 89,
+   Note that `(88, 96)` covers indices 88–95, seven of which (88, 89,
    90, 91, 92, 93, 94) are from before the previous checkpoint —
    that's fine; "efficiently cover" doesn't mean "exactly cover".
 
@@ -275,8 +275,10 @@ The CA:
 4. Optionally fans the request out to mirrors. Each mirror that has
    caught up returns its own signature.
 
-5. Persists the signed checkpoint and the per-subtree signatures to
-   disk.
+5. Persists the signed checkpoint to disk. The per-subtree cosigner
+   signatures are kept only in memory — they travel inside issued certs
+   (the MTCProof), so they are not separately published (see the §5
+   note above).
 
 When a client wants the cert at index 97:
 
@@ -425,7 +427,9 @@ If you're reading the code, this is the order I'd recommend:
 5. `ca/issuer.go` — assemble the X.509 cert from a CSR + a `log.Issued`.
 6. `acme/handler.go` — the ACME state machine.
 7. `landmark/sequence.go` — §6.4.1/2 allocator.
-8. `mirror/follower.go` and `mirror/server.go` — the mirror role.
+8. `mirrorpush/client.go` — the push client that replicates the log to
+   external c2sp.org/tlog-mirror mirrors and retains their cosignatures.
+   (cactus itself is not a mirror; there is no `mirror/` package.)
 
 The integration test `integration/TestParallelIssuance` exercises
 1–6 end-to-end: 100 certs in parallel, each one re-parsed and

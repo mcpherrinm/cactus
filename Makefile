@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration stress clean \
+.PHONY: build test test-race vet integration stress clean \
 	docker-binaries docker-build docker-up docker-down docker-logs
 
 # cactus requires Go 1.27+ (built-in crypto/mldsa). Until 1.27 ships, the

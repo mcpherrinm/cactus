@@ -88,7 +88,7 @@ processes — single-writer is enforced by documentation, not by code. See
 
 ## IDs are derived, not independent
 
-The **CA ID** (`ca_cosigner.id`, e.g. `1.3.6.1.4.1.44363.47.1.99`) is load-bearing: draft
+The **CA ID** (`ca_cosigner.id`, e.g. `44363.47.1.99`, the arcs *below* the `1.3.6.1.4.1` enterprise base) is load-bearing: draft
 §5.4 requires the CA cosigner ID to equal the CA ID, so this one value identifies the CA,
 seeds the issuer DN, and roots all derived IDs — the log ID is `<CA-ID>.0.<lognum>` and
 landmark trust-anchor IDs are `<CA-ID>.1.<lognum>.L`. There is no separate `base_id`.

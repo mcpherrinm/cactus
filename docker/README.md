@@ -54,7 +54,7 @@ The two sides need each other's public keys before either can start, so
 startup is three init containers:
 
 1. `cactus-init` — generates the CA cosigner seed and exports the
-   issuance log's c2sp **vkey** (`cactus-keygen -vkey -log-id ...`).
+   issuance log's c2sp **vkey** (`cactus-keygen -vkey -cosigner-id ...`).
    Sunlight will not accept a push for an origin it has no key for.
 2. `sunlight-init` — derives Sunlight's witness and mirror keys from a
    single seed, writes the `logs/v0` log list naming cactus's log, and

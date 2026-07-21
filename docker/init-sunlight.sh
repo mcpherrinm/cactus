@@ -1,5 +1,5 @@
 #!/bin/sh
-# Init step 2 of 2 (runs in the sunlight image).
+# Init step 2 of 3 (runs in the sunlight image).
 #
 # Derives Sunlight's witness/mirror keys from a single seed, builds the
 # log list naming cactus's issuance log, and pre-creates the checkpoint

@@ -1,6 +1,6 @@
 // Package signer defines the cosigner signing abstraction. Per the
 // MTC-with-tlog profile, every MTC cosigner — including the CA cosigner
-// (§5.5 of draft-ietf-plants-merkle-tree-certs-04) that signs checkpoints
+// (§5.5 of draft-ietf-plants-merkle-tree-certs-05) that signs checkpoints
 // — uses an ML-DSA-44 key and produces the §5.3.1 CosignedMessage. This
 // package provides the concrete ML-DSA implementation (FIPS 204, via the
 // built-in crypto/mldsa, which requires Go 1.27+) behind a stable
