@@ -468,12 +468,24 @@ func (l *Log) flush() error {
 	defer l.mu.Unlock()
 
 	now := l.cfg.NowFunc()
-	prevSize := uint64(l.tw.Size())
+	// committedSize is the size the last published checkpoint covers;
+	// treeSize is the tile writer's current size. In steady state they
+	// are equal, but after a failed flush or a crash the tile writer can
+	// be ahead (entries were appended and the treeSize file persisted,
+	// but the checkpoint never committed — loadCheckpoint tolerates
+	// tw.Size() > checkpoint.size). Those entries still need a covering
+	// subtree, so the covering range starts at committedSize, not the
+	// pre-append tree size.
+	committedSize := sizeOrZero(l.committed)
+	treeSize := uint64(l.tw.Size())
 	pool := l.pool
 	l.pool = nil
 
-	if len(pool) == 0 && l.committed != nil && l.committed.size == prevSize {
-		return nil // nothing to do
+	// Nothing to do only when the pool is empty AND the committed
+	// checkpoint already covers the whole tree. Do not early-return while
+	// tree entries remain uncovered by a prior failed flush.
+	if len(pool) == 0 && l.committed != nil && committedSize == treeSize {
+		return nil
 	}
 
 	var entries [][]byte
@@ -519,14 +531,15 @@ func (l *Log) flush() error {
 		return fmt.Errorf("flush build note: %w", err)
 	}
 
-	// Sign covering subtrees for the just-added range, if any.
-	// Subtrees start with just the CA's sig; mirror sigs
-	// are collected *after* the checkpoint is committed so that
-	// mirrors polling our /checkpoint can see and verify the new
+	// Sign covering subtrees for everything the committed checkpoint does
+	// not yet cover — the entries just appended plus any left uncovered by
+	// an earlier failed flush. Subtrees start with just the CA's sig;
+	// mirror sigs are collected *after* the checkpoint is committed so
+	// that mirrors polling our /checkpoint can see and verify the new
 	// state before we ask them to sign.
 	var subs []signedSubtree
-	if newSize > prevSize {
-		covers := tlogx.FindSubtrees(prevSize, newSize)
+	if newSize > committedSize {
+		covers := tlogx.FindSubtrees(committedSize, newSize)
 		for _, s := range covers {
 			h, err := subtreeHashFromTW(l.tw, s.Start, s.End)
 			if err != nil {
@@ -602,9 +615,7 @@ func (l *Log) flush() error {
 		// Capture by value so a subsequent flush replacing
 		// l.committed doesn't perturb the request.
 		toRequest := append([]signedSubtree(nil), subs...)
-		capturedNote := append([]byte(nil), signedNote...)
-		capturedSize := newSize
-		go l.collectMirrorSigs(toRequest, capturedNote, capturedSize)
+		go l.collectMirrorSigs(toRequest)
 	}
 	return nil
 }
@@ -613,7 +624,7 @@ func (l *Log) flush() error {
 // subtree and appends the returned signatures to the matching subtree
 // in l.committed (if it's still the current checkpoint). Late arrivals
 // against a superseded checkpoint are dropped.
-func (l *Log) collectMirrorSigs(subs []signedSubtree, signedNote []byte, atSize uint64) {
+func (l *Log) collectMirrorSigs(subs []signedSubtree) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for i := range subs {
@@ -651,7 +662,6 @@ func (l *Log) collectMirrorSigs(subs []signedSubtree, signedNote []byte, atSize 
 		}
 		l.mu.Unlock()
 	}
-	_ = signedNote
 }
 
 func (l *Log) signSubtree(st *cert.MTCSubtree) (cert.MTCSignature, error) {
