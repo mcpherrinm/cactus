@@ -51,12 +51,6 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
-// pemDecode is just pem.Decode kept here so the file can keep the
-// "all stdlib imports first" Go convention without splitting groups.
-func pemDecode(s string) (*pem.Block, []byte) {
-	return pem.Decode([]byte(s))
-}
-
 // caMirrorRequestsAdapter adapts a *prometheus.CounterVec to the
 // cert.CounterVec interface.
 type caMirrorRequestsAdapter struct {
@@ -561,7 +555,7 @@ func loadPEMSPKI(path string) ([]byte, error) {
 // parsePEMSPKI accepts a PEM SubjectPublicKeyInfo block and returns
 // the inner DER bytes of the public key.
 func parsePEMSPKI(pemStr string) ([]byte, error) {
-	block, _ := pemDecode(pemStr)
+	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
 		return nil, errors.New("not a PEM block")
 	}

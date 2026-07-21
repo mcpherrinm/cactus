@@ -445,13 +445,6 @@ func parseSignedNoteFlat(data []byte) (uint64, [32]byte, string, error) {
 	return size, root, lines[0], nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // stdout returns os.Stdout; isolated as a helper so tests can substitute
 // a buffer.
 func stdout() *os.File { return os.Stdout }

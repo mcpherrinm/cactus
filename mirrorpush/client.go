@@ -245,7 +245,7 @@ func (c *Client) Push(ctx context.Context) error {
 	if err := c.pushCheckpoint(ctx, size, note); err != nil {
 		return err
 	}
-	return c.pushEntries(ctx, size, root, note)
+	return c.pushEntries(ctx, size, root)
 }
 
 // CosignedCheckpoint returns the checkpoint note the client last
@@ -463,7 +463,7 @@ func (c *Client) buildAddCheckpointBody(oldSize, newSize uint64, note []byte) ([
 
 // pushEntries uploads [next entry, size) to the mirror and retains the
 // checkpoint cosignature from the final 200.
-func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.Hash, note []byte) error {
+func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.Hash) error {
 	for round := 0; round < maxUploadRounds; round++ {
 		c.mu.Lock()
 		uploadStart := c.st.nextEntry

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -104,12 +105,12 @@ func prove(logURL string, idx uint64) {
 	out := proveJSON{
 		Index:          idx,
 		TreeSize:       size,
-		Root:           hexs(root[:]),
-		LeafHash:       hexs(leafHash[:]),
+		Root:           hex.EncodeToString(root[:]),
+		LeafHash:       hex.EncodeToString(leafHash[:]),
 		InclusionProof: make([]string, 0, len(proof)),
 	}
 	for _, h := range proof {
-		out.InclusionProof = append(out.InclusionProof, hexs(h[:]))
+		out.InclusionProof = append(out.InclusionProof, hex.EncodeToString(h[:]))
 	}
 	enc := json.NewEncoder(stdout())
 	enc.SetIndent("", "  ")
@@ -168,14 +169,4 @@ func (h hr) ReadHashes(indexes []int64) ([]tlog.Hash, error) {
 		out[i] = h[idx]
 	}
 	return out, nil
-}
-
-func hexs(b []byte) string {
-	const hexd = "0123456789abcdef"
-	out := make([]byte, len(b)*2)
-	for i, x := range b {
-		out[i*2] = hexd[x>>4]
-		out[i*2+1] = hexd[x&0x0f]
-	}
-	return string(out)
 }
