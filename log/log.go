@@ -196,8 +196,8 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 		return nil, fmt.Errorf("log: tilewriter.New: %w", err)
 	}
 	l := &Log{
-		cfg:     cfg,
-		tw:      tw,
+		cfg:         cfg,
+		tw:          tw,
 		dedup:       make(map[[32]byte]uint64),
 		notify:      make(chan struct{}),
 		flushSignal: make(chan struct{}, 1),
