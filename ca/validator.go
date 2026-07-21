@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/letsencrypt/cactus/cert"
+	"golang.org/x/crypto/cryptobyte"
+	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
 )
 
 // OrderInput carries the relevant ACME order state. It is the
@@ -81,19 +83,38 @@ func (v *Validator) Validate(csr *x509.CertificateRequest, order OrderInput) (*V
 	for _, n := range order.AuthorizedDNSNames {
 		authorized[strings.ToLower(n)] = struct{}{}
 	}
+	csrDNS := make(map[string]struct{}, len(csr.DNSNames))
 	for _, n := range csr.DNSNames {
 		if _, ok := authorized[strings.ToLower(n)]; !ok {
 			return nil, fmt.Errorf("%w: CSR DNSName %q not authorized by order", ErrBadCSR, n)
 		}
+		csrDNS[strings.ToLower(n)] = struct{}{}
 	}
 
 	authorizedIPs := make(map[string]struct{}, len(order.AuthorizedIPs))
 	for _, ip := range order.AuthorizedIPs {
 		authorizedIPs[ip.String()] = struct{}{}
 	}
+	csrIPs := make(map[string]struct{}, len(csr.IPAddresses))
 	for _, ip := range csr.IPAddresses {
 		if _, ok := authorizedIPs[ip.String()]; !ok {
 			return nil, fmt.Errorf("%w: CSR IPAddress %s not authorized by order", ErrBadCSR, ip)
+		}
+		csrIPs[ip.String()] = struct{}{}
+	}
+
+	// RFC 8555 §7.4: the CSR MUST indicate the exact same set of
+	// identifiers as the order, so every authorized identifier must also
+	// appear in the CSR — not merely the reverse (which the loops above
+	// already enforce).
+	for n := range authorized {
+		if _, ok := csrDNS[n]; !ok {
+			return nil, fmt.Errorf("%w: order DNSName %q missing from CSR", ErrBadCSR, n)
+		}
+	}
+	for ipStr := range authorizedIPs {
+		if _, ok := csrIPs[ipStr]; !ok {
+			return nil, fmt.Errorf("%w: order IPAddress %s missing from CSR", ErrBadCSR, ipStr)
 		}
 	}
 
@@ -251,6 +272,16 @@ func buildExtensionsFromCSR(csr *x509.CertificateRequest, subjectEmpty bool) ([]
 		critical := e.Critical
 		if e.Id.Equal(oidExtSubjectAltName) {
 			sawSAN = true
+			// The order only authorizes dNSName and iPAddress
+			// identifiers, and Validate cross-checks those against
+			// csr.DNSNames/csr.IPAddresses. But the extension value is
+			// copied verbatim below, so a SAN carrying an rfc822Name,
+			// URI, or otherName alongside an authorized dNSName would
+			// smuggle an unvalidated identity into the issued cert.
+			// Reject any GeneralName type we don't authorize.
+			if err := sanContainsOnlyDNSAndIP(e.Value); err != nil {
+				return nil, err
+			}
 			if subjectEmpty {
 				critical = true // RFC 5280 §4.1.2.6
 			}
@@ -279,6 +310,32 @@ func buildExtensionsFromCSR(csr *x509.CertificateRequest, subjectEmpty bool) ([]
 		inner = append(inner, der...)
 	}
 	return wrapSequence(inner), nil
+}
+
+// sanContainsOnlyDNSAndIP walks a subjectAltName extension value (a
+// SEQUENCE OF GeneralName) and returns ErrBadCSR if any entry is not a
+// dNSName ([2]) or iPAddress ([7]). cactus only validates those two
+// GeneralName types against the order, so no others may be carried onto
+// the leaf certificate.
+func sanContainsOnlyDNSAndIP(extnValue []byte) error {
+	var inner cryptobyte.String
+	outer := cryptobyte.String(extnValue)
+	if !outer.ReadASN1(&inner, cryptobyte_asn1.SEQUENCE) || !outer.Empty() {
+		return fmt.Errorf("%w: malformed subjectAltName", ErrBadCSR)
+	}
+	dnsName := cryptobyte_asn1.Tag(2).ContextSpecific()  // [2] IA5String
+	ipAddress := cryptobyte_asn1.Tag(7).ContextSpecific() // [7] OCTET STRING
+	for !inner.Empty() {
+		var gn cryptobyte.String
+		var tag cryptobyte_asn1.Tag
+		if !inner.ReadAnyASN1(&gn, &tag) {
+			return fmt.Errorf("%w: malformed GeneralName in subjectAltName", ErrBadCSR)
+		}
+		if tag != dnsName && tag != ipAddress {
+			return fmt.Errorf("%w: subjectAltName GeneralName type %v not permitted (only dNSName and iPAddress)", ErrBadCSR, tag)
+		}
+	}
+	return nil
 }
 
 // pkix_Extension is asn1.Marshal-friendly, identical to pkix.Extension

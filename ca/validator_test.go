@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -77,6 +79,44 @@ func TestValidatorPinsValidityWindow(t *testing.T) {
 	}
 	if !got.NotAfter.Equal(notAfter) {
 		t.Errorf("NotAfter = %v, want %v", got.NotAfter, notAfter)
+	}
+}
+
+// TestValidatorRejectsNonDNSIPSANs guards against a SAN carrying an
+// rfc822Name / URI / otherName alongside an authorized dNSName: those
+// GeneralName types are never authorized against the order, so the CSR
+// must be rejected rather than copied verbatim onto the leaf.
+func TestValidatorRejectsNonDNSIPSANs(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse("https://evil.example/x")
+	tmpl := &x509.CertificateRequest{
+		Subject:        pkix.Name{CommonName: "x"},
+		DNSNames:       []string{"a.test"},
+		EmailAddresses: []string{"victim@example.com"},
+		URIs:           []*url.URL{u},
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, tmpl, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr, _ := x509.ParseCertificateRequest(der)
+	_, err = NewValidator().Validate(csr, OrderInput{AuthorizedDNSNames: []string{"a.test"}})
+	if !errors.Is(err, ErrBadCSR) {
+		t.Fatalf("expected ErrBadCSR for non-DNS/IP SAN, got %v", err)
+	}
+}
+
+// TestValidatorRejectsSubsetCSR guards RFC 8555 §7.4: a CSR that omits an
+// authorized order identifier must be rejected (exact-set match).
+func TestValidatorRejectsSubsetCSR(t *testing.T) {
+	v := NewValidator()
+	csr := mkCSR(t, []string{"a.test"}, nil)
+	_, err := v.Validate(csr, OrderInput{AuthorizedDNSNames: []string{"a.test", "b.test"}})
+	if !errors.Is(err, ErrBadCSR) {
+		t.Fatalf("expected ErrBadCSR for CSR missing an order identifier, got %v", err)
 	}
 }
 
