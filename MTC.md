@@ -5,7 +5,7 @@ the parts of [draft-ietf-plants-merkle-tree-certs][draft] that you
 need to keep in your head while reading the code.
 
 It's deliberately thinner than the IETF draft. For anything you can't
-find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-04.txt`
+find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-05.txt`
 is the version cactus targets, and section numbers in this doc match
 that file.
 
@@ -323,7 +323,7 @@ In cactus:
   cert's TBS (so subject, validity, SPKI all match) and replaces
   only the signature value with a landmark MTCProof.
 - `acme.Server` advertises the landmark-relative cert as a
-  `rel="enhancement"` URL on the standalone cert response, served by
+  `rel="acme-optional-alternate"` URL on the standalone cert response, served by
   `handleCertLandmarkRelative` at `/cert/{id}/landmark-relative/{number}`
   (see "Doing it over ACME" below).
 - `cmd/cactus-cli cert landmark-relative` derives the same cert from a
@@ -390,12 +390,12 @@ ACME is what the authenticating party (the cert holder) uses to
    in its `trust_anchors` to accept the CA's standalone certs and all
    active landmarks at once.
 3. **Enhancement URL.** The standalone cert response carries a
-   `Link: <…>; rel="enhancement"` header (trust-anchor-ids) pointing at
+   `Link: <…>; rel="acme-optional-alternate"` header (draft §9.1) pointing at
    the landmark-relative variant, at
    `/cert/{id}/landmark-relative/{number}`. The number pins the single
    landmark the entry is relative to (`ContainingIndex`), so the URL is
    an immutable resource: it returns `HTTP 202 (Accepted)` + `Retry-After`
-   until that landmark is allocated, then the cert. An *enhancement* is
+   until that landmark is allocated, then the cert. An *optional alternate* is
    an optional, non-blocking substitute — a client retries the 202 later
    but must never let it hold up deploying the standalone cert.
 
@@ -403,7 +403,7 @@ ACME is what the authenticating party (the cert holder) uses to
    design. `alternate` is load-bearing: clients (e.g. lego, via
    `go-retryablehttp`) fetch it eagerly during issuance and honour the
    `Retry-After` on the 503, so a not-yet-available landmark stalled
-   issuance for the full interval. `enhancement` + 202 is non-blocking,
+   issuance for the full interval. `acme-optional-alternate` + 202 is non-blocking,
    and pinning the landmark number keeps the URL stable.
 
 Cactus implements the above in `acme/` plus the property-list builder
@@ -433,7 +433,7 @@ re-verified using the §7.2 procedure on the live log.
 
 ## Further reading
 
-- [draft-ietf-plants-merkle-tree-certs-04][draft] — the spec.
+- [draft-ietf-plants-merkle-tree-certs-05][draft] — the spec.
 - [c2sp tlog-tiles] — the read-path layout cactus uses.
 - [c2sp tlog-cosignature] — the cosigner signed-note format.
 - [c2sp tlog-mirror] — the mirror role.
@@ -441,7 +441,7 @@ re-verified using the §7.2 procedure on the live log.
 - [RFC 9162] — Certificate Transparency v2; the Merkle-tree
   conventions MTC builds on.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt
 [c2sp.org/tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md

@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 cactus is a Go ACME server that issues **Merkle Tree certificates** per
-[draft-ietf-plants-merkle-tree-certs-04], for **testing only** (not a production CA).
+[draft-ietf-plants-merkle-tree-certs-05], for **testing only** (not a production CA).
 Read [MTC.md](MTC.md) for how MTC works (why certs have no real signature, what the
 inclusion proof proves, how landmarks and mirrors fit) and [README.md](README.md) for
 operating details and the full config reference.
@@ -31,10 +31,19 @@ gotip test -run TestParallelIssuance -tags=integration ./integration/...
 
 # Fuzz targets:
 gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
+gotip test -fuzz=FuzzAddEntriesFraming -fuzztime=30s ./mirrorpush/...
+
+# Local stack: cactus + Sunlight as a c2sp.org/tlog-mirror (see docker/README.md).
+make docker-up          # cross-build binaries with gotip, build images, start
+make docker-logs
+make docker-down        # also deletes volumes, and therefore key material
 ```
 
-Integration tests live in `./integration/` behind the `integration` build tag; some of
-them compile and run the actual `cactus` binary over HTTP.
+Integration tests live in `./integration/` and are **not** build-tagged, so plain
+`gotip test ./...` runs them; they take ~10s. (`make integration` passes
+`-tags=integration`, which currently selects nothing extra — it exists to run them
+under `-race -count=1`.) Some of them compile and run the actual `cactus` binary
+over HTTP.
 
 ## Architecture
 
@@ -61,10 +70,12 @@ Cert issuance data flow (CSR → verifiable bytes on disk):
    (`/<lognum>/checkpoint`, `/<lognum>/tile/…`, `/<lognum>/landmarks`).
 
 Supporting packages: **`cert/`** holds the wire types (`TBSCertificateLogEntry`,
-`MTCProof`, `MTCSubtreeSignatureInput`, `CertificatePropertyList`) and the multi-mirror
-request client. **`tlogx/`** extends `x/mod/sumdb/tlog` with the §4 subtree primitives
+`MTCProof`, `CosignedMessage`, `CertificatePropertyList`) and the multi-mirror
+sign-subtree request client. **`mirrorpush/`** is the c2sp.org/tlog-mirror push
+client: it replicates the log to external mirrors (`add-checkpoint`, `add-entries`)
+and retains the mirror-cosigned checkpoint that `sign-subtree` then requires. **`tlogx/`** extends `x/mod/sumdb/tlog` with the §4 subtree primitives
 (consistency, inclusion, covering subtrees). **`signer/`** is the ML-DSA cosigner
-abstraction. **`landmark/`** allocates §6.3 landmark sequences and serves `/landmarks`.
+abstraction. **`landmark/`** allocates §6.4 landmark sequences and serves `/landmarks`.
 **`storage/`** is on-disk K/V using atomic-rename writes.
 
 **Single-writer assumption**: the log has no locks or shared-state coordination across
@@ -87,4 +98,4 @@ cactus-cli cert verify <cert.pem> <log-url> # full §7.2 verification, prints OK
 cactus-cli prove <log-url> <index>          # JSON inclusion proof
 ```
 
-[draft-ietf-plants-merkle-tree-certs-04]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
+[draft-ietf-plants-merkle-tree-certs-05]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt

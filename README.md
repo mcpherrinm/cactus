@@ -1,7 +1,7 @@
 # cactus
 
 A Go ACME server that issues **Merkle Tree certificates** per
-[draft-ietf-plants-merkle-tree-certs-04][draft], intended for
+[draft-ietf-plants-merkle-tree-certs-05][draft], intended for
 **testing environments only**.
 
 > ⚠ This is *not* a production CA. There is no fsync ladder, no
@@ -23,14 +23,15 @@ operate it, and where to look in the code.
 1. [What it does](#what-it-does)
 2. [What it does not do](#what-it-does-not-do)
 3. [Quickstart](#quickstart)
-4. [Operating modes](#operating-modes)
-5. [Issuing your first cert](#issuing-your-first-cert)
-6. [Verifying certs with the CLI](#verifying-certs-with-the-cli)
-7. [Configuration reference](#configuration-reference)
-8. [Observability](#observability)
-9. [Layout of the codebase](#layout-of-the-codebase)
-10. [Tests](#tests)
-11. [Status](#status)
+4. [Local stack with a real mirror](#local-stack-with-a-real-mirror)
+5. [Operating modes](#operating-modes)
+6. [Issuing your first cert](#issuing-your-first-cert)
+7. [Verifying certs with the CLI](#verifying-certs-with-the-cli)
+8. [Configuration reference](#configuration-reference)
+9. [Observability](#observability)
+10. [Layout of the codebase](#layout-of-the-codebase)
+11. [Tests](#tests)
+12. [Status](#status)
 
 ---
 
@@ -50,7 +51,7 @@ operate it, and where to look in the code.
 - Supports **landmark-relative certificates** (§6.3). Allocates
   landmarks per §6.3.2 and serves a `/landmarks` endpoint per §6.3.1.
   The standalone cert advertises the signature-free landmark-relative
-  form as a `rel="enhancement"` URL (an optional, non-blocking substitute
+  form as a `rel="acme-optional-alternate"` URL (an optional, non-blocking substitute
   that returns HTTP 202 until a covering landmark exists). The same form
   is also derivable from the log with `cactus-cli cert landmark-relative`.
 - Acts as a **CA cosigner** using ML-DSA-44 (requires a Go 1.27+ build).
@@ -116,6 +117,34 @@ curl http://localhost:14090/metrics        # Prometheus metrics
 
 Stop it with `Ctrl-C` (SIGINT) or `kill -TERM` — graceful shutdown
 drains the pool, writes a final checkpoint, and closes listeners.
+
+---
+
+## Local stack with a real mirror
+
+The quickstart above runs cactus alone, so issued certificates carry
+only the CA's own cosignature. To see the full picture — the log
+replicated to a mirror, and that mirror's cosignature inside an issued
+certificate — use the compose stack in [`docker/`](docker/README.md):
+
+```sh
+make docker-up      # cactus + Sunlight (tlog-mirror) + skylight
+make docker-logs
+make docker-down    # deletes volumes, and therefore key material
+```
+
+It runs [Sunlight](https://github.com/FiloSottile/sunlight) as a
+c2sp.org/tlog-mirror and ML-DSA-44 cosigner, and handles the key
+exchange in both directions. cactus pushes its log to the mirror
+(`mirror_push`), the mirror cosigns the resulting checkpoint, and that
+cosigned checkpoint is what makes `sign-subtree` work — so certificates
+issued against the stack verify with two cosignatures.
+
+Because cactus needs Go 1.27 and no `golang:1.27` image exists yet, the
+cactus image is built from binaries cross-compiled on the host with
+`gotip`; `make docker-up` does that first. `docker/README.md` covers
+that and the several non-obvious things Sunlight needs in order to run
+as a mirror.
 
 ---
 
@@ -240,7 +269,7 @@ signatures per second.
 }
 ```
 
-`id` is the **CA ID** (§5.1): draft-04 §5.4 requires the CA cosigner's
+`id` is the **CA ID** (§5.1): draft §5.4 requires the CA cosigner's
 ID to equal the CA ID, so this one value identifies the CA, seeds the
 issuer DN, and roots all derived log / landmark IDs.
 
@@ -396,12 +425,13 @@ cactus/
 ├── cmd/
 │   ├── cactus/         main server binary
 │   ├── cactus-cli/     debugging client (tree show, entry, cert verify, prove)
-│   └── cactus-keygen/  cosigner seed generator (-pub prints the public key)
+│   └── cactus-keygen/  cosigner seed generator (-pub / -vkey / -from-vkey)
 ├── acme/      RFC 8555 ACME server with §9 extensions
 ├── ca/        Issuer (CSR → X.509 cert via id-alg-mtcProof)
-├── cert/      TBSCertificateLogEntry, MTCProof, MTCSubtreeSignatureInput,
-│              CertificatePropertyList, multi-mirror request client
-├── landmark/  §6.3 landmark sequence allocator + /landmarks handler
+├── cert/      TBSCertificateLogEntry, MTCProof, CosignedMessage,
+│              CertificatePropertyList, multi-mirror sign-subtree client
+├── mirrorpush/ c2sp.org/tlog-mirror push client (add-checkpoint, add-entries)
+├── landmark/  §6.4 landmark sequence allocator + /landmarks handler
 ├── log/       issuance log (single-writer, signed checkpoints + subtrees)
 ├── signer/    cosigner abstraction (ML-DSA-44/65/87, Go 1.27+)
 ├── storage/   on-disk K/V (atomic-rename writes)
@@ -410,6 +440,7 @@ cactus/
 ├── metrics/   Prometheus instruments
 ├── config/    JSON config loader
 ├── docs/      threat-model, disk-layout, test-instance
+├── docker/    compose stack: cactus + Sunlight as a tlog-mirror
 └── integration/ end-to-end tests
 ```
 
@@ -456,7 +487,7 @@ The cornerstone tests:
 Working draft; APIs may shift to track the upstream IETF and c2sp
 specs.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
 [tlog-witness]: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md
