@@ -321,3 +321,44 @@ func TestEntriesAndTreeConsistencyProof(t *testing.T) {
 		t.Error("TreeConsistencyProof accepted oldSize > newSize")
 	}
 }
+
+// TestMaxPoolSizeTriggersEarlyFlush verifies the pool_size knob: with a
+// very long FlushPeriod, appending MaxPoolSize entries must flush (and so
+// let Wait return) well before the ticker would fire.
+func TestMaxPoolSizeTriggersEarlyFlush(t *testing.T) {
+	fs, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := signer.FromSeed(signer.AlgMLDSA44, bytes.Repeat([]byte{0x42}, signer.SeedSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := New(context.Background(), Config{
+		LogID:       cert.TrustAnchorID("32473.1"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
+		Signer:      s,
+		FS:          fs,
+		FlushPeriod: time.Hour, // effectively never on its own
+		MaxPoolSize: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Stop)
+
+	var lastIdx uint64
+	for i := 0; i < 3; i++ {
+		tbs := []byte{byte(i), 0x01}
+		idx, err := l.Append(context.Background(), cert.EncodeTBSCertEntry(tbs), sha256.Sum256(tbs))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastIdx = idx
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := l.Wait(ctx, lastIdx); err != nil {
+		t.Fatalf("Wait did not return before the hour-long flush period: %v", err)
+	}
+}

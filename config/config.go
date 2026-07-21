@@ -228,9 +228,6 @@ func (c *Config) Validate() error {
 	if c.Log.Number == 0 {
 		return fmt.Errorf("log.number must be set and >= 1 (draft-05 §5.2)")
 	}
-	if c.Log.ShortName == "" {
-		return fmt.Errorf("log.shortname must be set")
-	}
 	if c.Log.Hash != "sha256" {
 		return fmt.Errorf("log.hash %q not supported (only sha256)", c.Log.Hash)
 	}
@@ -265,6 +262,11 @@ func (c *Config) Validate() error {
 	}
 	if c.ACME.ExternalURL == "" {
 		return fmt.Errorf("acme.external_url must be set (the public base URL ACME clients see)")
+	}
+	// TLS is optional, but a lone cert or key would silently serve
+	// plaintext, so require both or neither.
+	if (c.ACME.TLSCert == "") != (c.ACME.TLSKey == "") {
+		return fmt.Errorf("acme.tls_cert and acme.tls_key must be set together")
 	}
 	switch c.ACME.ChallengeMode {
 	case "auto-pass", "http-01":
@@ -336,8 +338,8 @@ func (c *Config) Validate() error {
 			if m.URL == "" {
 				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].url required", i)
 			}
-			if m.Algorithm == "" {
-				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].algorithm required", i)
+			if m.Algorithm != "mldsa-44" {
+				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].algorithm must be \"mldsa-44\" (c2sp.org/tlog-cosignature has no other subtree-capable type), got %q", i, m.Algorithm)
 			}
 			if m.PublicKeyPath == "" {
 				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].public_key_path required", i)

@@ -123,6 +123,14 @@ func printVkey(seedPath, algName, cosignerID string) error {
 	if err != nil {
 		return err
 	}
+	// The c2sp.org/signed-note vkey material prefixes the key with the
+	// signature-type byte, which below is fixed to the ML-DSA-44 value
+	// (0x06). c2sp assigns no such byte to ML-DSA-65/87, so a vkey for
+	// those would be mislabeled as ML-DSA-44. The whole mirror/witness
+	// cosignature path is ML-DSA-44-only anyway, so reject the others.
+	if alg != signer.AlgMLDSA44 {
+		return fmt.Errorf("-vkey is only defined for mldsa-44 (c2sp.org/tlog-cosignature assigns no vkey type to %s)", algName)
+	}
 	seed, err := signer.LoadSeed(seedPath)
 	if err != nil {
 		return err

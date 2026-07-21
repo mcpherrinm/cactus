@@ -57,6 +57,12 @@ type Config struct {
 	NowFunc     func() time.Time // optional, defaults to time.Now
 	Metrics     Metrics          // optional; nil-safe
 
+	// MaxPoolSize, if > 0, triggers an immediate flush as soon as the
+	// pending pool reaches this many entries, instead of waiting for the
+	// next FlushPeriod tick. It bounds the pool's memory footprint and
+	// issuance latency under bursty load. 0 disables early flushing.
+	MaxPoolSize int
+
 	// OnFlush, if set, is invoked after each successful flush with
 	// the *new* tree size. Used by the landmark allocator to call
 	// `seq.Append(treeSize, now)` per §6.4.2. Runs in its own
@@ -113,6 +119,11 @@ type Log struct {
 	committed *committedCheckpoint
 	// notify is closed and re-created each flush; waiters re-check.
 	notify chan struct{}
+
+	// flushSignal is a buffered (size 1) coalescing signal that Append
+	// pokes when the pool reaches MaxPoolSize, waking the sequencer for
+	// an early flush.
+	flushSignal chan struct{}
 
 	stop    chan struct{}
 	stopped chan struct{}
@@ -187,10 +198,11 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 	l := &Log{
 		cfg:     cfg,
 		tw:      tw,
-		dedup:   make(map[[32]byte]uint64),
-		notify:  make(chan struct{}),
-		stop:    make(chan struct{}),
-		stopped: make(chan struct{}),
+		dedup:       make(map[[32]byte]uint64),
+		notify:      make(chan struct{}),
+		flushSignal: make(chan struct{}, 1),
+		stop:        make(chan struct{}),
+		stopped:     make(chan struct{}),
 	}
 
 	// Seed the committed checkpoint and dedup index from disk if present.
@@ -244,6 +256,15 @@ func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64,
 	pendingIdx := uint64(l.tw.Size()) + uint64(len(l.pool))
 	l.pool = append(l.pool, poolItem{entry: entry, idemKey: idemKey})
 	l.dedup[idemKey] = pendingIdx
+	// Wake the sequencer for an early flush once the pool is full enough,
+	// bounding pool memory and issuance latency. The signal is coalescing
+	// (buffered size 1); a full buffer already means a flush is pending.
+	if l.cfg.MaxPoolSize > 0 && len(l.pool) >= l.cfg.MaxPoolSize {
+		select {
+		case l.flushSignal <- struct{}{}:
+		default:
+		}
+	}
 	return pendingIdx, nil
 }
 
@@ -419,6 +440,12 @@ func (l *Log) run() {
 				// hanging. The sequencer keeps running and will
 				// retry on the next tick.
 				l.cfg.Logger.Error("log: flush failed", "err", err)
+			}
+		case <-l.flushSignal:
+			// Pool reached MaxPoolSize; flush early rather than
+			// waiting for the next tick.
+			if err := l.flush(); err != nil {
+				l.cfg.Logger.Error("log: early flush failed", "err", err)
 			}
 		}
 	}
