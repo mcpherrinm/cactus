@@ -151,6 +151,7 @@ func RebuildLogEntryFromTBS(tbs []byte, expectedIssuer []byte) ([]byte, uint64, 
 	// bit) and tag number. The MTC log entry preserves whichever are
 	// present so §7.2 verification stays exact.
 	var issuerUniqueID, subjectUniqueID, extensions asn1.RawValue
+	lastTag := 0
 	for len(body) > 0 {
 		var rv asn1.RawValue
 		body, err = asn1.Unmarshal(body, &rv)
@@ -160,6 +161,14 @@ func RebuildLogEntryFromTBS(tbs []byte, expectedIssuer []byte) ([]byte, uint64, 
 		if rv.Class != asn1.ClassContextSpecific {
 			return nil, 0, fmt.Errorf("cert: unexpected TBS field with class=%d tag=%d", rv.Class, rv.Tag)
 		}
+		// DER requires SEQUENCE elements in definition order, so the
+		// optional tail must be strictly ascending by tag ([1] < [2] <
+		// [3]). Without this check a tag-reordered (non-DER) certificate
+		// would rebuild to the same log entry — a §12.6 malleability.
+		if rv.Tag <= lastTag {
+			return nil, 0, fmt.Errorf("cert: TBS tail field tag %d out of order (after %d)", rv.Tag, lastTag)
+		}
+		lastTag = rv.Tag
 		switch rv.Tag {
 		case 1:
 			if issuerUniqueID.FullBytes != nil {
