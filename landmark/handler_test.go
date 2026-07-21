@@ -24,7 +24,7 @@ func TestHandlerEmptySequence(t *testing.T) {
 	}
 }
 
-// TestHandlerHappyPath drives the §6.3.1 example: with N landmarks and
+// TestHandlerHappyPath drives the §6.4.1 example: with N landmarks and
 // MaxActive larger than N, num_active = N, and we emit N+1 tree sizes,
 // strictly decreasing.
 func TestHandlerHappyPath(t *testing.T) {
@@ -125,7 +125,7 @@ func TestHandlerCapsAtMaxActive(t *testing.T) {
 	}
 }
 
-// TestHandlerHeaders confirms the §6.3.1 Content-Type and the
+// TestHandlerHeaders confirms the §6.4.1 Content-Type and the
 // no-cache directive.
 func TestHandlerHeaders(t *testing.T) {
 	s, _, _ := newTestSeq(t)

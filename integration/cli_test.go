@@ -109,7 +109,7 @@ func TestCLIProve(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := buildCLI(t)
-	// Index 0 is the entry we just issued (draft-04 §5.2.1: no reserved
+	// Index 0 is the entry we just issued (draft-05 §5.2.1: no reserved
 	// null entry, so the first issued cert is at index 0).
 	out, err := exec.Command(bin, "prove", s.tileBase, "0").CombinedOutput()
 	if err != nil {

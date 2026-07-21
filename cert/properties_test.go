@@ -46,7 +46,7 @@ func TestPropertyListRoundTripStandalone(t *testing.T) {
 }
 
 func TestPropertyListRoundTripLandmark(t *testing.T) {
-	// draft-04 §8.2: a landmark-relative certificate's property list
+	// draft-05 §8.2: a landmark-relative certificate's property list
 	// carries only the individual landmark's trust anchor ID
 	// (CA-ID.1.logNumber.L); the additional_trust_anchor_ranges property
 	// was removed.

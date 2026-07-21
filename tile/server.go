@@ -44,7 +44,7 @@ func New(l *log.Log, fs storage.FS) *Server {
 }
 
 // WithLandmarks attaches a landmark.Sequence so the server exposes
-// the §6.3.1 /landmarks endpoint.
+// the §6.4.1 /landmarks endpoint.
 func (s *Server) WithLandmarks(seq *landmark.Sequence) *Server {
 	s.landmarks = seq
 	return s
@@ -68,7 +68,7 @@ func (s *Server) WithConfigJSON(j []byte) *Server {
 //	GET /tile/<L>/<NNN..>      — hash tiles (c2sp tlog-tiles)
 //	GET /tile/entries/<NNN..>  — entry (data) tiles (c2sp tlog-tiles)
 //	GET /config                — redacted config JSON (only if WithConfigJSON)
-//	GET /landmarks             — §6.3.1 landmark list (only if WithLandmarks)
+//	GET /landmarks             — §6.4.1 landmark list (only if WithLandmarks)
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)

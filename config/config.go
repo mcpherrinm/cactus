@@ -111,18 +111,18 @@ type MirrorEndpointConfig struct {
 	PublicKeyPath string `json:"public_key_path"`
 }
 
-// LandmarkConfig configures the §6.3 landmark sequence. Landmarks are
+// LandmarkConfig configures the §6.4 landmark sequence. Landmarks are
 // always on; only their cadence and the max cert lifetime (which sets
-// max_active_landmarks) are tunable. In draft-04 landmark trust anchor
+// max_active_landmarks) are tunable. In draft-05 landmark trust anchor
 // IDs are derived from the CA ID and log number (CA-ID.1.logNumber.L),
-// so there is no separate base_id parameter. The §6.3.1 list is always
+// so there is no separate base_id parameter. The §6.4.1 list is always
 // served at "/landmarks".
 type LandmarkConfig struct {
 	TimeBetweenLandmarksMS int `json:"time_between_landmarks_ms"`
 	MaxCertLifetimeMS      int `json:"max_cert_lifetime_ms"`
 }
 
-// TimeBetweenLandmarks returns the §6.3.2 interval as a time.Duration.
+// TimeBetweenLandmarks returns the §6.4.2 interval as a time.Duration.
 func (l LandmarkConfig) TimeBetweenLandmarks() time.Duration {
 	return time.Duration(l.TimeBetweenLandmarksMS) * time.Millisecond
 }
@@ -133,7 +133,7 @@ func (l LandmarkConfig) MaxCertLifetime() time.Duration {
 }
 
 type LogConfig struct {
-	// Number is the issuance log's log number (draft-04 §5.2), in
+	// Number is the issuance log's log number (draft-05 §5.2), in
 	// [1, 65535]. The log ID is derived as CA-ID.0.Number; the CA ID is
 	// the CA cosigner's ID (ca_cosigner.id).
 	Number             uint16 `json:"number"`
@@ -226,7 +226,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("data_dir must be set")
 	}
 	if c.Log.Number == 0 {
-		return fmt.Errorf("log.number must be set and >= 1 (draft-04 §5.2)")
+		return fmt.Errorf("log.number must be set and >= 1 (draft-05 §5.2)")
 	}
 	if c.Log.ShortName == "" {
 		return fmt.Errorf("log.shortname must be set")
@@ -257,7 +257,7 @@ func (c *Config) Validate() error {
 	if c.CACosigner.SeedPath == "" {
 		return fmt.Errorf("ca_cosigner.seed_path must be set")
 	}
-	// draft-04 §5.4: the CA cosigner ID is the CA ID. ca_cosigner.id is
+	// draft-05 §5.4: the CA cosigner ID is the CA ID. ca_cosigner.id is
 	// therefore the CA ID, and the log ID is derived from it as
 	// CA-ID.0.<log.number>.
 	if c.ACME.Listen == "" {

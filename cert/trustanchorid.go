@@ -13,13 +13,13 @@ import (
 // Canonical form: cactus stores a TrustAnchorID as the *relative*
 // trust-anchor-ID ASCII (Section 3 of draft-ietf-tls-trust-anchor-ids),
 // e.g. "32473.1" — the dotted-decimal OID arcs *relative to the
-// 1.3.6.1.4.1 base*, exactly as draft-04 §5.1 shows in the DN example.
+// 1.3.6.1.4.1 base*, exactly as draft-05 §5.1 shows in the DN example.
 // From this single form we derive:
 //
 //   - the DN attribute value: UTF8String(<relative ASCII>)         (§5.1)
 //   - the cosigner_name / log_origin: "oid/1.3.6.1.4.1."+<rel ASCII> (§5.3.1)
 //   - the binary representation: DER content octets of the
-//     RELATIVE-OID, used in MTCProof.cosigner_id (§6.1), the
+//     RELATIVE-OID, used in MTCProof.cosigner_id (§6.2), the
 //     trust_anchor_id certificate property, and the CA cert subjectKeyId.
 //
 // Keeping the relative form canonical is what lets all three be
@@ -42,7 +42,7 @@ const OIDNamePrefix = "oid/"
 // 3 of draft-ietf-tls-trust-anchor-ids: the DER content octets of the
 // RELATIVE-OID (X.690 §8.20), i.e. each arc base-128 encoded with the
 // high bit set on every octet but the last of the arc, concatenated.
-// This is the form draft-04 §6.1 requires for MTCProof.cosigner_id and
+// This is the form draft-05 §6.2 requires for MTCProof.cosigner_id and
 // TAI §7 requires for the trust_anchor_id certificate property.
 //
 // For example, TrustAnchorID("32473.1").Binary() == {0x81,0xfd,0x59,0x01}.

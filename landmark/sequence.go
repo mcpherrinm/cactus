@@ -1,4 +1,4 @@
-// Package landmark implements the landmark sequence from §6.3 of
+// Package landmark implements the landmark sequence from §6.4 of
 // draft-ietf-plants-merkle-tree-certs-04.
 //
 // A landmark is a (number, treeSize, allocatedAt) triple. The
@@ -33,7 +33,7 @@ type Landmark struct {
 	AllocatedAt time.Time `json:"allocated_at"`
 }
 
-// TrustAnchorID returns the landmark's trust anchor ID per §6.3.1/§8.2:
+// TrustAnchorID returns the landmark's trust anchor ID per §6.4.1/§8.2:
 // CA-ID.1.logNumber.landmarkNumber.
 func (l Landmark) TrustAnchorID(caID cert.TrustAnchorID, logNumber uint16) cert.TrustAnchorID {
 	return cert.LandmarkID(caID, logNumber, l.Number)
@@ -49,22 +49,22 @@ func (l Landmark) GroupID(caID cert.TrustAnchorID, logNumber uint16) cert.TrustA
 // Config configures the sequence allocator.
 type Config struct {
 	// CAID is the CA's CA ID (§5.1); landmark trust anchor IDs are
-	// derived from it and the log number (§6.3.1).
+	// derived from it and the log number (§6.4.1).
 	CAID cert.TrustAnchorID
 
 	// LogNumber is the issuance log's number (§5.2).
 	LogNumber uint16
 
-	// TimeBetweenLandmarks is the §6.3.2 interval. A new landmark is
+	// TimeBetweenLandmarks is the §6.4.2 interval. A new landmark is
 	// allocated at most once per such interval.
 	TimeBetweenLandmarks time.Duration
 
 	// MaxCertLifetime is the CA's maximum certificate lifetime; used
-	// only to compute MaxActive() per §6.3.2.
+	// only to compute MaxActive() per §6.4.2.
 	MaxCertLifetime time.Duration
 }
 
-// MaxActive returns max_active_landmarks per §6.3.2:
+// MaxActive returns max_active_landmarks per §6.4.2:
 //
 //	ceil(max_cert_lifetime / time_between_landmarks) + 1.
 func (c Config) MaxActive() int {
@@ -89,7 +89,7 @@ const SequenceFile = "state/landmarks/sequence.jsonl"
 
 // New constructs a Sequence and replays the on-disk JSONL if it
 // exists. If the file is missing or empty, the sequence is initialized
-// with landmark 0 at tree size 0 (§6.3.1).
+// with landmark 0 at tree size 0 (§6.4.1).
 func New(cfg Config, fs storage.FS, now time.Time) (*Sequence, error) {
 	if cfg.TimeBetweenLandmarks <= 0 {
 		return nil, errors.New("landmark: TimeBetweenLandmarks must be > 0")
@@ -173,7 +173,7 @@ func (s *Sequence) persistLineLocked(_ Landmark) error {
 	return s.fs.Put(SequenceFile, buf, false)
 }
 
-// Append implements the §6.3.2 allocation procedure: at most once per
+// Append implements the §6.4.2 allocation procedure: at most once per
 // TimeBetweenLandmarks, append the current treeSize if it strictly
 // exceeds the last landmark's tree size.
 //
@@ -215,7 +215,7 @@ func (s *Sequence) All() []Landmark {
 }
 
 // Active returns the most recent MaxActive() landmarks, descending by
-// Number. Per §6.3.1 these are the landmarks that may currently
+// Number. Per §6.4.1 these are the landmarks that may currently
 // contain unexpired certs.
 func (s *Sequence) Active() []Landmark {
 	s.mu.Lock()
@@ -287,7 +287,7 @@ func (s *Sequence) NextNumber() uint64 {
 // TimeUntilNextLandmark estimates how long until the next landmark is
 // allocated — i.e. when a freshly-issued, not-yet-covered entry's
 // landmark-relative cert becomes available. It is the remainder of the
-// §6.3.2 interval since the most recent landmark, floored at zero. Used
+// §6.4.2 interval since the most recent landmark, floored at zero. Used
 // to set the Retry-After on the enhancement URL's 202 response.
 func (s *Sequence) TimeUntilNextLandmark(now time.Time) time.Duration {
 	s.mu.Lock()
@@ -304,7 +304,7 @@ func (s *Sequence) LatestTreeSize() uint64 {
 	return s.landmarks[len(s.landmarks)-1].TreeSize
 }
 
-// MaxActive returns the §6.3.2 max_active_landmarks for this sequence.
+// MaxActive returns the §6.4.2 max_active_landmarks for this sequence.
 // Convenience accessor for callers that need the number to populate a
 // landmark group's set of active landmarks.
 func (s *Sequence) MaxActive() int {

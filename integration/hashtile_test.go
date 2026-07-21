@@ -49,7 +49,7 @@ func TestHashTileReadPath(t *testing.T) {
 	// Wait for one more flush so all entries are committed.
 	time.Sleep(100 * time.Millisecond)
 
-	// The full set is the n issued entries. draft-04 §5.2.1 no longer
+	// The full set is the n issued entries. draft-05 §5.2.1 no longer
 	// reserves an index-0 null entry, so tree size = n.
 	want := uint64(n)
 

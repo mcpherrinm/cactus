@@ -72,8 +72,8 @@ type Config struct {
 	LogID cert.TrustAnchorID
 
 	// CAID is the CA's CA ID (§5.1). Emitted as the standalone cert's
-	// `trust_anchor_id` property (draft-04 §8.1); landmark trust anchor
-	// IDs are derived from it and LogNumber (CA-ID.1.logNumber.L, §6.3.1).
+	// `trust_anchor_id` property (draft-05 §8.1); landmark trust anchor
+	// IDs are derived from it and LogNumber (CA-ID.1.logNumber.L, §6.4.1).
 	CAID cert.TrustAnchorID
 
 	// LogNumber is the issuance log's number (§5.2). Required whenever
@@ -1027,7 +1027,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
 		// Standalone cert: the trust_anchor_id property naming the CA
-		// (draft-04 §8.1: a standalone certificate's trust anchor ID is
+		// (draft-05 §8.1: a standalone certificate's trust anchor ID is
 		// the CA ID). Fall back to LogID when CAID is unset.
 		taID := s.cfg.CAID
 		if len(taID) == 0 {
@@ -1056,7 +1056,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 }
 
 // certIndex extracts the issuance-log index from a standalone cert's
-// serial (draft-04 §6.1: serial = (log_number << 48) | index).
+// serial (draft-05 §6.2: serial = (log_number << 48) | index).
 func (s *Server) certIndex(der []byte) (uint64, bool) {
 	tbs, _, _, err := cert.SplitCertificate(der)
 	if err != nil {
@@ -1087,7 +1087,7 @@ func (s *Server) coveringLandmarkNumber(index uint64) uint64 {
 
 // handleCertLandmarkRelative serves the landmark-relative form of a cert,
 // pinned in the URL to the specific landmark number it is relative to
-// (draft-04 §6.3). It is the rel="acme-optional-alternate" target
+// (draft-05 §6.4). It is the rel="acme-optional-alternate" target
 // advertised on the
 // standalone cert response. Each entry belongs to exactly one landmark
 // (ContainingIndex), so there is exactly one valid number per cert and
@@ -1188,7 +1188,7 @@ func (s *Server) handleCertLandmarkRelative(w http.ResponseWriter, r *http.Reque
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/pem-certificate-chain-with-properties") {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain-with-properties")
-		// draft-04 §8.2: a landmark-relative certificate's trust anchor
+		// draft-05 §8.2: a landmark-relative certificate's trust anchor
 		// ID is the individual landmark ID (CA-ID.1.logNumber.L).
 		props := []cert.CertificateProperty{
 			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lm.TrustAnchorID(s.cfg.CAID, s.cfg.LogNumber)},
@@ -1212,7 +1212,7 @@ func (s *Server) handleCertLandmarkRelative(w http.ResponseWriter, r *http.Reque
 // but never fail issuance or block deploying the standalone cert.
 //
 // Retry-After is derived from when the covering landmark is expected: the
-// remainder of the §6.3.2 landmark interval, rounded up to whole seconds
+// remainder of the §6.4.2 landmark interval, rounded up to whole seconds
 // with a 1s floor so a client never busy-loops on Retry-After: 0.
 func (s *Server) serveEnhancementPending(w http.ResponseWriter) {
 	secs := max(1, int64(math.Ceil(s.cfg.Landmarks.TimeUntilNextLandmark(time.Now()).Seconds())))

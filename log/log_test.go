@@ -40,7 +40,7 @@ func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {
 	return l, s, fs
 }
 
-// TestLogStartsEmptyAndFirstEntryIsIndexZero pins draft-04 §5.2.1: a
+// TestLogStartsEmptyAndFirstEntryIsIndexZero pins draft-05 §5.2.1: a
 // fresh log starts empty (no reserved index-0 null_entry), and the first
 // appended entry is assigned index 0. (Regression for review finding 3.)
 func TestLogStartsEmptyAndFirstEntryIsIndexZero(t *testing.T) {

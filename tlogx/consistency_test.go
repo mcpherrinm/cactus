@@ -45,9 +45,9 @@ func TestConsistencyProofRoundTrip(t *testing.T) {
 		{8, 13, 14},
 		// §4.4.2 example: [4,8) in tree of 14.
 		{4, 8, 14},
-		// §B.3 example: [0,6) in tree of 8.
+		// §B.4 example: [0,6) in tree of 8.
 		{0, 6, 8},
-		// §B.3 example: [0,6) in tree of 7.
+		// §B.4 example: [0,6) in tree of 7.
 		{0, 6, 7},
 		// Random-ish.
 		{16, 24, 100},

@@ -161,7 +161,7 @@ func EvaluateInclusionProof(
 
 // ProofLen returns the number of nodes that a valid subtree inclusion
 // proof must contain for entry `index` of subtree [start, end), per
-// Appendix B.2.
+// Appendix B.3.
 func ProofLen(start, end, index uint64) int {
 	fn := index - start
 	sn := end - start - 1

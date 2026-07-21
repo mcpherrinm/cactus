@@ -3,7 +3,7 @@
 // The Validator checks a CSR matches an order and produces the inputs
 // needed to build a TBSCertificateLogEntry. The Issuer drives the log
 // Append/Wait round-trip and assembles the final X.509 certificate
-// per §6.1.
+// per §6.2.
 package ca
 
 import (

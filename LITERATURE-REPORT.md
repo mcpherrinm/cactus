@@ -106,7 +106,7 @@ and targets the draft plus the MTC-with-tlog profile
   parsers strip the timestamp and reject a non-zero timestamp on a
   subtree cosignature. The MTCProof signature carried in the X.509
   certificate is a bare PKIX signature over the `CosignedMessage`
-  (§6.1), with no note-line wrapper.
+  (§6.2), with no note-line wrapper.
 - **Checkpoint body** (`log/note.go`) is origin / size / base64 root,
   with the empty tree's root being the RFC 6962 / RFC 9162 §2.1
   empty-tree hash `SHA-256("")` (`log/tilewriter`, not the zero hash).
@@ -242,8 +242,8 @@ and targets the draft plus the MTC-with-tlog profile
 consistency proof generation/verification, FindSubtrees) · §5.1 CA / log
 parameters · §5.2 log IDs + entries (null + tbs_cert_entry, ASN.1 module,
 single-pass hash) · §5.3/§5.3.1 cosigner signature format · §5.5 CA
-cosigner + CA-certificate extension · §6.1 certificate format / MTCProof
-/ serial · §6.2 standalone certs · §6.3.1–§6.3.3 landmark sizes,
+cosigner + CA-certificate extension · §6.2 certificate format / MTCProof
+/ serial · §6.3 standalone certs · §6.4.1–§6.4.3 landmark sizes,
 allocation, publishing, and landmark-relative cert construction ·
 §7.1/§7.2/§7.4/§7.5 relying-party verification (config from CA cert,
 verify steps 1–12, trusted subtrees, revoked-range data model) · §9 ACME

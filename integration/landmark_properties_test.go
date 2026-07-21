@@ -81,7 +81,7 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// draft-04 §8.1: a standalone cert carries a single trust_anchor_id
+	// draft-05 §8.1: a standalone cert carries a single trust_anchor_id
 	// naming the CA.
 	if len(props) != 1 || props[0].Type != cert.PropertyTrustAnchorID ||
 		string(props[0].TrustAnchorID) != string(logID) {

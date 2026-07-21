@@ -80,7 +80,7 @@ func TestLandmarkRelativeCertConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// draft-04 §6.1: serial = (log_number << 48) | index.
+	// draft-05 §6.2: serial = (log_number << 48) | index.
 	_, index, err := cert.SplitSerial(serial)
 	if err != nil {
 		t.Fatal(err)

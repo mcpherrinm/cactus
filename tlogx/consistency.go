@@ -49,7 +49,7 @@ func VerifyConsistencyProof(
 	var fr, sr Hash
 	if fn == sn {
 		// node_hash starts the reconstruction; consistency proof omits
-		// it (§B.3 first optimization).
+		// it (§B.4 first optimization).
 		fr = nodeHash
 		sr = nodeHash
 	} else {

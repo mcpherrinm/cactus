@@ -95,7 +95,7 @@ func TestMTCProofRoundTrip(t *testing.T) {
 }
 
 func TestMTCProofRejectsInvalidInclusionProofLength(t *testing.T) {
-	// §6.1 layout: extensions<2> || start[6] || end[6] || ip_len[2] || ...
+	// §6.2 layout: extensions<2> || start[6] || end[6] || ip_len[2] || ...
 	bad := []byte{
 		// extensions length=0
 		0x00, 0x00,
@@ -127,7 +127,7 @@ func TestMTCProofRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
-// TestMTCProofCosignerIDIsBinary pins §6.1: the cosigner_id field on the
+// TestMTCProofCosignerIDIsBinary pins §6.2: the cosigner_id field on the
 // wire is the trust anchor ID's binary representation, not ASCII, and the
 // in-memory CosignerID round-trips to the canonical relative form.
 // (Regression for review finding 1.)
@@ -148,7 +148,7 @@ func TestMTCProofCosignerIDIsBinary(t *testing.T) {
 		t.Errorf("MTCProof %x missing binary cosigner_id field %x", enc, want)
 	}
 	if bytes.Contains(enc, []byte("32473.1")) {
-		t.Error("MTCProof bytes contain ASCII cosigner_id; §6.1 requires binary")
+		t.Error("MTCProof bytes contain ASCII cosigner_id; §6.2 requires binary")
 	}
 	dec, err := ParseMTCProof(enc)
 	if err != nil {
@@ -159,7 +159,7 @@ func TestMTCProofCosignerIDIsBinary(t *testing.T) {
 	}
 }
 
-// TestMTCProofSignaturesSortedByBinary pins the §6.1 ordering: signatures
+// TestMTCProofSignaturesSortedByBinary pins the §6.2 ordering: signatures
 // are sorted by the *binary* cosigner_id (shorter first, then
 // lexicographic), which can differ from ASCII order. "32473.2" (4 binary
 // octets) must sort before "32473.130" (5 binary octets) even though

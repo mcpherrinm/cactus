@@ -6,7 +6,7 @@ import (
 )
 
 // SignatureAlgorithm identifies how to interpret an MTCSignature's
-// public key + signature bytes. draft-04 §5.3.3 no longer fixes an
+// public key + signature bytes. draft-05 §5.3.3 no longer fixes an
 // algorithm registry — a cosigner's algorithm is a PKIX
 // AlgorithmIdentifier carried in the CA certificate's sigAlg (§5.5),
 // resolved out-of-band. Per the MTC-with-tlog profile, cosigners use
@@ -46,7 +46,7 @@ func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte)
 }
 
 // verifyMLDSA verifies a pure ML-DSA signature with an empty context
-// (draft-04 §5.3.3 / RFC 9881 §3). pub is the raw FIPS 204 public key as
+// (draft-05 §5.3.3 / RFC 9881 §3). pub is the raw FIPS 204 public key as
 // extracted from the cosigner SPKI by cosignerKeyFromSPKI.
 func verifyMLDSA(alg SignatureAlgorithm, pub, msg, sig []byte) error {
 	var params mldsa.Parameters

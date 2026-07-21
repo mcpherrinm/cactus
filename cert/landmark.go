@@ -10,9 +10,9 @@ import (
 )
 
 // BuildLandmarkRelativeCert builds a landmark-relative certificate
-// (§6.3.3) from an existing standalone cert.
+// (§6.4.4) from an existing standalone cert.
 //
-// Per §6.3.3 the landmark-relative cert has the same TBSCertificate
+// Per §6.4.4 the landmark-relative cert has the same TBSCertificate
 // fields as the standalone cert; only the signatureValue changes:
 // the new MTCProof points to the chosen landmark subtree, includes
 // the §4.3 inclusion proof from the entry up to that subtree, and
@@ -47,7 +47,7 @@ func BuildLandmarkRelativeCert(
 		Start:          subtree.Start,
 		End:            subtree.End,
 		InclusionProof: inclusionProof,
-		Signatures:     nil, // §6.3.3: no signatures
+		Signatures:     nil, // §6.4.4: no signatures
 	}
 	proofBytes, err := proof.MarshalTLS()
 	if err != nil {

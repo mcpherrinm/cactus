@@ -175,7 +175,7 @@ func TestCactusBinaryStartsAndServes(t *testing.T) {
 	}
 
 	// /checkpoint on the monitoring listener — a fresh log publishes an
-	// initial empty (size 0) checkpoint (draft-04 §5.2.1: no reserved
+	// initial empty (size 0) checkpoint (draft-05 §5.2.1: no reserved
 	// null entry).
 	cpURL := fmt.Sprintf("http://127.0.0.1:%d/1/checkpoint", monPort)
 	resp3, err := http.Get(cpURL)

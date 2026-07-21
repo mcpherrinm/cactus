@@ -14,7 +14,7 @@ import (
 )
 
 // TestMultiCosignerQuorum stands up one CA plus three stub witnesses
-// and drives the §6.2/9.4 collection: the CA fans a sign-subtree
+// and drives the §6.3 cosignature collection: the CA fans a sign-subtree
 // request out to all three with quorum=2, collects the responses, and
 // verifies each.
 //

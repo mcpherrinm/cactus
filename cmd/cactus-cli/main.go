@@ -354,7 +354,7 @@ func certVerify(certPath, logURL string) {
 	if err != nil {
 		die("rebuild log entry: %v", err)
 	}
-	// draft-04 §6.1: serial = (log_number << 48) | index.
+	// draft-05 §6.2: serial = (log_number << 48) | index.
 	logNumber, index, err := cert.SplitSerial(serial)
 	if err != nil {
 		die("decode serial: %v", err)

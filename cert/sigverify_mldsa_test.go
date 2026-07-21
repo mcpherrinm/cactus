@@ -29,7 +29,7 @@ func TestVerifyMTCSignatureMLDSARoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// draft-04 §5.3.3: empty context (nil Options); the reader is
+			// draft-05 §5.3.3: empty context (nil Options); the reader is
 			// ignored by crypto/mldsa.
 			sig, err := priv.Sign(nil, msg, nil)
 			if err != nil {

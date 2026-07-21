@@ -24,19 +24,19 @@ type LogAPI interface {
 }
 
 // Issuer turns a CSR + ACME order into a Merkle Tree certificate per
-// §6.1 of the draft.
+// §6.2 of the draft.
 type Issuer struct {
 	Validator *Validator
 	Log       LogAPI
 
 	// CADN is the precomputed DER-encoded CA ID Name (§5.1). It's used
 	// both as the TBSCertificateLogEntry.issuer and the
-	// TBSCertificate.issuer (draft-04: the issuer is the CA ID, not the
+	// TBSCertificate.issuer (draft-05: the issuer is the CA ID, not the
 	// per-log ID).
 	CADN []byte
 
 	// LogNumber is this log's number (§5.2), used to compose serial
-	// numbers as (LogNumber << 48) | index (§6.1).
+	// numbers as (LogNumber << 48) | index (§6.2).
 	LogNumber uint16
 }
 
@@ -106,7 +106,7 @@ func (i *Issuer) Issue(ctx context.Context, csr *x509.CertificateRequest, order 
 		return nil, fmt.Errorf("ca: marshal proof: %w", err)
 	}
 
-	// serialNumber = (logNumber << 48) | index (§6.1).
+	// serialNumber = (logNumber << 48) | index (§6.2).
 	serial, err := cert.ComposeSerial(i.LogNumber, idx)
 	if err != nil {
 		return nil, fmt.Errorf("ca: compose serial: %w", err)

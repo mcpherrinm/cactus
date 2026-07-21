@@ -72,7 +72,7 @@ func certText(certPath string) {
 }
 
 // certLandmarkRelative converts a standalone certificate into the
-// equivalent landmark-relative certificate (§6.3.3): same TBS, but a new
+// equivalent landmark-relative certificate (§6.4.4): same TBS, but a new
 // MTCProof whose inclusion proof climbs from the entry to a covering
 // subtree of the smallest landmark containing the entry, with the
 // cosigner signatures dropped. The log's /landmarks and tile endpoints
@@ -109,7 +109,7 @@ func certLandmarkRelative(certPath, logURL string) {
 		die("decode serial: %v", err)
 	}
 
-	// Pick the covering landmark from the §6.3.1 list.
+	// Pick the covering landmark from the §6.4.1 list.
 	body, err := httpGet(logURL + "/landmarks")
 	if err != nil {
 		die("fetch landmarks: %v", err)
@@ -249,13 +249,13 @@ func caTrustAnchorID(props []cert.CertificateProperty) (cert.TrustAnchorID, bool
 	return nil, false
 }
 
-// landmarkEntry is one (number, treeSize) pair from the §6.3.1 list.
+// landmarkEntry is one (number, treeSize) pair from the §6.4.1 list.
 type landmarkEntry struct {
 	number   uint64
 	treeSize uint64
 }
 
-// parseLandmarks decodes the §6.3.1 landmark list:
+// parseLandmarks decodes the §6.4.1 landmark list:
 //
 //	<last> <num_active>\n
 //	<treeSize of landmark last>\n
@@ -299,9 +299,9 @@ func parseLandmarks(body []byte) ([]landmarkEntry, error) {
 }
 
 // coveringLandmark finds the smallest-numbered landmark whose tree size
-// is strictly greater than index (§6.3.3), and its predecessor's tree
+// is strictly greater than index (§6.4.4), and its predecessor's tree
 // size (the lower bound of the landmark's entry range). It needs the
-// predecessor to be present in the list, which the §6.3.1 format
+// predecessor to be present in the list, which the §6.4.1 format
 // guarantees for every active landmark by including one extra older
 // size line.
 func coveringLandmark(desc []landmarkEntry, index uint64) (num, size, prev uint64, ok bool) {
