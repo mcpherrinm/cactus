@@ -42,6 +42,13 @@ func SplitCertificate(der []byte) (tbs, sigAlg, sigValue []byte, err error) {
 	if len(rest2) != 0 {
 		return nil, nil, nil, errors.New("cert: trailing bytes after Certificate body")
 	}
+	// §7.2 step 2 requires verification to fail if signatureValue is not
+	// a multiple of 8 bits. encoding/asn1 accepts a non-zero unused-bits
+	// count and reports it via BitLength, so reject that explicitly
+	// rather than silently verifying over a partially-used final byte.
+	if sigBS.BitLength != len(sigBS.Bytes)*8 {
+		return nil, nil, nil, fmt.Errorf("cert: signatureValue is %d bits, not a multiple of 8", sigBS.BitLength)
+	}
 	return tbsRV.FullBytes, algRV.FullBytes, sigBS.Bytes, nil
 }
 

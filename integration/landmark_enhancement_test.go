@@ -23,10 +23,10 @@ import (
 )
 
 // TestEnhancementURLSwitchover wires the draft §9 landmark-relative
-// "enhancement" URL end-to-end:
+// "acme-optional-alternate" URL end-to-end:
 //
 //   - The standalone cert response advertises the landmark-relative cert
-//     via rel="enhancement", at a URL pinned to the landmark number it
+//     via rel="acme-optional-alternate", at a URL pinned to the landmark number it
 //     will be relative to (an immutable resource).
 //   - Before a covering landmark exists, that URL returns HTTP 202
 //     (Accepted) + Retry-After — non-blocking, never a 5xx.
@@ -80,7 +80,7 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 
 	type certCtx struct {
 		url     string // standalone cert URL
-		enh     string // pinned landmark-relative (enhancement) URL
+		enh     string // pinned landmark-relative (optional alternate) URL
 		acctKey *ecdsa.PrivateKey
 		kid     string
 	}
@@ -91,17 +91,17 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The standalone cert response advertises the enhancement URL.
+		// The standalone cert response advertises the optional-alternate URL.
 		certResp, _ := postAsGetWithAccept(t, hsrv.URL, certURL, "", acctKey, kid)
 		link := certResp.Header.Get("Link")
-		if !strings.Contains(link, `rel="enhancement"`) {
-			t.Fatalf("cert %d Link missing rel=enhancement: %q", i, link)
+		if !strings.Contains(link, `rel="acme-optional-alternate"`) {
+			t.Fatalf("cert %d Link missing rel=acme-optional-alternate: %q", i, link)
 		}
 		enh := linkURL(link)
 		// Every cert here lands in landmark 1 (the first allocated), so
 		// the pinned URL is stable and identical across certs.
 		if !strings.HasSuffix(enh, "/landmark-relative/1") {
-			t.Fatalf("cert %d enhancement URL = %q, want pinned to landmark 1", i, enh)
+			t.Fatalf("cert %d optional-alternate URL = %q, want pinned to landmark 1", i, enh)
 		}
 		ctxs = append(ctxs, certCtx{url: certURL, enh: enh, acctKey: acctKey, kid: kid})
 	}
@@ -109,7 +109,7 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 	// Let all entries commit.
 	time.Sleep(100 * time.Millisecond)
 
-	// Before a covering landmark exists, the enhancement URL returns 202
+	// Before a covering landmark exists, the optional-alternate URL returns 202
 	// + Retry-After (non-blocking).
 	r0, _ := postAsGetWithAccept(t, hsrv.URL, ctxs[0].enh, "", ctxs[0].acctKey, ctxs[0].kid)
 	if r0.StatusCode != http.StatusAccepted {

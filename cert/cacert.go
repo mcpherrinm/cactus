@@ -3,6 +3,7 @@ package cert
 import (
 	"encoding/asn1"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
@@ -39,17 +40,28 @@ type algorithmIdentifier struct {
 	Parameters asn1.RawValue `asn1:"optional"`
 }
 
+// mtcMaxSerial is the §5.5 / Appendix A bound on serial numbers: 2^64-1,
+// the largest serial this protocol can express.
+const mtcMaxSerial = math.MaxUint64
+
 // mtcCertificationAuthorityASN1 mirrors the §5.5 / Appendix A SEQUENCE:
 //
 //	MTCCertificationAuthority ::= SEQUENCE {
 //	    logHash   AlgorithmIdentifier{DIGEST-ALGORITHM, {...}},
 //	    sigAlg    AlgorithmIdentifier{SIGNATURE-ALGORITHM, {...}},
-//	    minSerial INTEGER
+//	    minSerial INTEGER (0..mtcMaxSerial),
+//	    maxSerial INTEGER (0..mtcMaxSerial)
 //	}
+//
+// maxSerial is new in draft-05. Because it is a required field, -04 and
+// -05 encodings are mutually unparseable: a -05 parser rejects a -04
+// extension as truncated, and a -04 parser rejects a -05 one as having
+// trailing data. Any previously issued CA certificate must be reissued.
 type mtcCertificationAuthorityASN1 struct {
 	LogHash   algorithmIdentifier
 	SigAlg    algorithmIdentifier
 	MinSerial *big.Int
+	MaxSerial *big.Int
 }
 
 // MTCCertificationAuthority is the decoded content of the critical
@@ -66,6 +78,12 @@ type MTCCertificationAuthority struct {
 	// MinSerial is the smallest serial number the CA will not have
 	// pruned; serials in [0, MinSerial) are treated as revoked (§7.1).
 	MinSerial uint64
+	// MaxSerial is the largest serial number the CA will issue; serials
+	// in [MaxSerial+1, 2^64) are treated as revoked (§7.1). Because a
+	// serial packs a log number and an entry index (§5.2.3), an upper
+	// bound on serials is also an upper bound on log numbers, which a
+	// relying party can use to bound its monitoring scope (§7.5).
+	MaxSerial uint64
 }
 
 // Marshal returns the DER encoding of the MTCCertificationAuthority
@@ -79,10 +97,14 @@ func (m MTCCertificationAuthority) Marshal() ([]byte, error) {
 	if len(m.SigAlg) == 0 {
 		return nil, fmt.Errorf("cert: MTCCertificationAuthority sigAlg unset")
 	}
+	if m.MaxSerial < m.MinSerial {
+		return nil, fmt.Errorf("cert: MTCCertificationAuthority maxSerial %d below minSerial %d", m.MaxSerial, m.MinSerial)
+	}
 	v := mtcCertificationAuthorityASN1{
 		LogHash:   algorithmIdentifier{Algorithm: m.LogHash},
 		SigAlg:    algorithmIdentifier{Algorithm: m.SigAlg},
 		MinSerial: new(big.Int).SetUint64(m.MinSerial),
+		MaxSerial: new(big.Int).SetUint64(m.MaxSerial),
 	}
 	return asn1.Marshal(v)
 }
@@ -98,23 +120,46 @@ func ParseMTCCertificationAuthority(der []byte) (MTCCertificationAuthority, erro
 	if len(rest) != 0 {
 		return MTCCertificationAuthority{}, fmt.Errorf("cert: %d trailing bytes after MTCCertificationAuthority", len(rest))
 	}
-	if v.MinSerial == nil || v.MinSerial.Sign() < 0 {
-		return MTCCertificationAuthority{}, fmt.Errorf("cert: MTCCertificationAuthority minSerial missing or negative")
+	minSerial, err := serialBound("minSerial", v.MinSerial)
+	if err != nil {
+		return MTCCertificationAuthority{}, err
 	}
-	if !v.MinSerial.IsUint64() {
-		return MTCCertificationAuthority{}, fmt.Errorf("cert: MTCCertificationAuthority minSerial %s does not fit in uint64", v.MinSerial)
+	maxSerial, err := serialBound("maxSerial", v.MaxSerial)
+	if err != nil {
+		return MTCCertificationAuthority{}, err
+	}
+	if maxSerial < minSerial {
+		return MTCCertificationAuthority{}, fmt.Errorf("cert: MTCCertificationAuthority maxSerial %d below minSerial %d", maxSerial, minSerial)
 	}
 	return MTCCertificationAuthority{
 		LogHash:   v.LogHash.Algorithm,
 		SigAlg:    v.SigAlg.Algorithm,
-		MinSerial: v.MinSerial.Uint64(),
+		MinSerial: minSerial,
+		MaxSerial: maxSerial,
 	}, nil
 }
 
-// RevokedRange is a half-open range [Start, End) of certificate serial
+// serialBound range-checks one of the INTEGER (0..mtcMaxSerial) serial
+// bounds from the §5.5 SEQUENCE.
+func serialBound(name string, v *big.Int) (uint64, error) {
+	if v == nil || v.Sign() < 0 {
+		return 0, fmt.Errorf("cert: MTCCertificationAuthority %s missing or negative", name)
+	}
+	if !v.IsUint64() {
+		return 0, fmt.Errorf("cert: MTCCertificationAuthority %s %s exceeds %d", name, v, uint64(mtcMaxSerial))
+	}
+	return v.Uint64(), nil
+}
+
+// RevokedRange is a closed range [Start, End] of certificate serial
 // numbers (§7.5). Because a serial number packs a log number and an
 // entry index, a single range can revoke entries within a log or whole
 // logs at once.
+//
+// The range is closed rather than half-open so that the upper revoked
+// range from §7.1, [maxSerial+1, 2^64), is representable: a half-open
+// uint64 range cannot express an exclusive end of 2^64, and clamping it
+// to 2^64-1 would silently leave the largest serial unrevoked.
 type RevokedRange struct {
 	Start, End uint64
 }
@@ -124,19 +169,25 @@ type RevokedRange struct {
 type RevokedRanges []RevokedRange
 
 // InitialRevokedRanges returns the revoked ranges implied by a CA
-// certificate's minSerial (§7.1): serials in [0, minSerial) are
-// revoked. Relying parties may extend this list out-of-band.
+// certificate's minSerial and maxSerial (§7.1): serials in
+// [0, minSerial) and [maxSerial+1, 2^64) are revoked. Either range is
+// omitted when it is empty. Relying parties may extend this list
+// out-of-band.
 func InitialRevokedRanges(ca MTCCertificationAuthority) RevokedRanges {
-	if ca.MinSerial == 0 {
-		return nil
+	var out RevokedRanges
+	if ca.MinSerial > 0 {
+		out = append(out, RevokedRange{Start: 0, End: ca.MinSerial - 1})
 	}
-	return RevokedRanges{{Start: 0, End: ca.MinSerial}}
+	if ca.MaxSerial < mtcMaxSerial {
+		out = append(out, RevokedRange{Start: ca.MaxSerial + 1, End: mtcMaxSerial})
+	}
+	return out
 }
 
 // Contains reports whether serial falls in any revoked range.
 func (r RevokedRanges) Contains(serial uint64) bool {
 	for _, rr := range r {
-		if serial >= rr.Start && serial < rr.End {
+		if serial >= rr.Start && serial <= rr.End {
 			return true
 		}
 	}
@@ -160,7 +211,9 @@ type CACertificateInput struct {
 	// (MTCCertificationAuthority.sigAlg).
 	SigAlg asn1.ObjectIdentifier
 	// MinSerial is the minimum valid serial number (§5.2.3 / §7.1).
-	MinSerial           uint64
+	MinSerial uint64
+	// MaxSerial is the maximum valid serial number (§7.1 / §7.5).
+	MaxSerial           uint64
 	NotBefore, NotAfter time.Time
 }
 
@@ -202,6 +255,7 @@ func BuildCACertificate(in CACertificateInput) ([]byte, error) {
 		LogHash:   in.LogHash,
 		SigAlg:    in.SigAlg,
 		MinSerial: in.MinSerial,
+		MaxSerial: in.MaxSerial,
 	}.Marshal()
 	if err != nil {
 		return nil, err

@@ -2,7 +2,7 @@
 // extensions of draft-ietf-plants-merkle-tree-certs-04 (the
 // PEM-with-properties content type). It issues standalone Merkle Tree
 // certificates and advertises the landmark-relative form as a
-// rel="enhancement" URL (an optional, non-blocking substitute that
+// rel="acme-optional-alternate" URL (an optional, non-blocking chain that
 // returns HTTP 202 until a covering landmark exists). The same form is
 // also derivable from the log out-of-band with cmd/cactus-cli.
 //
