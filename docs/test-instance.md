@@ -12,6 +12,24 @@ have issued certs carry additional cosignatures, point
 set `min_signatures` accordingly. Everything below works with or without
 that block.
 
+**If what you want is a working mirror, use the compose stack instead.**
+[`docker/`](../docker/README.md) runs cactus against
+[Sunlight](https://github.com/FiloSottile/sunlight) as a real
+c2sp.org/tlog-mirror and ML-DSA-44 cosigner, and handles the key
+exchange between the two:
+
+```sh
+make docker-up      # cactus :14000 ACME, :14080 monitoring
+make docker-logs
+make docker-down    # deletes volumes, and therefore key material
+```
+
+Certificates issued against that stack carry Sunlight's mirror
+cosignature alongside the CA's. Standing the same thing up by hand means
+replicating the log yourself (`mirror_push`), which the rest of this
+document does not cover — read `docker/README.md` for what the wiring
+actually has to get right.
+
 > **This is not real transparency.** See
 > [threat-model.md](threat-model.md).
 
@@ -71,13 +89,15 @@ lego --server http://localhost:14000/directory \
 The order's `certificate` URL is the **standalone** cert. It is a
 POST-as-GET resource (RFC 8555 §6.3), so an ACME
 client — not a plain `curl` — retrieves it. Its response carries a
-`Link: …; rel="enhancement"` header pointing at the signature-free
+`Link: …; rel="acme-optional-alternate"` header pointing at the signature-free
 **landmark-relative** variant (which verifies against predistributed
 landmark subtree hashes). That URL is pinned to the landmark the cert is
 relative to and returns `HTTP 202 (Accepted)` + `Retry-After` until that
 landmark is allocated (within ~`time_between_landmarks_ms`), then the
-cert. The enhancement is optional and non-blocking — a client must never
-let a 202 hold up deploying the standalone cert. The same landmark-relative
+cert. The optional alternate is exactly that — optional and
+non-blocking: per draft §9.1 a client SHOULD NOT fail the transaction if
+it is unavailable, and must never let a 202 hold up deploying the
+standalone cert. The same landmark-relative
 cert is also derivable from the log with `cactus-cli cert
 landmark-relative` (see below).
 
