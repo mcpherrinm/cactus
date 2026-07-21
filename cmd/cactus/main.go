@@ -192,6 +192,9 @@ func main() {
 	}
 
 	logger := logging.New(os.Stdout, cfg.LogLevel)
+	if cfg.Log.ShortName != "" {
+		logger = logger.With("log", cfg.Log.ShortName)
+	}
 	slog.SetDefault(logger)
 	logger.Info("starting", "version", version, "config", *configPath, "data_dir", cfg.DataDir)
 
@@ -285,6 +288,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		Signer:      sgn,
 		FS:          fsRoot,
 		FlushPeriod: cfg.Log.CheckpointPeriod(),
+		MaxPoolSize: cfg.Log.PoolSize,
 		Logger:      logger,
 		Metrics: cactuslog.Metrics{
 			Entries:           m.LogEntries,
@@ -512,23 +516,36 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		MaxHeaderBytes: 16 * 1024,
 	}
 
-	// Start listeners.
-	startServer(logger, acmeHTTP, "acme", cfg.ACME.TLSCert, cfg.ACME.TLSKey)
-	startServer(logger, monitoringHTTP, "monitoring", "", "")
-	startServer(logger, metricsHTTP, "metrics", "", "")
+	// Start listeners. A listener that fails to bind (port in use, bad
+	// tls_cert path, ...) reports on srvErr so startup fails loudly
+	// instead of running on with a dead endpoint.
+	srvErr := make(chan error, 3)
+	// Resolve TLS paths relative to data_dir, like every other configured
+	// path (absolute paths are left untouched).
+	tlsCert := resolveUnderDataDir(cfg.DataDir, cfg.ACME.TLSCert)
+	tlsKey := resolveUnderDataDir(cfg.DataDir, cfg.ACME.TLSKey)
+	startServer(logger, acmeHTTP, "acme", tlsCert, tlsKey, srvErr)
+	startServer(logger, monitoringHTTP, "monitoring", "", "", srvErr)
+	startServer(logger, metricsHTTP, "metrics", "", "", srvErr)
 
-	// Wait for SIGTERM/SIGINT.
+	// Wait for SIGTERM/SIGINT or a fatal listener error.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	logger.Info("shutting down", "signal", sig.String())
+	var runErr error
+	select {
+	case sig := <-sigCh:
+		logger.Info("shutting down", "signal", sig.String())
+	case err := <-srvErr:
+		logger.Error("listener failed, shutting down", "err", err)
+		runErr = err
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = acmeHTTP.Shutdown(shutdownCtx)
 	_ = monitoringHTTP.Shutdown(shutdownCtx)
 	_ = metricsHTTP.Shutdown(shutdownCtx)
-	return nil
+	return runErr
 }
 
 // loadPEMSPKI reads a PEM SubjectPublicKeyInfo file from path and
@@ -554,7 +571,16 @@ func parsePEMSPKI(pemStr string) ([]byte, error) {
 	return block.Bytes, nil
 }
 
-func startServer(logger *slog.Logger, srv *http.Server, name, certFile, keyFile string) {
+// resolveUnderDataDir resolves a configured path relative to dataDir,
+// leaving empty and absolute paths unchanged.
+func resolveUnderDataDir(dataDir, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(dataDir, p)
+}
+
+func startServer(logger *slog.Logger, srv *http.Server, name, certFile, keyFile string, errCh chan<- error) {
 	go func() {
 		var err error
 		if certFile != "" && keyFile != "" {
@@ -566,6 +592,10 @@ func startServer(logger *slog.Logger, srv *http.Server, name, certFile, keyFile 
 		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "name", name, "err", err)
+			select {
+			case errCh <- fmt.Errorf("%s listener: %w", name, err):
+			default:
+			}
 		}
 	}()
 }
