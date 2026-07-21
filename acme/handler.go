@@ -483,7 +483,9 @@ func (s *Server) handleAccountOrders(w http.ResponseWriter, r *http.Request) {
 	urls := make([]string, 0, len(ids))
 	for _, id := range ids {
 		// RFC 8555 §7.1.2.1: the list SHOULD NOT include invalid orders.
-		if o, ok := s.state.GetOrder(id); ok && o.Status == "invalid" {
+		// Also skip any dangling ID whose order no longer exists.
+		o, ok := s.state.GetOrder(id)
+		if !ok || o.Status == "invalid" {
 			continue
 		}
 		urls = append(urls, s.urlFor("/order/"+id))
