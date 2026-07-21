@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -649,5 +650,48 @@ func TestNilPoolIsInert(t *testing.T) {
 	note := []byte("origin\n5\nAAA=\n\n— sig line\n")
 	if got := p.CheckpointWithCosignatures(note, 5); !bytes.Equal(got, note) {
 		t.Errorf("nil Pool rewrote the checkpoint: %q", got)
+	}
+}
+
+// TestDiscoverClampsOversizedCheckpoint guards the fix for an
+// unauthenticated discovery size wedging pushes: a mirror that advertises
+// a checkpoint larger than ours must not seed next-entry beyond our size.
+func TestDiscoverClampsOversizedCheckpoint(t *testing.T) {
+	origin := cert.OIDName(testLogID)
+	sum := sha256.Sum256([]byte(origin))
+	wantPath := "/" + hex.EncodeToString(sum[:]) + "/checkpoint"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			http.NotFound(w, r)
+			return
+		}
+		// Advertise a wildly oversized (unauthenticated) checkpoint.
+		fmt.Fprintf(w, "%s\n%d\n%s\n\n", origin, uint64(1)<<40,
+			base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	}))
+	t.Cleanup(srv.Close)
+
+	l := newTestLog(t, 5)
+	m := newStubMirror(t, testLogID, 0x42)
+	fsys, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := New(testLogID, Target{
+		SubmissionPrefix: srv.URL,
+		MonitoringPrefix: srv.URL,
+		Key:              m.key,
+	}, logSource{l}, fsys, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ourSize = 5
+	if err := c.discover(context.Background(), ourSize); err != nil {
+		t.Fatal(err)
+	}
+	if c.st.nextEntry > ourSize {
+		t.Fatalf("discover seeded next-entry %d beyond our size %d; wedge not closed",
+			c.st.nextEntry, ourSize)
 	}
 }

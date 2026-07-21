@@ -239,7 +239,7 @@ func (c *Client) Push(ctx context.Context) error {
 		return nil
 	}
 
-	if err := c.discover(ctx); err != nil {
+	if err := c.discover(ctx, size); err != nil {
 		return err
 	}
 	if err := c.pushCheckpoint(ctx, size, note); err != nil {
@@ -267,7 +267,7 @@ func (c *Client) CosignedCheckpoint() (uint64, []string) {
 // add-entries runs, which is fine — they are a starting point, and any
 // error is corrected by the 202/409 loop, which is the only thing we
 // actually trust to set next entry.
-func (c *Client) discover(ctx context.Context) error {
+func (c *Client) discover(ctx context.Context, ourSize uint64) error {
 	c.mu.Lock()
 	known := c.st.known
 	c.mu.Unlock()
@@ -283,6 +283,19 @@ func (c *Client) discover(ctx context.Context) error {
 		// the truth via a 409.
 		c.logger.Debug("mirrorpush: could not read mirror checkpoint, starting from 0", "err", err)
 		size = 0
+	}
+	// The discovered size comes from an unauthenticated GET of the
+	// mirror's checkpoint (no signature is verified). Never let it seed a
+	// next-entry beyond our own checkpoint: a forged or buggy oversized
+	// value would make every pushEntries take the "mirror is ahead"
+	// bail-out and silently wedge this mirror out of cosignature
+	// collection for the process lifetime. Clamp to our size; a mirror
+	// that is genuinely ahead is corrected by the authenticated
+	// add-entries loop.
+	if size > ourSize {
+		c.logger.Warn("mirrorpush: mirror advertises a larger checkpoint than ours; clamping discovery seed",
+			"mirror_size", size, "our_size", ourSize)
+		size = ourSize
 	}
 	c.mu.Lock()
 	c.st.nextEntry = size
@@ -461,7 +474,12 @@ func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.H
 
 		if uploadStart > uploadEnd {
 			// The mirror is ahead of our checkpoint. Nothing to upload
-			// against this checkpoint; a later flush will catch up.
+			// against this checkpoint; a later flush will catch up. Log
+			// it: after discovery clamps to our size this should only
+			// happen for a genuinely-ahead mirror, so a persistent
+			// message here points at a real divergence worth noticing.
+			c.logger.Warn("mirrorpush: mirror ahead of our checkpoint, skipping upload",
+				"next_entry", uploadStart, "our_size", uploadEnd)
 			return nil
 		}
 
