@@ -84,3 +84,10 @@ jobs:
 
       - name: Integration tests (race)
         run: make integration
+
+      # The stress test is build-tagged, so the steps above never compile
+      # it. Vet it here so a break is caught on the pull request rather
+      # than by the nightly Stress workflow. Running it is that
+      # workflow's job.
+      - name: Vet stress-tagged tests
+        run: gotip vet -tags=stress ./integration/...
