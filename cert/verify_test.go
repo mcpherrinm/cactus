@@ -78,14 +78,14 @@ func tlv(tag byte, body []byte) []byte {
 // carries issuerUniqueID [1] and extensions [3] in caller-chosen order.
 func buildTBSWithTail(tailA, tailB []byte) []byte {
 	var body []byte
-	body = append(body, tlv(0xa0, tlv(0x02, []byte{0x02}))...)                        // version [0] INTEGER 2
-	body = append(body, tlv(0x02, []byte{0x01, 0, 0, 0, 0, 0, 0x05})...)              // serialNumber
+	body = append(body, tlv(0xa0, tlv(0x02, []byte{0x02}))...)           // version [0] INTEGER 2
+	body = append(body, tlv(0x02, []byte{0x01, 0, 0, 0, 0, 0, 0x05})...) // serialNumber
 	algID, _ := asn1.Marshal(struct{ Algorithm asn1.ObjectIdentifier }{OIDAlgMTCProof})
-	body = append(body, algID...)                                                     // signature AlgId (id-alg-mtcProof)
-	body = append(body, tlv(0x30, nil)...)                                            // issuer
-	utc := tlv(0x17, []byte("250101000000Z"))                                         // Time
-	body = append(body, tlv(0x30, append(append([]byte{}, utc...), utc...))...)       // validity
-	body = append(body, tlv(0x30, nil)...)                                            // subject
+	body = append(body, algID...)                                                                   // signature AlgId (id-alg-mtcProof)
+	body = append(body, tlv(0x30, nil)...)                                                          // issuer
+	utc := tlv(0x17, []byte("250101000000Z"))                                                       // Time
+	body = append(body, tlv(0x30, append(append([]byte{}, utc...), utc...))...)                     // validity
+	body = append(body, tlv(0x30, nil)...)                                                          // subject
 	spki := tlv(0x30, append(tlv(0x30, tlv(0x06, []byte{0x2b})), tlv(0x03, []byte{0x00, 0xff})...)) // SPKI
 	body = append(body, spki...)
 	body = append(body, tailA...)
@@ -97,7 +97,7 @@ func buildTBSWithTail(tailA, tailB []byte) []byte {
 // malleability: the optional TBS tail fields must be in strict DER order,
 // so a tag-reordered (non-DER) encoding cannot rebuild to the same entry.
 func TestRebuildRejectsReorderedTail(t *testing.T) {
-	uid := tlv(0x81, []byte{0x00, 0xaa}) // issuerUniqueID [1]
+	uid := tlv(0x81, []byte{0x00, 0xaa})                                                                                  // issuerUniqueID [1]
 	ext := tlv(0xa3, tlv(0x30, tlv(0x30, append(tlv(0x06, []byte{0x55, 0x1d, 0x11}), tlv(0x04, []byte{0x30, 0x00})...)))) // extensions [3]
 
 	if _, _, err := RebuildLogEntryFromTBS(buildTBSWithTail(uid, ext), nil); err != nil {

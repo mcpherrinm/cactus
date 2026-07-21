@@ -323,7 +323,7 @@ func sanContainsOnlyDNSAndIP(extnValue []byte) error {
 	if !outer.ReadASN1(&inner, cryptobyte_asn1.SEQUENCE) || !outer.Empty() {
 		return fmt.Errorf("%w: malformed subjectAltName", ErrBadCSR)
 	}
-	dnsName := cryptobyte_asn1.Tag(2).ContextSpecific()  // [2] IA5String
+	dnsName := cryptobyte_asn1.Tag(2).ContextSpecific()   // [2] IA5String
 	ipAddress := cryptobyte_asn1.Tag(7).ContextSpecific() // [7] OCTET STRING
 	for !inner.Empty() {
 		var gn cryptobyte.String
