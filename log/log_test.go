@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -360,5 +361,88 @@ func TestMaxPoolSizeTriggersEarlyFlush(t *testing.T) {
 	defer cancel()
 	if _, err := l.Wait(ctx, lastIdx); err != nil {
 		t.Fatalf("Wait did not return before the hour-long flush period: %v", err)
+	}
+}
+
+// failCheckpointFS wraps a storage.FS and fails the next Put to
+// "log/checkpoint" once armed, to simulate a crash/failed flush after the
+// tile writer (and its treeSize file) have advanced but before the
+// checkpoint commits.
+type failCheckpointFS struct {
+	storage.FS
+	armed bool
+}
+
+func (f *failCheckpointFS) Put(name string, data []byte, exclusive bool) error {
+	if f.armed && name == "log/checkpoint" {
+		f.armed = false
+		return fmt.Errorf("injected checkpoint write failure")
+	}
+	return f.FS.Put(name, data, exclusive)
+}
+
+// TestFlushRecoversUncoveredGap reproduces the case where a flush advances
+// the tile writer but fails before committing the checkpoint: the next
+// flush must cover the gap entries with a signed subtree, not leave them
+// committed-without-a-signature. Regression for the second-review HIGH
+// finding.
+func TestFlushRecoversUncoveredGap(t *testing.T) {
+	inner, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := &failCheckpointFS{FS: inner}
+	s, err := signer.FromSeed(signer.AlgMLDSA44, bytes.Repeat([]byte{0x42}, signer.SeedSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A long flush period so only our explicit l.flush() calls run.
+	l, err := New(context.Background(), Config{
+		LogID:       cert.TrustAnchorID("32473.1"),
+		CosignerID:  cert.TrustAnchorID("32473.1"),
+		Signer:      s,
+		FS:          fs,
+		FlushPeriod: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Stop)
+
+	// Queue three entries, then arm the checkpoint-write failure and flush:
+	// tw advances to size 3 but the checkpoint never commits.
+	for i := 0; i < 3; i++ {
+		tbs := []byte{byte(i), 0x01}
+		if _, err := l.Append(context.Background(), cert.EncodeTBSCertEntry(tbs), sha256.Sum256(tbs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs.armed = true
+	if err := l.flush(); err == nil {
+		t.Fatal("expected the armed flush to fail")
+	}
+	if got := uint64(l.tw.Size()); got != 3 {
+		t.Fatalf("tile writer size = %d, want 3 (advanced despite failed checkpoint)", got)
+	}
+	if l.committed.size != 0 {
+		t.Fatalf("committed size = %d, want 0 (checkpoint never committed)", l.committed.size)
+	}
+
+	// Recovery flush: must mint a covering subtree for [0,3).
+	if err := l.flush(); err != nil {
+		t.Fatalf("recovery flush: %v", err)
+	}
+	iss, err := l.buildIssued(2)
+	if err != nil {
+		t.Fatalf("buildIssued(2): %v", err)
+	}
+	if len(iss.Signatures) == 0 {
+		t.Fatal("gap entry has no covering cosignature after recovery flush")
+	}
+	// The covering subtree must actually contain the entry (a real §4.5
+	// covering subtree of [0,3), not the signature-less whole-tree
+	// fallback).
+	if !(iss.Subtree.Start <= 2 && 2 < iss.Subtree.End) {
+		t.Fatalf("covering subtree [%d,%d) does not contain index 2", iss.Subtree.Start, iss.Subtree.End)
 	}
 }
