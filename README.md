@@ -54,19 +54,17 @@ operate it, and where to look in the code.
   that returns HTTP 202 until a covering landmark exists). The same form
   is also derivable from the log with `cactus-cli cert landmark-relative`.
 - Acts as a **CA cosigner** using ML-DSA-44 (requires a Go 1.27+ build).
-- Optionally **runs as a cosigning mirror** for an external upstream
-  log ([tlog-mirror], [tlog-cosignature]). In mirror mode cactus
-  follows an upstream via tlog-tiles, verifies consistency, and
-  exposes a `/sign-subtree` endpoint that signs §5.4.1 inputs with
-  its own cosigner key.
-- In CA mode, **collects cosignatures from a configured set of
-  external mirrors** in parallel, with quorum + per-mirror timeout +
-  best-effort-after-minimum semantics.
+- **Collects cosignatures from a configured set of external mirrors**
+  ([tlog-witness], [tlog-cosignature]) in parallel, with quorum +
+  per-mirror timeout + best-effort-after-minimum semantics.
 
 ## What it does not do
 
-- **Witness-only cosigners** (§7.3). Mirror cosigners are in scope;
-  pure witnesses are out of scope.
+- **Act as a mirror or witness itself.** cactus only ever *requests*
+  cosignatures; mirroring is push-based against an external
+  [tlog-mirror] (Sunlight). There is no follower and no `/sign-subtree`
+  server.
+- **Witness-only cosigners** (§7.3).
 - **Log pruning** (§5.2.3).
 - **Real DNS-01 challenges.** `auto-pass` and `http-01` are
   supported; DNS-01 is not.
@@ -123,23 +121,19 @@ drains the pool, writes a final checkpoint, and closes listeners.
 
 ## Operating modes
 
-The same binary can run in any combination of three concerns,
-determined by which top-level config blocks are populated and
-`enabled`:
+The same binary can run either of two concerns, determined by which
+top-level config blocks are populated:
 
 | Concern | Adds | Set |
 |---|---|---|
 | **CA** (default) | Issuance log + ACME server + landmark-relative certs | `acme`, `log`, `ca_cosigner` |
 | **CA-side mirror collection** | Multi-mirror cosignatures during issuance | `ca_cosigner_quorum.mirrors[]` |
-| **Mirror operating mode** | Follow an upstream + serve `/sign-subtree` | `mirror.enabled = true` (and `mirror.upstream`) |
 
 Landmark-relative cert support is always on; only its cadence is
 tunable (see `landmarks` below).
 
 Cactus operating modes are not enumerated; the binary just brings up
-whichever subsystems the config asks for. The validator does enforce
-some hygiene rules — chiefly, mirror + CA modes in the same binary
-must use distinct cosigner keys.
+whichever subsystems the config asks for.
 
 ---
 
@@ -292,37 +286,6 @@ cadence, 7-day max cert lifetime ⇒ `max_active_landmarks =
 ceil(168) + 1 = 169` ⇒ ~10 KiB of relying party state per CA. See
 §6.3.1 of the draft.
 
-### `mirror` (optional, mirror mode)
-
-```json
-"mirror": {
-  "enabled": true,
-  "cosigner_id": "1.3.6.1.4.1.44363.47.2.1.mirror",
-  "seed_path": "keys/mirror-cosigner.seed",
-  "algorithm": "mldsa-44",
-  "upstream": {
-    "tile_url": "https://upstream.example/log",
-    "log_id": "1.3.6.1.4.1.44363.47.1.99.0.1",
-    "ca_cosigner_id": "1.3.6.1.4.1.44363.47.1.99",
-    "ca_cosigner_key_path": "keys/ca-cosigner.pub.pem",
-    "ca_cosigner_algorithm": "mldsa-44",
-    "poll_interval_ms": 1000
-  },
-  "sign_subtree_listen": ":14081",
-  "sign_subtree_path": "/sign-subtree",
-  "require_ca_signature_on_subtree": true
-}
-```
-
-The mirror's cosigner ID + seed must differ from the CA's (the
-validator rejects shared keys). The cosigner `algorithm` **must be
-`mldsa-44`**: the [tlog-witness] `sign-subtree` response is an ML-DSA-44
-[tlog-cosignature] (there is no ECDSA cosignature type), so the witness
-path requires it and a mirror cosigner therefore needs a Go 1.27+ build.
-`require_ca_signature_on_subtree` is the [tlog-witness] DoS gate — keep
-it on if the `/sign-subtree` listener is publicly reachable; the CA's
-subtree cosignature it requires must likewise be ML-DSA-44.
-
 ### `ca_cosigner_quorum` (optional, CA-side mirror requests)
 
 ```json
@@ -365,10 +328,6 @@ Prometheus metrics on `127.0.0.1:14090/metrics`:
 | `cactus_log_checkpoints_total` | | Counter |
 | `cactus_pool_flush_size` | | Histogram |
 | `cactus_signature_duration_seconds` | `alg` | Histogram |
-| `cactus_mirror_upstream_checkpoint_size` | | Gauge |
-| `cactus_mirror_consistency_failures_total` | | Counter |
-| `cactus_mirror_signsubtree_requests_total` | `result` | Counter |
-| `cactus_mirror_signsubtree_duration_seconds` | | Histogram |
 | `cactus_ca_mirror_request_total` | `mirror_id`, `result` | Counter |
 | `cactus_ca_quorum_failures_total` | | Counter |
 
@@ -382,7 +341,7 @@ under `/debug/pprof` on the same listener.
 ```
 cactus/
 ├── cmd/
-│   ├── cactus/         main server binary (CA / mirror / both)
+│   ├── cactus/         main server binary
 │   ├── cactus-cli/     debugging client (tree show, entry, cert verify, prove)
 │   └── cactus-keygen/  cosigner seed generator (-pub prints the public key)
 ├── acme/      RFC 8555 ACME server with §9 extensions
@@ -391,14 +350,13 @@ cactus/
 │              CertificatePropertyList, multi-mirror request client
 ├── landmark/  §6.3 landmark sequence allocator + /landmarks handler
 ├── log/       issuance log (single-writer, signed checkpoints + subtrees)
-├── mirror/    follower + sign-subtree HTTP server
 ├── signer/    cosigner abstraction (ML-DSA-44/65/87, Go 1.27+)
 ├── storage/   on-disk K/V (atomic-rename writes)
 ├── tile/      read-path HTTP server (tlog-tiles compatible layout)
 ├── tlogx/     §4 subtree primitives extending x/mod/sumdb/tlog
 ├── metrics/   Prometheus instruments
 ├── config/    JSON config loader
-├── docs/      threat-model, disk-layout, test-instance (CA + witness)
+├── docs/      threat-model, disk-layout, test-instance
 └── integration/ end-to-end tests
 ```
 
@@ -416,7 +374,6 @@ use a `gotip` 1.27-devel toolchain; an older `go` won't compile cactus.
 ```sh
 gotip test -race -count=1 ./...
 gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
-gotip test -fuzz=FuzzParseSignSubtreeRequest -fuzztime=30s ./mirror/...
 make integration                                       # `gotip test -race -count=1 -tags=integration ./integration/...`
 ```
 
@@ -430,14 +387,14 @@ The cornerstone tests:
 - `integration.TestRelyingPartyFastPath` — landmark-relative cert
   verification *without* consulting any cosigner key, using only
   the public `/landmarks` + tile-served subtree hashes.
-- `integration.TestEndToEndCAWithThreeMirrors` — a CA, three
-  mirror followers + servers, `quorum=2`. Issued cert lands with
-  1 CA + 2 mirror sigs, each independently verifiable.
-- `integration.TestMirrorRestartResume` — mirror restart picks up
-  where it left off without re-fetching everything.
-- `integration.TestCactusBinaryStartsAndServes` and
-  `integration.TestCactusBinaryMirrorMode` — actually run the
-  binary, drive it over HTTP.
+- `integration.TestEndToEndCAWithThreeCosigners` — a CA plus three
+  stub witnesses, `quorum=2`. Issued cert lands with 1 CA + 2
+  cosigner sigs, each independently verifiable.
+- `integration.TestMultiCosignerQuorum` — quorum collection against
+  three stub witnesses, one deliberately slow, asserting the CA
+  returns as soon as the minimum is met.
+- `integration.TestCactusBinaryStartsAndServes` — actually runs the
+  binary, drives it over HTTP.
 
 ---
 
@@ -449,3 +406,4 @@ specs.
 [draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-04.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
+[tlog-witness]: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md

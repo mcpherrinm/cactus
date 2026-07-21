@@ -20,12 +20,6 @@ type Metrics struct {
 	SignatureDuration *prometheus.HistogramVec // labels: alg
 	PoolFlushSize     prometheus.Histogram
 
-	// Mirror operating mode.
-	MirrorUpstreamSize        prometheus.Gauge
-	MirrorConsistencyFailures prometheus.Counter
-	MirrorSignSubtreeRequests *prometheus.CounterVec // labels: result
-	MirrorSignSubtreeDuration prometheus.Histogram
-
 	// CA-mode multi-mirror.
 	CAMirrorRequests *prometheus.CounterVec // labels: mirror_id, result
 	CAQuorumFailures prometheus.Counter
@@ -63,24 +57,6 @@ func New() *Metrics {
 			Buckets: []float64{0, 1, 4, 16, 64, 256, 1024, 4096, 16384},
 		}),
 
-		MirrorUpstreamSize: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "cactus_mirror_upstream_checkpoint_size",
-			Help: "Tree size of the latest verified upstream checkpoint.",
-		}),
-		MirrorConsistencyFailures: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "cactus_mirror_consistency_failures_total",
-			Help: "Times the mirror refused to advance because a consistency check failed.",
-		}),
-		MirrorSignSubtreeRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "cactus_mirror_signsubtree_requests_total",
-			Help: "sign-subtree requests served by the mirror, by result.",
-		}, []string{"result"}),
-		MirrorSignSubtreeDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "cactus_mirror_signsubtree_duration_seconds",
-			Help:    "Time to serve a sign-subtree request.",
-			Buckets: prometheus.DefBuckets,
-		}),
-
 		CAMirrorRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "cactus_ca_mirror_request_total",
 			Help: "Outbound CA→mirror sign-subtree requests, by mirror_id and result.",
@@ -92,8 +68,6 @@ func New() *Metrics {
 	}
 	r.MustRegister(m.ACMEOrders, m.LogEntries, m.LogCheckpoints,
 		m.SignatureDuration, m.PoolFlushSize,
-		m.MirrorUpstreamSize, m.MirrorConsistencyFailures,
-		m.MirrorSignSubtreeRequests, m.MirrorSignSubtreeDuration,
 		m.CAMirrorRequests, m.CAQuorumFailures)
 	return m
 }
@@ -148,12 +122,6 @@ func (c *counterVecAdapter) WithLabelValues(lvs ...string) Counter {
 // cactus_acme_orders_total counter.
 func (m *Metrics) ACMEOrdersVec() CounterVec {
 	return &counterVecAdapter{cv: m.ACMEOrders}
-}
-
-// MirrorSignSubtreeRequestsVec returns the CounterVec adapter for
-// cactus_mirror_signsubtree_requests_total.
-func (m *Metrics) MirrorSignSubtreeRequestsVec() CounterVec {
-	return &counterVecAdapter{cv: m.MirrorSignSubtreeRequests}
 }
 
 // CAMirrorRequestsVec returns the CounterVec adapter for

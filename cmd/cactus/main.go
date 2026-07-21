@@ -44,7 +44,6 @@ import (
 	cactuslog "github.com/letsencrypt/cactus/log"
 	"github.com/letsencrypt/cactus/logging"
 	"github.com/letsencrypt/cactus/metrics"
-	"github.com/letsencrypt/cactus/mirror"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tile"
@@ -54,17 +53,6 @@ import (
 // "all stdlib imports first" Go convention without splitting groups.
 func pemDecode(s string) (*pem.Block, []byte) {
 	return pem.Decode([]byte(s))
-}
-
-// mirrorCounterVecAdapter adapts a *prometheus.CounterVec to the
-// mirror.CounterVec interface (whose WithLabelValues returns
-// mirror.Counter rather than prometheus.Counter).
-type mirrorCounterVecAdapter struct {
-	cv *prometheus.CounterVec
-}
-
-func (a mirrorCounterVecAdapter) WithLabelValues(lvs ...string) mirror.Counter {
-	return a.cv.WithLabelValues(lvs...)
 }
 
 // caMirrorRequestsAdapter adapts a *prometheus.CounterVec to the
@@ -430,22 +418,10 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		MaxHeaderBytes: 16 * 1024,
 	}
 
-	// Optional mirror operating mode.
-	var mirrorHTTP *http.Server
-	if cfg.Mirror.Enabled {
-		mirrorHTTP, err = startMirror(ctx, cfg, fsRoot, logger, m, readHeaderTimeout, readTimeout, writeTimeout, idleTimeout)
-		if err != nil {
-			return fmt.Errorf("mirror: %w", err)
-		}
-	}
-
 	// Start listeners.
 	startServer(logger, acmeHTTP, "acme", cfg.ACME.TLSCert, cfg.ACME.TLSKey)
 	startServer(logger, monitoringHTTP, "monitoring", "", "")
 	startServer(logger, metricsHTTP, "metrics", "", "")
-	if mirrorHTTP != nil {
-		startServer(logger, mirrorHTTP, "mirror", "", "")
-	}
 
 	// Wait for SIGTERM/SIGINT.
 	sigCh := make(chan os.Signal, 1)
@@ -458,106 +434,11 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	_ = acmeHTTP.Shutdown(shutdownCtx)
 	_ = monitoringHTTP.Shutdown(shutdownCtx)
 	_ = metricsHTTP.Shutdown(shutdownCtx)
-	if mirrorHTTP != nil {
-		_ = mirrorHTTP.Shutdown(shutdownCtx)
-	}
 	return nil
 }
 
-// startMirror brings up the mirror operating mode: loads the mirror's
-// own seed, parses the upstream CA cosigner public key, builds a
-// Follower goroutine, and returns the configured sign-subtree HTTP
-// server (not yet started — caller does that).
-func startMirror(
-	ctx context.Context,
-	cfg config.Config,
-	fsRoot *storage.Disk,
-	logger *slog.Logger,
-	m *metrics.Metrics,
-	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout time.Duration,
-) (*http.Server, error) {
-	mSeedPath := filepath.Join(cfg.DataDir, cfg.Mirror.SeedPath)
-	if err := os.MkdirAll(filepath.Dir(mSeedPath), 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir mirror keys: %w", err)
-	}
-	mSeed, err := loadOrInitSeed(mSeedPath)
-	if err != nil {
-		return nil, fmt.Errorf("mirror seed: %w", err)
-	}
-	mAlg, err := signer.ParseAlgorithm(cfg.Mirror.Algorithm)
-	if err != nil {
-		return nil, err
-	}
-	mSigner, err := signer.FromSeed(mAlg, mSeed)
-	if err != nil {
-		return nil, fmt.Errorf("mirror signer: %w", err)
-	}
-
-	upstreamKey, err := loadPEMSPKI(filepath.Join(cfg.DataDir, cfg.Mirror.Upstream.CACosignerKeyPath))
-	if err != nil {
-		return nil, fmt.Errorf("upstream ca_cosigner_key_path: %w", err)
-	}
-
-	follower, err := mirror.NewFollower(mirror.FollowerConfig{
-		Upstream: mirror.Upstream{
-			TileURL:       cfg.Mirror.Upstream.TileURL,
-			LogID:         cert.TrustAnchorID(cfg.Mirror.Upstream.LogID),
-			CACosignerID:  cert.TrustAnchorID(cfg.Mirror.Upstream.CACosignerID),
-			CACosignerKey: upstreamKey,
-		},
-		FS:           fsRoot,
-		PollInterval: cfg.Mirror.Upstream.PollInterval(),
-		Logger:       logger,
-		Metrics: mirror.FollowerMetrics{
-			UpstreamSize:        m.MirrorUpstreamSize,
-			ConsistencyFailures: m.MirrorConsistencyFailures,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("follower: %w", err)
-	}
-	go func() { _ = follower.Run(ctx) }()
-	logger.Info("mirror follower started",
-		"upstream", cfg.Mirror.Upstream.TileURL,
-		"poll_interval", cfg.Mirror.Upstream.PollInterval())
-
-	mServerCfg := mirror.ServerConfig{
-		Follower:                    follower,
-		Signer:                      mSigner,
-		CosignerID:                  cert.TrustAnchorID(cfg.Mirror.CosignerID),
-		RequireCASignatureOnSubtree: cfg.Mirror.RequireCASignatureOnSubtree,
-		Metrics: mirror.ServerMetrics{
-			Requests:        mirrorCounterVecAdapter{m.MirrorSignSubtreeRequests},
-			RequestDuration: m.MirrorSignSubtreeDuration,
-		},
-	}
-	if cfg.Mirror.RequireCASignatureOnSubtree {
-		mServerCfg.UpstreamCAKey = &cert.CosignerKey{
-			ID:        cert.TrustAnchorID(cfg.Mirror.Upstream.CACosignerID),
-			Algorithm: cert.AlgMLDSA44,
-			PublicKey: upstreamKey,
-		}
-	}
-	mSrv, err := mirror.NewServer(mServerCfg)
-	if err != nil {
-		return nil, fmt.Errorf("server: %w", err)
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle(cfg.Mirror.SignSubtreePath, mSrv.Handler())
-	return &http.Server{
-		Addr:              cfg.Mirror.SignSubtreeListen,
-		Handler:           logging.Middleware(logger)(mux),
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		MaxHeaderBytes:    16 * 1024,
-	}, nil
-}
-
 // loadPEMSPKI reads a PEM SubjectPublicKeyInfo file from path and
-// returns the inner DER bytes that mirror.Upstream.CACosignerKey expects.
+// returns the inner DER bytes of the public key.
 func loadPEMSPKI(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -567,7 +448,7 @@ func loadPEMSPKI(path string) ([]byte, error) {
 }
 
 // parsePEMSPKI accepts a PEM SubjectPublicKeyInfo block and returns
-// the inner DER bytes that mirror.Upstream.CACosignerKey expects.
+// the inner DER bytes of the public key.
 func parsePEMSPKI(pemStr string) ([]byte, error) {
 	block, _ := pemDecode(pemStr)
 	if block == nil {

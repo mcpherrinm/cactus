@@ -31,7 +31,6 @@ gotip test -run TestParallelIssuance -tags=integration ./integration/...
 
 # Fuzz targets:
 gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
-gotip test -fuzz=FuzzParseSignSubtreeRequest -fuzztime=30s ./mirror/...
 ```
 
 Integration tests live in `./integration/` behind the `integration` build tag; some of
@@ -40,10 +39,10 @@ them compile and run the actual `cactus` binary over HTTP.
 ## Architecture
 
 One binary (`cmd/cactus`) brings up whichever subsystems the JSON config asks for — there
-is no fixed mode enum. The three composable concerns are **CA** (`acme` + `log` +
-`ca_cosigner`), **CA-side mirror quorum collection** (`ca_cosigner_quorum.mirrors[]`), and
-**mirror operating mode** (`mirror.enabled`). The config validator enforces hygiene rules
-— notably, CA and mirror cosigner keys in the same binary must differ.
+is no fixed mode enum. The two composable concerns are **CA** (`acme` + `log` +
+`ca_cosigner`) and **CA-side mirror quorum collection** (`ca_cosigner_quorum.mirrors[]`),
+which requests cosignatures from external mirrors. cactus does not itself act as a
+mirror; mirroring is push-based against an external tlog-mirror (Sunlight).
 
 Cert issuance data flow (CSR → verifiable bytes on disk):
 
@@ -66,8 +65,7 @@ Supporting packages: **`cert/`** holds the wire types (`TBSCertificateLogEntry`,
 request client. **`tlogx/`** extends `x/mod/sumdb/tlog` with the §4 subtree primitives
 (consistency, inclusion, covering subtrees). **`signer/`** is the ML-DSA cosigner
 abstraction. **`landmark/`** allocates §6.3 landmark sequences and serves `/landmarks`.
-**`mirror/`** is the upstream follower plus the `/sign-subtree` server. **`storage/`** is
-on-disk K/V using atomic-rename writes.
+**`storage/`** is on-disk K/V using atomic-rename writes.
 
 **Single-writer assumption**: the log has no locks or shared-state coordination across
 processes — single-writer is enforced by documentation, not by code. See
