@@ -389,8 +389,13 @@ func (c *Client) pushCheckpoint(ctx context.Context, size uint64, note []byte) e
 			// the checkpoint here — any cosignature present would be
 			// from a separate witness identity, so there is nothing for
 			// us to harvest. The pending checkpoint is now at `size`.
+			// Clear any stored ticket: a ticket is only meaningful for
+			// the pendingSize it was issued alongside, so carrying it
+			// across a checkpoint advance would send add-entries a stale
+			// ticket paired with a new upload_end.
 			c.mu.Lock()
 			c.st.pendingSize = size
+			c.st.ticket = nil
 			c.mu.Unlock()
 			return nil
 		case http.StatusConflict:
@@ -697,9 +702,16 @@ func (c *Client) do(ctx context.Context, req *http.Request) (int, []byte, error)
 		return 0, nil, fmt.Errorf("mirrorpush: %s %s: %w", req.Method, req.URL, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	// Read one byte past the cap so a genuinely oversized response is
+	// reported as such, rather than being silently truncated and then
+	// mis-diagnosed downstream (e.g. a cut-off cosignature body escalated
+	// as a fatal mirror fault).
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return 0, nil, fmt.Errorf("mirrorpush: read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return 0, nil, fmt.Errorf("mirrorpush: %s %s: response exceeds %d bytes", req.Method, req.URL, maxResponseBytes)
 	}
 	return resp.StatusCode, body, nil
 }

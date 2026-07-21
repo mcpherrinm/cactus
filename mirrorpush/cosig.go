@@ -147,6 +147,12 @@ func VerifyCosignatures(
 		if c.Name != wantName || c.KeyID != wantKeyID {
 			continue // an unknown key: ignore, per signed-note.
 		}
+		// c2sp.org/tlog-cosignature: timestamp MUST NOT exceed 2^63-1.
+		// Reject a non-conformant value rather than retaining and
+		// republishing it in reference checkpoints.
+		if c.Timestamp > 1<<63-1 {
+			return nil, fmt.Errorf("mirrorpush: cosignature from %q has out-of-range timestamp %d", c.Name, c.Timestamp)
+		}
 		switch rule {
 		case TimestampZero:
 			if c.Timestamp != 0 {
