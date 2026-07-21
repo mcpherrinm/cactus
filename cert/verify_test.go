@@ -68,3 +68,41 @@ func TestSplitCertificateRejectsUnusedBits(t *testing.T) {
 		t.Error("unused=7: SplitCertificate accepted a malformed BIT STRING")
 	}
 }
+
+// tlv builds a short-form DER TLV (bodies < 128 bytes only).
+func tlv(tag byte, body []byte) []byte {
+	return append([]byte{tag, byte(len(body))}, body...)
+}
+
+// buildTBSWithTail assembles a minimal TBSCertificate whose optional tail
+// carries issuerUniqueID [1] and extensions [3] in caller-chosen order.
+func buildTBSWithTail(tailA, tailB []byte) []byte {
+	var body []byte
+	body = append(body, tlv(0xa0, tlv(0x02, []byte{0x02}))...)                        // version [0] INTEGER 2
+	body = append(body, tlv(0x02, []byte{0x01, 0, 0, 0, 0, 0, 0x05})...)              // serialNumber
+	body = append(body, tlv(0x30, tlv(0x06, []byte{0x2a}))...)                        // signature AlgId
+	body = append(body, tlv(0x30, nil)...)                                            // issuer
+	utc := tlv(0x17, []byte("250101000000Z"))                                         // Time
+	body = append(body, tlv(0x30, append(append([]byte{}, utc...), utc...))...)       // validity
+	body = append(body, tlv(0x30, nil)...)                                            // subject
+	spki := tlv(0x30, append(tlv(0x30, tlv(0x06, []byte{0x2b})), tlv(0x03, []byte{0x00, 0xff})...)) // SPKI
+	body = append(body, spki...)
+	body = append(body, tailA...)
+	body = append(body, tailB...)
+	return tlv(0x30, body)
+}
+
+// TestRebuildRejectsReorderedTail guards against §12.6 certificate
+// malleability: the optional TBS tail fields must be in strict DER order,
+// so a tag-reordered (non-DER) encoding cannot rebuild to the same entry.
+func TestRebuildRejectsReorderedTail(t *testing.T) {
+	uid := tlv(0x81, []byte{0x00, 0xaa}) // issuerUniqueID [1]
+	ext := tlv(0xa3, tlv(0x30, tlv(0x30, append(tlv(0x06, []byte{0x55, 0x1d, 0x11}), tlv(0x04, []byte{0x30, 0x00})...)))) // extensions [3]
+
+	if _, _, err := RebuildLogEntryFromTBS(buildTBSWithTail(uid, ext), nil); err != nil {
+		t.Fatalf("canonical tail order rejected: %v", err)
+	}
+	if _, _, err := RebuildLogEntryFromTBS(buildTBSWithTail(ext, uid), nil); err == nil {
+		t.Fatal("reordered tail ([3] before [1]) accepted; malleability not closed")
+	}
+}
