@@ -18,7 +18,6 @@ type Config struct {
 	Monitoring       ListenerConfig   `json:"monitoring"`
 	Metrics          MetricsConfig    `json:"metrics"`
 	Landmarks        LandmarkConfig   `json:"landmarks"`
-	Mirror           MirrorConfig     `json:"mirror"`
 	LogLevel         string           `json:"log_level"`
 }
 
@@ -55,37 +54,6 @@ type MirrorEndpointConfig struct {
 	// cosigner key, resolved relative to data_dir. The PEM body is the raw
 	// ML-DSA-44 public key.
 	PublicKeyPath string `json:"public_key_path"`
-}
-
-// MirrorConfig configures cactus's mirror operating mode.
-// When Enabled, the binary brings up a Follower + sign-subtree
-// listener alongside (or instead of) its CA-mode duties.
-type MirrorConfig struct {
-	Enabled                     bool           `json:"enabled"`
-	CosignerID                  string         `json:"cosigner_id"`
-	SeedPath                    string         `json:"seed_path"`
-	Algorithm                   string         `json:"algorithm"`
-	Upstream                    UpstreamConfig `json:"upstream"`
-	SignSubtreeListen           string         `json:"sign_subtree_listen"`
-	SignSubtreePath             string         `json:"sign_subtree_path"`
-	RequireCASignatureOnSubtree bool           `json:"require_ca_signature_on_subtree"`
-}
-
-// UpstreamConfig describes the log being mirrored.
-type UpstreamConfig struct {
-	TileURL      string `json:"tile_url"`
-	LogID        string `json:"log_id"`
-	CACosignerID string `json:"ca_cosigner_id"`
-	// CACosignerKeyPath points to a PEM "PUBLIC KEY" file holding the
-	// upstream CA cosigner's key, resolved relative to data_dir. The PEM
-	// body is the raw ML-DSA-44 public key.
-	CACosignerKeyPath string `json:"ca_cosigner_key_path"`
-	PollIntervalMS    int    `json:"poll_interval_ms"`
-}
-
-// PollInterval is a typed-time accessor.
-func (u UpstreamConfig) PollInterval() time.Duration {
-	return time.Duration(u.PollIntervalMS) * time.Millisecond
 }
 
 // LandmarkConfig configures the §6.3 landmark sequence. Landmarks are
@@ -169,14 +137,6 @@ func Default() Config {
 		Landmarks: LandmarkConfig{
 			TimeBetweenLandmarksMS: 3600000,   // 1 hour
 			MaxCertLifetimeMS:      604800000, // 7 days
-		},
-		Mirror: MirrorConfig{
-			Algorithm:                   "mldsa-44",
-			SignSubtreePath:             "/sign-subtree",
-			RequireCASignatureOnSubtree: true,
-			Upstream: UpstreamConfig{
-				PollIntervalMS: 1000,
-			},
 		},
 		LogLevel: "info",
 	}
@@ -296,50 +256,6 @@ func (c *Config) Validate() error {
 			if m.PublicKeyPath == "" {
 				return fmt.Errorf("ca_cosigner_quorum.mirrors[%d].public_key_path required", i)
 			}
-		}
-	}
-	if c.Mirror.Enabled {
-		if c.Mirror.CosignerID == "" {
-			return fmt.Errorf("mirror.cosigner_id must be set when mirror.enabled")
-		}
-		if c.Mirror.CosignerID == c.CACosigner.ID {
-			return fmt.Errorf("mirror.cosigner_id %q must differ from ca_cosigner.id", c.Mirror.CosignerID)
-		}
-		if c.Mirror.SeedPath == "" {
-			return fmt.Errorf("mirror.seed_path must be set when mirror.enabled")
-		}
-		if c.Mirror.SeedPath == c.CACosigner.SeedPath {
-			return fmt.Errorf("mirror.seed_path %q must differ from ca_cosigner.seed_path", c.Mirror.SeedPath)
-		}
-		if c.Mirror.Algorithm == "" {
-			return fmt.Errorf("mirror.algorithm must be set when mirror.enabled")
-		}
-		// The c2sp.org/tlog-witness sign-subtree response is an ML-DSA-44
-		// cosignature (c2sp.org/tlog-cosignature defines no ECDSA
-		// cosignature type), so a mirror's cosigner MUST be ML-DSA-44.
-		if c.Mirror.Algorithm != "mldsa-44" {
-			return fmt.Errorf("mirror.algorithm must be \"mldsa-44\" (the witness path is ML-DSA-44 only), got %q", c.Mirror.Algorithm)
-		}
-		if c.Mirror.Upstream.TileURL == "" {
-			return fmt.Errorf("mirror.upstream.tile_url required")
-		}
-		if c.Mirror.Upstream.LogID == "" {
-			return fmt.Errorf("mirror.upstream.log_id required")
-		}
-		if c.Mirror.Upstream.CACosignerID == "" {
-			return fmt.Errorf("mirror.upstream.ca_cosigner_id required")
-		}
-		if c.Mirror.Upstream.CACosignerKeyPath == "" {
-			return fmt.Errorf("mirror.upstream.ca_cosigner_key_path required")
-		}
-		if c.Mirror.Upstream.PollIntervalMS <= 0 {
-			return fmt.Errorf("mirror.upstream.poll_interval_ms must be > 0")
-		}
-		if c.Mirror.SignSubtreeListen == "" {
-			return fmt.Errorf("mirror.sign_subtree_listen required")
-		}
-		if c.Mirror.SignSubtreePath == "" {
-			return fmt.Errorf("mirror.sign_subtree_path required")
 		}
 	}
 	return nil

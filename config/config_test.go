@@ -110,21 +110,6 @@ func TestRedactedOmitsSecretsAndPaths(t *testing.T) {
 			}},
 			MinSignatures: 1,
 		},
-		Mirror: MirrorConfig{
-			Enabled:    true,
-			CosignerID: "id-mirror-cosigner",
-			Algorithm:  "mldsa-44",
-			SeedPath:   "keys/" + secret,
-			Upstream: UpstreamConfig{
-				TileURL:           "https://upstream.test",
-				LogID:             "id-log",
-				CACosignerID:      "id-upstream-ca",
-				CACosignerKeyPath: "keys/" + secret,
-				PollIntervalMS:    1000,
-			},
-			SignSubtreeListen: secret + ":14070",
-			SignSubtreePath:   "/sign-subtree",
-		},
 	}
 
 	out, err := json.Marshal(c.Redacted())
