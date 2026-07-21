@@ -24,6 +24,7 @@ make test               # gotip test ./...
 make test-race          # gotip test -race ./...
 make vet                # gotip vet ./...
 make integration        # gotip test -race -count=1 -tags=integration ./integration/...
+make stress             # bulk issuance stress test (800 certs, `stress` build tag)
 
 # Single test / package:
 gotip test ./log/...
@@ -40,7 +41,10 @@ make docker-down        # also deletes volumes, and therefore key material
 ```
 
 Integration tests live in `./integration/` and are **not** build-tagged, so plain
-`gotip test ./...` runs them; they take ~10s. (`make integration` passes
+`gotip test ./...` runs them; they take ~10s. The one exception is
+`stress_test.go`, which *is* tagged (`stress`) so hundreds of issuances stay out of
+the default suite — `make stress`, or
+`CACTUS_STRESS_CERTS=5000 CACTUS_STRESS_CONCURRENCY=128 make stress` for a soak. (`make integration` passes
 `-tags=integration`, which currently selects nothing extra — it exists to run them
 under `-race -count=1`.) Some of them compile and run the actual `cactus` binary
 over HTTP.
