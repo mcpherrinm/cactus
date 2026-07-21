@@ -34,60 +34,30 @@ on:
 permissions:
   contents: read
 
-# See .github/workflows/ci.yml — cactus needs a Go 1.27 toolchain, which
-# until 1.27 ships means gotip. Once it ships, replace the bootstrap and
-# gotip steps with a single actions/setup-go and drop GOTOOLCHAIN=local.
+# See .github/workflows/ci.yml for why this pins a 1.27 release
+# candidate. Keep GO_VERSION in sync with that workflow.
 env:
+  GO_VERSION: '1.27.0-rc.2'
   GOTOOLCHAIN: local
 
 jobs:
   stress:
     runs-on: ubuntu-latest
     # Generous: the default 800-cert run takes seconds, but a
-    # workflow_dispatch soak can be given a much larger size, and the
-    # first run on a cold cache has to build the gotip toolchain.
+    # workflow_dispatch soak can be given a much larger size.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
-      # A released Go is needed only to `go install` and bootstrap gotip.
-      - name: Install bootstrap Go
+      # setup-go caches the module and build caches itself, keyed on
+      # go.sum, so no separate actions/cache step is needed.
+      - name: Install Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
-          cache: false
-
-      # Shares a cache key with ci.yml so whichever workflow runs first
-      # populates it for the other.
-      - name: Cache gotip toolchain
-        id: cache-gotip
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/sdk/gotip
-            ~/go/bin/gotip
-          key: gotip-${{ runner.os }}-v1
-
-      - name: Install gotip (Go 1.27 devel)
-        if: steps.cache-gotip.outputs.cache-hit != 'true'
-        run: |
-          go install golang.org/dl/gotip@latest
-          "$(go env GOPATH)/bin/gotip" download
-
-      - name: Put gotip on PATH
-        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      - name: Cache Go modules and build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Toolchain version
-        run: gotip version
+        run: go version
 
       # `make stress` runs under -race, which is the point: the
       # assertions this test makes about index assignment are exactly the
@@ -99,4 +69,4 @@ jobs:
         env:
           CACTUS_STRESS_CERTS: ${{ inputs.certs }}
           CACTUS_STRESS_CONCURRENCY: ${{ inputs.concurrency }}
-        run: make stress
+        run: make GO=go stress

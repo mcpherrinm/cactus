@@ -9,12 +9,14 @@ permissions:
   contents: read
 
 # cactus uses Go's built-in crypto/mldsa and declares `go 1.27` in
-# go.mod, so it must be built with a Go 1.27 toolchain. Until 1.27 is
-# released, that means the gotip 1.27-devel toolchain (the same default
-# the Makefile uses: GO ?= gotip). Once Go 1.27 ships, replace the
-# bootstrap+gotip steps with a single actions/setup-go (go-version
-# '1.27') and drop GOTOOLCHAIN=local.
+# go.mod, so it must be built with a Go 1.27 toolchain. 1.27 has not had
+# a final release yet, so CI pins the newest release candidate; bump
+# GO_VERSION as later RCs appear and set it to '1.27' once 1.27.0 ships.
+# GOTOOLCHAIN=local keeps the go command from downloading a different
+# toolchain behind our backs -- the RC satisfies the go.mod requirement
+# on its own.
 env:
+  GO_VERSION: '1.27.0-rc.2'
   GOTOOLCHAIN: local
 
 jobs:
@@ -23,71 +25,42 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # A released Go is needed only to `go install` and bootstrap gotip.
-      - name: Install bootstrap Go
+      # setup-go caches the module and build caches itself, keyed on
+      # go.sum, so no separate actions/cache step is needed.
+      - name: Install Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
-          cache: false
-
-      # Cache the built gotip toolchain so we don't rebuild Go from
-      # source on every run. Bump the -v1 suffix to force a refresh to a
-      # newer gotip commit.
-      - name: Cache gotip toolchain
-        id: cache-gotip
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/sdk/gotip
-            ~/go/bin/gotip
-          key: gotip-${{ runner.os }}-v1
-
-      - name: Install gotip (Go 1.27 devel)
-        if: steps.cache-gotip.outputs.cache-hit != 'true'
-        run: |
-          go install golang.org/dl/gotip@latest
-          "$(go env GOPATH)/bin/gotip" download
-
-      - name: Put gotip on PATH
-        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-      # Module + build cache for faster test runs.
-      - name: Cache Go modules and build
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Toolchain version
-        run: gotip version
+        run: go version
 
       - name: Check gofmt
         run: |
-          fmtout=$("$(gotip env GOROOT)/bin/gofmt" -l .)
+          fmtout=$(gofmt -l .)
           if [ -n "$fmtout" ]; then
             echo "These files are not gofmt-clean:"
             echo "$fmtout"
             exit 1
           fi
 
+      # The Makefile defaults to gotip for local development; CI has a
+      # real 1.27 toolchain on PATH as `go`.
       - name: Vet
-        run: make vet
+        run: make GO=go vet
 
       - name: Build
-        run: make build
+        run: make GO=go build
 
       - name: Test (race)
-        run: gotip test -race -count=1 ./...
+        run: go test -race -count=1 ./...
 
       - name: Integration tests (race)
-        run: make integration
+        run: make GO=go integration
 
       # The stress test is build-tagged, so the steps above never compile
       # it. Vet it here so a break is caught on the pull request rather
       # than by the nightly Stress workflow. Running it is that
       # workflow's job.
       - name: Vet stress-tagged tests
-        run: gotip vet -tags=stress ./integration/...
+        run: go vet -tags=stress ./integration/...
