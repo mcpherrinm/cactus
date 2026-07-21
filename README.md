@@ -459,6 +459,7 @@ use a `gotip` 1.27-devel toolchain; an older `go` won't compile cactus.
 gotip test -race -count=1 ./...
 gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
 make integration                                       # `gotip test -race -count=1 -tags=integration ./integration/...`
+make stress                                            # bulk issuance stress test (see below)
 ```
 
 The cornerstone tests:
@@ -468,8 +469,8 @@ The cornerstone tests:
 - `integration.TestRestartContinuesIssuance` — 50 + restart + 50,
   with the pre-restart certs still verifying against the now-larger
   tree.
-- `integration.TestRelyingPartyFastPath` — landmark-relative cert
-  verification *without* consulting any cosigner key, using only
+- `integration.TestLandmarkRelativeCertConstruction` — landmark-relative
+  cert verification *without* consulting any cosigner key, using only
   the public `/landmarks` + tile-served subtree hashes.
 - `integration.TestEndToEndCAWithThreeCosigners` — a CA plus three
   stub witnesses, `quorum=2`. Issued cert lands with 1 CA + 2
@@ -479,6 +480,29 @@ The cornerstone tests:
   returns as soon as the minimum is met.
 - `integration.TestCactusBinaryStartsAndServes` — actually runs the
   binary, drives it over HTTP.
+
+### Bulk issuance stress test
+
+`integration.TestBulkIssuanceStress` issues 800 certificates
+concurrently through the full ACME flow, verifies each against the log,
+and then checks the log is internally consistent. It sits behind the
+`stress` build tag so it stays out of the default suite:
+
+```sh
+make stress
+CACTUS_STRESS_CERTS=5000 CACTUS_STRESS_CONCURRENCY=128 make stress
+```
+
+The load is not the point; the post-conditions are. The log is a single
+writer with no cross-process locking, so a sequencing bug shows up as a
+duplicated or skipped index rather than as an error any one request
+would see — the test therefore asserts the assigned indices are exactly
+a permutation of `[0, n)`, not merely that every request succeeded and
+the tree ended at the right size. It also replays the published entry
+tiles through `tlog.StoredHashes` and compares the recomputed root to
+the signed checkpoint, which catches a tile written inconsistently under
+concurrent flushes (the per-certificate inclusion proofs would not,
+since those are served from the same in-memory hashes).
 
 ---
 

@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration clean \
+.PHONY: build test test-race lint integration stress clean \
 	docker-binaries docker-build docker-up docker-down docker-logs
 
 # cactus requires Go 1.27+ (built-in crypto/mldsa). Until 1.27 ships, the
@@ -23,6 +23,13 @@ vet:
 
 integration:
 	$(GO) test -race -count=1 -tags=integration ./integration/...
+
+# Bulk issuance stress test. Behind the `stress` build tag so it stays
+# out of the normal suite. Defaults to 800 certificates; override with
+# CACTUS_STRESS_CERTS / CACTUS_STRESS_CONCURRENCY.
+stress:
+	$(GO) test -race -count=1 -tags=stress -timeout 30m \
+		-run TestBulkIssuanceStress -v ./integration/...
 
 # --- docker-compose stack (cactus + Sunlight as a tlog-mirror) ---------
 #
