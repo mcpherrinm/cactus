@@ -288,3 +288,81 @@ func TestNewAccountRequiresNonce(t *testing.T) {
 		t.Errorf("expected nonce-error status, got %d", resp.StatusCode)
 	}
 }
+
+// newAccountAndOrder registers a fresh account and one dns order, returning
+// the account key, kid, and the order object. Helper for cross-account tests.
+func newAccountAndOrder(t *testing.T, base, dnsName string) (*ecdsa.PrivateKey, string, OrderResp, string) {
+	t.Helper()
+	acctKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acctJWK := &jose.JSONWebKey{Key: acctKey.Public(), Algorithm: "ES256"}
+	nonce := nonceFor(t, base)
+	accountReq, _ := json.Marshal(NewAccountReq{TermsOfServiceAgreed: true})
+	jws := jwsSign(t, acctKey, acctJWK, "", nonce, base+"/new-account", accountReq)
+	resp, body := post(t, base, "/new-account", jws)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("new-account: %d %s", resp.StatusCode, body)
+	}
+	kid := resp.Header.Get("Location")
+	nonce = resp.Header.Get("Replay-Nonce")
+	orderPayload, _ := json.Marshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: dnsName}}})
+	jws = jwsSign(t, acctKey, nil, kid, nonce, base+"/new-order", orderPayload)
+	resp, body = post(t, base, "/new-order", jws)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("new-order: %d %s", resp.StatusCode, body)
+	}
+	var ord OrderResp
+	json.Unmarshal(body, &ord)
+	return acctKey, kid, ord, resp.Header.Get("Location")
+}
+
+// TestCrossAccountAccessDenied confirms RFC 8555 §6.3 access control: a
+// second account cannot read or finalize the first account's order.
+func TestCrossAccountAccessDenied(t *testing.T) {
+	hsrv, _ := newTestStack(t)
+	base := hsrv.URL
+
+	_, _, victimOrder, victimOrderURL := newAccountAndOrder(t, base, "victim.test")
+	attackerKey, attackerKID, _, _ := newAccountAndOrder(t, base, "attacker.test")
+
+	// Attacker POST-as-GETs the victim's order URL.
+	resp, body := postAsGet(t, base, victimOrderURL, attackerKey, attackerKID, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("cross-account order read: status=%d body=%s, want 404", resp.StatusCode, body)
+	}
+
+	// Attacker tries to finalize the victim's order with its own CSR.
+	csrKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		DNSNames: []string{"victim.test"},
+	}, csrKey)
+	finPayload, _ := json.Marshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csrDER)})
+	nonce := nonceFor(t, base)
+	jws := jwsSign(t, attackerKey, nil, attackerKID, nonce, victimOrder.Finalize, finPayload)
+	resp, body = post(t, base, strings.TrimPrefix(victimOrder.Finalize, base), jws)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("cross-account finalize: status=%d body=%s, want 404", resp.StatusCode, body)
+	}
+}
+
+// TestFinalizeRejectsAccountKeyCSR confirms RFC 8555 §11.1: a CSR whose
+// public key equals the account key is rejected.
+func TestFinalizeRejectsAccountKeyCSR(t *testing.T) {
+	hsrv, _ := newTestStack(t)
+	base := hsrv.URL
+	acctKey, kid, ord, _ := newAccountAndOrder(t, base, "example.test")
+
+	// CSR signed with (and carrying) the account key.
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		DNSNames: []string{"example.test"},
+	}, acctKey)
+	finPayload, _ := json.Marshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csrDER)})
+	nonce := nonceFor(t, base)
+	jws := jwsSign(t, acctKey, nil, kid, nonce, ord.Finalize, finPayload)
+	resp, body := post(t, base, strings.TrimPrefix(ord.Finalize, base), jws)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("account-key CSR finalize: status=%d body=%s, want 400 badCSR", resp.StatusCode, body)
+	}
+}

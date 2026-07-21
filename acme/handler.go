@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/x509"
@@ -425,6 +426,8 @@ func (s *Server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 	loc := s.urlFor("/account/" + acct.ID)
 	w.Header().Set("Location", loc)
 	s.issueNonce(w)
+	s.setIndexLink(w)
+	w.Header().Set("Content-Type", "application/json")
 	if created {
 		w.WriteHeader(http.StatusCreated)
 	} else {
@@ -458,6 +461,7 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.accountJSON(acct))
 }
@@ -478,9 +482,14 @@ func (s *Server) handleAccountOrders(w http.ResponseWriter, r *http.Request) {
 	ids := s.state.OrderIDsForAccount(acct.ID)
 	urls := make([]string, 0, len(ids))
 	for _, id := range ids {
+		// RFC 8555 §7.1.2.1: the list SHOULD NOT include invalid orders.
+		if o, ok := s.state.GetOrder(id); ok && o.Status == "invalid" {
+			continue
+		}
 		urls = append(urls, s.urlFor("/order/"+id))
 	}
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(OrdersList{Orders: urls})
 }
@@ -602,6 +611,8 @@ func (s *Server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 	loc := s.urlFor("/order/" + o.ID)
 	w.Header().Set("Location", loc)
 	s.issueNonce(w)
+	s.setIndexLink(w)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(s.orderJSON(o))
 }
@@ -651,13 +662,15 @@ func (s *Server) challengeMsg(c *challenge) ChallengeMsg {
 }
 
 func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := s.readJWS(r, true); err != nil {
+	_, acct, err := s.readJWS(r, true)
+	if err != nil {
 		s.writeJWSError(w, err)
 		return
 	}
 	id := r.PathValue("id")
 	a, ok := s.state.GetAuthz(id)
-	if !ok {
+	// RFC 8555 §6.3 access control; report a foreign authz as not found.
+	if !ok || !s.authzOwnedBy(a, acct.ID) {
 		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no authz")
 		return
 	}
@@ -676,6 +689,7 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 		resp.Challenges = append(resp.Challenges, s.challengeMsg(c))
 	}
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -688,7 +702,10 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	c, ok := s.state.GetChallenge(id)
-	if !ok {
+	// RFC 8555 §6.3 access control; report a foreign challenge as not
+	// found. This also prevents driving validation of another account's
+	// challenge with the caller's key authorization.
+	if !ok || !s.challengeOwnedBy(c, acct.ID) {
 		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no challenge")
 		return
 	}
@@ -729,6 +746,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.challengeMsg(c))
 }
@@ -852,23 +870,27 @@ func (s *Server) maybeOrderReady(orderID string) {
 }
 
 func (s *Server) handleOrder(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := s.readJWS(r, true); err != nil {
+	_, acct, err := s.readJWS(r, true)
+	if err != nil {
 		s.writeJWSError(w, err)
 		return
 	}
 	id := r.PathValue("id")
 	o, ok := s.state.GetOrder(id)
-	if !ok {
+	// RFC 8555 §6.3: enforce access control. A mismatch is reported as
+	// "not found" so an unrelated account can't probe order existence.
+	if !ok || o.AccountID != acct.ID {
 		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no order")
 		return
 	}
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.orderJSON(o))
 }
 
 func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
-	parsed, _, err := s.readJWS(r, true)
+	parsed, acct, err := s.readJWS(r, true)
 	if err != nil {
 		s.writeJWSError(w, err)
 		return
@@ -892,6 +914,22 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	csr, err := x509.ParseCertificateRequest(csrDER)
 	if err != nil {
 		s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:badCSR", err.Error())
+		return
+	}
+
+	// RFC 8555 §11.1: the CSR public key MUST differ from the account key.
+	if acctKey, kerr := s.accountPublicKey(acct); kerr == nil && samePublicKey(csr.PublicKey, acctKey) {
+		s.problem(w, http.StatusBadRequest, "urn:ietf:params:acme:error:badCSR",
+			"CSR public key must not equal the account key")
+		return
+	}
+
+	// RFC 8555 §6.3 access control: the order must belong to the
+	// authenticated account. AccountID is immutable, so checking before
+	// the atomic claim below is sufficient. Report a foreign order as
+	// "not found" rather than disclosing its existence.
+	if o, ok := s.state.GetOrder(id); !ok || o.AccountID != acct.ID {
+		s.problem(w, http.StatusNotFound, "urn:ietf:params:acme:error:malformed", "no order")
 		return
 	}
 
@@ -976,6 +1014,7 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	loc := s.urlFor("/order/" + o.ID)
 	w.Header().Set("Location", loc)
 	s.issueNonce(w)
+	s.setIndexLink(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.orderJSON(o))
 }
@@ -1232,6 +1271,48 @@ func (s *Server) certBelongsToAccount(certID, accountID string) bool {
 		}
 	}
 	return false
+}
+
+// authzOwnedBy reports whether authz `a` belongs to accountID, tracing
+// authz → order → account (RFC 8555 §6.3 access control).
+func (s *Server) authzOwnedBy(a *authz, accountID string) bool {
+	o, ok := s.state.GetOrder(a.OrderID)
+	return ok && o.AccountID == accountID
+}
+
+// challengeOwnedBy reports whether challenge `c` belongs to accountID,
+// tracing challenge → authz → order → account.
+func (s *Server) challengeOwnedBy(c *challenge, accountID string) bool {
+	a, ok := s.state.GetAuthz(c.AuthzID)
+	return ok && s.authzOwnedBy(a, accountID)
+}
+
+// setIndexLink adds the RFC 8555 §7.1 "index" Link relation, which is
+// present on every resource other than the directory itself.
+func (s *Server) setIndexLink(w http.ResponseWriter) {
+	w.Header().Add("Link", fmt.Sprintf("<%s>;rel=\"index\"", s.urlFor("/directory")))
+}
+
+// accountPublicKey parses an account's stored JWK and returns its public
+// key, for the RFC 8555 §11.1 CSR-key comparison.
+func (s *Server) accountPublicKey(acct *account) (any, error) {
+	var jwk jose.JSONWebKey
+	if err := jwk.UnmarshalJSON(acct.JWKBytes); err != nil {
+		return nil, err
+	}
+	return jwk.Key, nil
+}
+
+// samePublicKey reports whether two crypto.PublicKeys have identical
+// SubjectPublicKeyInfo encodings. Used to enforce RFC 8555 §11.1 (a CSR
+// key must differ from the account key).
+func samePublicKey(a, b any) bool {
+	ad, err1 := x509.MarshalPKIXPublicKey(a)
+	bd, err2 := x509.MarshalPKIXPublicKey(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return bytes.Equal(ad, bd)
 }
 
 func (s *Server) problem(w http.ResponseWriter, status int, kind, detail string) {
