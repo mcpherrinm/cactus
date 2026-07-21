@@ -1,5 +1,5 @@
 // Package cert deals with the X.509 / TLS encodings used by Merkle Tree
-// certificates per draft-ietf-plants-merkle-tree-certs-04.
+// certificates per draft-ietf-plants-merkle-tree-certs-05.
 package cert
 
 import "encoding/asn1"

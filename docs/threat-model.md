@@ -15,11 +15,12 @@ This is the same simplification pebble makes for ACME.
 
 ## No fsync ladder
 
-Every tile / state write uses `O_RDWR | O_CREATE` + `rename(2)`, but
-we do not fsync the parent directory between rename and the next
-operation. A power loss may leave the on-disk state inconsistent with
-the most recent reported `Wait()` result. **Don't use cactus on a
-host that loses power.**
+Every tile / state write goes through temp-file + `rename(2)`, but we
+fsync nothing: not the temp file before the rename, and not the parent
+directory after it. A power loss can therefore leave a renamed
+destination empty or partially written, and more generally the on-disk
+state inconsistent with the most recent reported `Wait()` result.
+**Don't use cactus on a host that loses power.**
 
 ## Auto-pass challenges
 

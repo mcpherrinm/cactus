@@ -1,5 +1,5 @@
 // Package acme implements a minimal RFC 8555 ACME server with the §9
-// extensions of draft-ietf-plants-merkle-tree-certs-04 (the
+// extensions of draft-ietf-plants-merkle-tree-certs-05 (the
 // PEM-with-properties content type). It issues standalone Merkle Tree
 // certificates and advertises the landmark-relative form as a
 // rel="acme-optional-alternate" URL (an optional, non-blocking chain that

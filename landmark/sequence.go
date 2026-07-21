@@ -1,5 +1,5 @@
 // Package landmark implements the landmark sequence from §6.4 of
-// draft-ietf-plants-merkle-tree-certs-04.
+// draft-ietf-plants-merkle-tree-certs-05.
 //
 // A landmark is a (number, treeSize, allocatedAt) triple. The
 // sequence starts at landmark 0 with treeSize 0, and grows by one

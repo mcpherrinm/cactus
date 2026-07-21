@@ -1,5 +1,5 @@
 #!/bin/sh
-# Init step 1 of 2 (runs in the cactus image).
+# Init step 1 of 3 (runs in the cactus image).
 #
 # Generates the CA cosigner seed if absent and exports the issuance
 # log's c2sp vkey, which Sunlight needs in its log list before it will

@@ -23,9 +23,13 @@ type FS interface {
 	// Get returns the file contents at name. Returns ErrNotExist if absent.
 	Get(name string) ([]byte, error)
 
-	// Put writes data at name atomically (temp-file + rename). Creates
-	// missing parents. If exclusive is true, fails if name already
-	// exists.
+	// Put writes data at name. Creates missing parents. The default
+	// (exclusive=false) path is atomic w.r.t. readers via temp-file +
+	// rename. If exclusive is true, it instead opens the final path with
+	// O_EXCL and fails if name already exists — this variant is not
+	// atomic w.r.t. readers and relies on the single-writer invariant
+	// (see docs/threat-model.md). Neither path fsyncs, so durability
+	// across a crash is best-effort.
 	Put(name string, data []byte, exclusive bool) error
 
 	// Exists reports whether name resolves to a regular file.

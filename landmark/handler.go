@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Handler returns an http.Handler that serves the §6.4.1 landmark
+// Handler returns an http.Handler that serves the §6.4.3 landmark
 // list. Plain text, one line of `<last> <num_active>` followed by
 // `num_active + 1` tree sizes in strictly decreasing order.
 func (s *Sequence) Handler() http.Handler {
@@ -35,7 +35,7 @@ func (s *Sequence) serveLandmarks(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// encode builds the §6.4.1 text body: `<last> <num_active>\n` followed
+// encode builds the §6.4.3 text body: `<last> <num_active>\n` followed
 // by num_active + 1 tree-size lines, strictly decreasing.
 //
 // Special case: when only landmark 0 exists, last = 0, num_active = 0,

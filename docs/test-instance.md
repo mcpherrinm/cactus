@@ -67,10 +67,16 @@ sed -i "s|/tmp/cactus-data|$DATA_DIR|" config.json
 ### Public exposure
 
 `acme.listen`/`monitoring.listen` are the public surfaces; set their
-`external_url` to whatever clients reach (cactus speaks plaintext HTTP,
-so terminate TLS at a reverse proxy if you need HTTPS, and set
-`external_url` to the public `https://…`). Keep `metrics.listen` on
-`127.0.0.1` — it is internal.
+`external_url` to whatever clients reach. `acme.external_url` is
+load-bearing — it is the base URL cactus puts in ACME directory entries,
+account/order locations, and the JWS `url`-header check — so it must
+match what clients actually use. `monitoring.external_url` is
+informational only: it is published in the `/config` output for
+discovery but does not change how the monitoring endpoint is served.
+cactus speaks plaintext HTTP unless you set `acme.tls_cert`/`tls_key`
+(or terminate TLS at a reverse proxy); either way, set `external_url` to
+the public `https://…`. Keep `metrics.listen` on `127.0.0.1` — it is
+internal.
 
 `challenge_mode: auto-pass` makes every authorization instantly valid, so
 anyone who can reach the ACME port gets a cert for any name — fine for a

@@ -69,7 +69,10 @@ operate it, and where to look in the code.
 - **Log pruning** (§5.2.3).
 - **Real DNS-01 challenges.** `auto-pass` and `http-01` are
   supported; DNS-01 is not.
-- **Revoked ranges** (§7.5) beyond a stub list in config.
+- **Revoked ranges** (§7.5) as a config key. The relying-party data
+  model carries them (`cert.RevokedRanges`, seeded from the CA
+  certificate's minSerial/maxSerial), but cactus exposes no
+  revoked-ranges configuration.
 
 ---
 
@@ -224,7 +227,7 @@ to be sure the log isn't lying about what it has.
 `prove` emits a JSON object that's easy to pipe to `jq`:
 
 ```sh
-./bin/cactus-cli prove http://localhost:14080 1 | jq .
+./bin/cactus-cli prove http://localhost:14080/1 5 | jq .
 {
   "index": 1,
   "tree_size": 2,
@@ -255,15 +258,18 @@ The blocks below are the load-bearing ones.
 
 `number` is the issuance log's log number (1–65535, §5.2); the log ID
 is derived as `<ca_cosigner.id>.0.<number>` and the issuer DN is the
-CA ID. `checkpoint_period_ms` is how often the sequencer flushes pooled
+CA ID. `shortname` is an optional operator-facing label attached to log
+lines. `checkpoint_period_ms` is how often the sequencer flushes pooled
 entries and signs a new checkpoint; lower = lower issuance latency, more
-signatures per second.
+signatures per second. `pool_size` bounds the pending pool: once that
+many entries are queued the sequencer flushes early instead of waiting
+for the next `checkpoint_period_ms` tick.
 
 ### `ca_cosigner`
 
 ```json
 "ca_cosigner": {
-  "id": "1.3.6.1.4.1.44363.47.1.99",
+  "id": "44363.47.1.99",
   "algorithm": "mldsa-44",
   "seed_path": "keys/ca-cosigner.seed"
 }
@@ -297,6 +303,10 @@ and an older toolchain simply won't compile cactus.
 `challenge_mode` is `auto-pass` (every authorization is instantly
 valid; for tests) or `http-01` (real fetch of
 `http://identifier/.well-known/acme-challenge/<token>`).
+
+Optional `tls_cert` and `tls_key` (PEM paths, resolved relative to
+`data_dir`) make the ACME listener serve HTTPS. They must be set together
+or not at all. When omitted, the listener serves plaintext HTTP.
 
 ### `landmarks` (tuning only)
 
@@ -413,8 +423,10 @@ Prometheus metrics on `127.0.0.1:14090/metrics`:
 | `cactus_ca_mirror_request_total` | `mirror_id`, `result` | Counter |
 | `cactus_ca_quorum_failures_total` | | Counter |
 
-Plus stdlib Go runtime metrics (goroutines, GC, etc.) and pprof
-under `/debug/pprof` on the same listener.
+Plus stdlib Go runtime metrics (goroutines, GC, etc.). pprof is
+registered under `/debug/pprof` on the same listener **only when
+`metrics.listen` is a loopback address**, so it is not exposed when the
+metrics endpoint is bound to a non-loopback interface.
 
 ---
 
