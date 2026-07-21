@@ -95,13 +95,20 @@ func RebuildLogEntryFromTBS(tbs []byte, expectedIssuer []byte) ([]byte, uint64, 
 	}
 	serial := serialBig.Uint64()
 
-	// signature AlgorithmIdentifier — drop.
+	// signature AlgorithmIdentifier. §7.2 step 1 requires the
+	// TBSCertificate's signature field to be id-alg-mtcProof with absent
+	// parameters (this is the inner field; RFC 5280 §4.1.1.2 requires it
+	// to equal the outer Certificate.signatureAlgorithm). It is not
+	// carried into the log entry, but checking it here means both the
+	// inner and outer algorithm IDs are validated.
 	var sigAlg asn1.RawValue
 	body, err = asn1.Unmarshal(body, &sigAlg)
 	if err != nil {
 		return nil, 0, err
 	}
-	_ = sigAlg
+	if err := checkMTCProofAlgID(sigAlg.FullBytes); err != nil {
+		return nil, 0, fmt.Errorf("cert: TBSCertificate signature field: %w", err)
+	}
 
 	// issuer Name
 	var issuer asn1.RawValue
