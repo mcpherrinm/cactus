@@ -1,0 +1,113 @@
+# Local cactus + Sunlight stack.
+#
+#   cactus    — the MTC ACME CA and issuance log
+#   sunlight  — tlog-mirror write path (add-checkpoint / add-entries /
+#               sign-subtree) and ML-DSA-44 mirror cosigner
+#   skylight  — tlog-mirror read path (mirrored checkpoint and tiles)
+#
+# Sunlight's mirror is push-based: it never fetches from cactus. cactus
+# pushes its log to sunlight and collects the mirror cosignatures that
+# go into issued certificates.
+#
+# Start with `make docker-up` (which builds the cactus binaries on the
+# host with gotip first — see docker/README.md for why).
+
+name: cactus
+
+services:
+  # Generates the CA cosigner seed and exports the log's vkey, which
+  # sunlight-init needs before it can build its log list.
+  cactus-init:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cactus
+    image: cactus:local
+    entrypoint: ["/bin/sh", "/docker/init-cactus.sh"]
+    environment:
+      CACTUS_CA_ID: "44363.47.1.99"
+      CACTUS_LOG_NUMBER: "1"
+    volumes:
+      - ./:/docker:ro
+      - shared:/shared
+      - cactus-data:/var/lib/cactus
+
+  # Derives sunlight's keys, builds the log list from cactus's vkey, and
+  # pre-creates the checkpoint lock database.
+  sunlight-init:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sunlight
+    image: sunlight:local
+    entrypoint: ["/bin/sh", "/docker/init-sunlight.sh"]
+    environment:
+      SUNLIGHT_WITNESS_NAME: "sunlight.mirror.test"
+      SUNLIGHT_MIRROR_NAME: "oid/1.3.6.1.4.1.44363.47.2.1"
+    volumes:
+      - ./:/docker:ro
+      - shared:/shared
+      - sunlight-data:/var/lib/sunlight
+    depends_on:
+      cactus-init:
+        condition: service_completed_successfully
+
+  # Converts sunlight's mirror vkey into the PEM form cactus's quorum
+  # config wants. Separate from cactus-init because it can only run once
+  # sunlight's keys exist.
+  cactus-wire:
+    image: cactus:local
+    entrypoint: ["/bin/sh", "/docker/init-wire.sh"]
+    volumes:
+      - ./:/docker:ro
+      - shared:/shared
+      - cactus-data:/var/lib/cactus
+    depends_on:
+      sunlight-init:
+        condition: service_completed_successfully
+
+  sunlight:
+    image: sunlight:local
+    # Config is rendered by sunlight-init (it needs today's date for the
+    # keep-alive log's inception), so it is read from the data volume.
+    command: ["-c", "/var/lib/sunlight/sunlight.yaml"]
+    volumes:
+      - sunlight-data:/var/lib/sunlight
+    ports:
+      - "8080:8080"
+    depends_on:
+      sunlight-init:
+        condition: service_completed_successfully
+
+  skylight:
+    image: sunlight:local
+    entrypoint: ["/usr/local/bin/skylight"]
+    command: ["-c", "/etc/sunlight/skylight.yaml"]
+    volumes:
+      - ./skylight.yaml:/etc/sunlight/skylight.yaml:ro
+      - sunlight-data:/var/lib/sunlight
+    ports:
+      - "8081:8081"
+    depends_on:
+      sunlight-init:
+        condition: service_completed_successfully
+
+  cactus:
+    image: cactus:local
+    command: ["-config", "/etc/cactus/config.json"]
+    volumes:
+      - ./cactus-config.json:/etc/cactus/config.json:ro
+      - shared:/shared:ro
+      - cactus-data:/var/lib/cactus
+    ports:
+      - "14000:14000" # ACME
+      - "14080:14080" # monitoring / tiles
+      - "14090:14090" # metrics
+    depends_on:
+      cactus-wire:
+        condition: service_completed_successfully
+      sunlight:
+        condition: service_started
+
+volumes:
+  shared:
+  cactus-data:
+  sunlight-data:

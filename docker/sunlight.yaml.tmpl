@@ -1,0 +1,83 @@
+# Sunlight configured as a tlog-mirror + ML-DSA-44 cosigner for cactus.
+#
+# No `logs:` section: witness/mirror setup is gated only on witness.name,
+# so Sunlight runs happily without operating any CT log of its own. It is
+# here purely to mirror cactus's issuance log and cosign its subtrees.
+#
+# No `acme:` section either, so Sunlight serves plain HTTP/h2c, which is
+# what we want inside the compose network.
+
+listen:
+  - ":8080"
+
+# Global compare-and-swap lock backend. Pre-created by init-sunlight.sh;
+# Sunlight refuses to create it itself.
+checkpoints: /var/lib/sunlight/checkpoints.db
+
+witness:
+  # The witness cosigner name. Distinct from mirrorname, which Sunlight
+  # requires.
+  name: sunlight.mirror.test
+
+  # Two traps here.
+  #
+  # 1. Sunlight validates that this is an https URL, but mounts its
+  #    handlers under the *host* alone and, with no acme: section, serves
+  #    plain HTTP/h2c. So the scheme is never used for transport: cactus
+  #    talks plain HTTP to this host.
+  #
+  # 2. It MUST NOT carry a port. Sunlight registers the handler with
+  #    net/http.ServeMux under "<host>/", and ServeMux strips the port
+  #    from the request Host before matching — so a pattern containing a
+  #    port matches nothing and every endpoint 404s, while a portless
+  #    pattern matches requests to any port. The host must stay in sync
+  #    with the compose service name.
+  submissionprefix: https://sunlight
+
+  # Sunlight does NOT serve this — skylight does, from localdirectory.
+  # The mirror's read prefix is this plus "/mirror/".
+  monitoringprefix: https://skylight
+
+  # 32-byte HKDF seed; all three keys are derived from it.
+  secret: /var/lib/sunlight/witness-seed.bin
+
+  # Logs allowed to use the witness endpoints, and (separately) the
+  # mirror endpoints. Written by init-sunlight.sh from cactus's log vkey.
+  loglists:
+    - /var/lib/sunlight/logs.txt
+  mirrorloglists:
+    - /var/lib/sunlight/logs.txt
+
+  # Setting mirrorname is what turns the witness into a tlog-mirror.
+  # An oid/ name makes Sunlight publish a cosigner_id in mirror.v0.json
+  # and makes the cosignature usable verbatim inside an MTC proof.
+  mirrorname: oid/1.3.6.1.4.1.44363.47.2.1
+
+  # Public mirror data (checkpoint + tiles) lands here for skylight.
+  localdirectory: /var/lib/sunlight/public
+
+# Sunlight cannot run as a mirror alone. main() ends with
+# sequencerGroup.Wait(), and sequencer goroutines are only started per
+# entry in `logs:` — so with no logs the group is empty, Wait() returns
+# immediately, and the process shuts down and exits 1 without logging
+# anything. The witness/mirror machinery is fully set up by then; it just
+# never gets to serve.
+#
+# So we run one throwaway CT log purely to keep the sequencer alive. We
+# never submit to it. Its inception date must be today when it is first
+# created, which is why this file is a template rendered at init time.
+#
+# `roots` is set deliberately: if it were omitted, CCADBRoots would
+# default to "trusted" and the log would fetch the CCADB root list over
+# the network on startup.
+logs:
+  - shortname: keepalive
+    inception: "__INCEPTION__"
+    submissionprefix: https://keepalive.invalid
+    monitoringprefix: https://keepalive.invalid
+    secret: /var/lib/sunlight/keepalive-seed.bin
+    cache: /var/lib/sunlight/keepalive-cache.db
+    roots: /var/lib/sunlight/keepalive-roots.pem
+    localdirectory: /var/lib/sunlight/keepalive-public
+    notafterstart: "__NOTAFTER_START__"
+    notafterlimit: "__NOTAFTER_LIMIT__"
