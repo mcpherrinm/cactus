@@ -1,0 +1,102 @@
+name: Stress
+
+# The bulk issuance stress test is separated from CI because it is slow
+# relative to the rest of the suite and its value is in repetition: a
+# sequencing race that survives one run may not survive fifty. So it runs
+# nightly and on demand rather than on every push, and CI stays fast.
+#
+# It still runs on pull requests that touch the issuance path, since that
+# is where a regression it could catch would come from.
+on:
+  schedule:
+    # 04:17 UTC daily. Off the hour to avoid the scheduling stampede.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      certs:
+        description: 'Number of certificates to issue'
+        required: false
+        default: '800'
+      concurrency:
+        description: 'Certificates in flight'
+        required: false
+        default: '64'
+  pull_request:
+    paths:
+      - 'log/**'
+      - 'ca/**'
+      - 'acme/**'
+      - 'cert/**'
+      - 'tlogx/**'
+      - 'integration/stress_test.go'
+      - '.github/workflows/stress.yml'
+
+permissions:
+  contents: read
+
+# See .github/workflows/ci.yml — cactus needs a Go 1.27 toolchain, which
+# until 1.27 ships means gotip. Once it ships, replace the bootstrap and
+# gotip steps with a single actions/setup-go and drop GOTOOLCHAIN=local.
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    # Generous: the default 800-cert run takes seconds, but a
+    # workflow_dispatch soak can be given a much larger size, and the
+    # first run on a cold cache has to build the gotip toolchain.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      # A released Go is needed only to `go install` and bootstrap gotip.
+      - name: Install bootstrap Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      # Shares a cache key with ci.yml so whichever workflow runs first
+      # populates it for the other.
+      - name: Cache gotip toolchain
+        id: cache-gotip
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/sdk/gotip
+            ~/go/bin/gotip
+          key: gotip-${{ runner.os }}-v1
+
+      - name: Install gotip (Go 1.27 devel)
+        if: steps.cache-gotip.outputs.cache-hit != 'true'
+        run: |
+          go install golang.org/dl/gotip@latest
+          "$(go env GOPATH)/bin/gotip" download
+
+      - name: Put gotip on PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Go modules and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      - name: Toolchain version
+        run: gotip version
+
+      # `make stress` runs under -race, which is the point: the
+      # assertions this test makes about index assignment are exactly the
+      # kind of thing the race detector corroborates.
+      #
+      # A manual run can override the size; the scheduled and
+      # pull_request runs take the test's own defaults (800 / 64).
+      - name: Bulk issuance stress test (race)
+        env:
+          CACTUS_STRESS_CERTS: ${{ inputs.certs }}
+          CACTUS_STRESS_CONCURRENCY: ${{ inputs.concurrency }}
+        run: make stress
