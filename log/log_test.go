@@ -12,6 +12,7 @@ import (
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tlogx"
+	"golang.org/x/mod/sumdb/tlog"
 )
 
 func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {
@@ -240,5 +241,83 @@ func TestLogReloadAfterRestart(t *testing.T) {
 	}
 	if cp1.Root != cp2.Root {
 		t.Errorf("root after reload differs")
+	}
+}
+
+// TestEntriesAndTreeConsistencyProof covers the two read-path additions
+// the tlog-mirror push client needs from the log: entry read-back, and
+// the RFC 6962 *tree* consistency proof used by add-checkpoint — as
+// distinct from ConsistencyProof, which is the MTC §4.4 *subtree* proof
+// used by sign-subtree and by add-entries packages.
+func TestEntriesAndTreeConsistencyProof(t *testing.T) {
+	l, _, _ := newTestLog(t)
+	ctx := context.Background()
+
+	const n = 40
+	want := make([][]byte, n)
+	for i := range want {
+		tbs := []byte{byte(i), 0xAA}
+		want[i] = cert.EncodeTBSCertEntry(tbs)
+		if _, err := l.Append(ctx, want[i], sha256.Sum256(tbs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Wait for the entries to be sequenced into a checkpoint.
+	if _, err := l.Wait(ctx, n-1); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := l.Entries(0, n)
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	for i := range want {
+		if !bytes.Equal(got[i], want[i]) {
+			t.Fatalf("Entries()[%d] = %x, want %x", i, got[i], want[i])
+		}
+	}
+	// A sub-range must be the corresponding slice.
+	mid, err := l.Entries(7, 19)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, e := range mid {
+		if !bytes.Equal(e, want[7+i]) {
+			t.Fatalf("Entries(7,19)[%d] mismatch", i)
+		}
+	}
+
+	// Tree consistency proofs must verify with the RFC 6962 checker.
+	size := l.CurrentCheckpoint().Size
+	newRoot, err := tlog.TreeHash(int64(size), hashesAsTlog(l.tw.SnapshotHashes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for old := uint64(1); old < size; old++ {
+		proof, err := l.TreeConsistencyProof(old, size)
+		if err != nil {
+			t.Fatalf("TreeConsistencyProof(%d,%d): %v", old, size, err)
+		}
+		oldRoot, err := tlog.TreeHash(int64(old), hashesAsTlog(l.tw.SnapshotHashes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tp := make(tlog.TreeProof, len(proof))
+		for i, h := range proof {
+			tp[i] = tlog.Hash(h)
+		}
+		if err := tlog.CheckTree(tp, int64(size), newRoot, int64(old), oldRoot); err != nil {
+			t.Fatalf("CheckTree(%d -> %d): %v", old, size, err)
+		}
+	}
+
+	// An old size of zero has an empty proof: the empty tree is
+	// consistent with every tree, and a witness rejects a non-empty
+	// proof there with a 422.
+	if proof, err := l.TreeConsistencyProof(0, size); err != nil || len(proof) != 0 {
+		t.Errorf("TreeConsistencyProof(0,%d) = %v, %v; want empty proof and no error", size, proof, err)
+	}
+	if _, err := l.TreeConsistencyProof(size, 1); err == nil {
+		t.Error("TreeConsistencyProof accepted oldSize > newSize")
 	}
 }

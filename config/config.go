@@ -14,6 +14,7 @@ type Config struct {
 	Log              LogConfig        `json:"log"`
 	CACosigner       CosignerConfig   `json:"ca_cosigner"`
 	CACosignerQuorum CACosignerQuorum `json:"ca_cosigner_quorum"`
+	MirrorPush       MirrorPushConfig `json:"mirror_push"`
 	ACME             ACMEConfig       `json:"acme"`
 	Monitoring       ListenerConfig   `json:"monitoring"`
 	Metrics          MetricsConfig    `json:"metrics"`
@@ -43,6 +44,60 @@ func (c CACosignerQuorum) RequestTimeout() time.Duration {
 // RetryDeadline is a typed-time accessor.
 func (c CACosignerQuorum) RetryDeadline() time.Duration {
 	return time.Duration(c.MirrorRetryDeadlineMS) * time.Millisecond
+}
+
+// MirrorPushConfig configures the c2sp.org/tlog-mirror push client.
+// When Targets is non-empty, every log flush pushes the new checkpoint
+// and entries to each target. With no targets the whole subsystem is
+// inert and cactus behaves exactly as it does without it.
+//
+// This is a separate section from ca_cosigner_quorum on purpose, even
+// though a deployment will typically list the same mirror in both. They
+// are different relationships: ca_cosigner_quorum is the CA asking a
+// mirror to cosign subtrees for certificates, while mirror_push is the
+// log replicating itself to that mirror. The push is what makes the
+// cosignature request answerable at all — a mirror only signs a subtree
+// against a checkpoint carrying its own cosignature, which it produces
+// only in an add-entries response — but a mirror can be pushed to
+// without being in the issuance quorum.
+type MirrorPushConfig struct {
+	Targets []MirrorPushTarget `json:"targets"`
+	// RequestTimeoutMS bounds each individual HTTP request.
+	RequestTimeoutMS int `json:"request_timeout_ms"`
+	// PushTimeoutMS bounds one complete push (add-checkpoint plus the
+	// whole add-entries 202 loop) to a single mirror.
+	PushTimeoutMS int `json:"push_timeout_ms"`
+	// DisableGzip turns off request compression. tlog-mirror says
+	// clients SHOULD compress add-entries bodies, so this defaults off.
+	DisableGzip bool `json:"disable_gzip"`
+}
+
+// RequestTimeout is a typed-time accessor.
+func (m MirrorPushConfig) RequestTimeout() time.Duration {
+	return time.Duration(m.RequestTimeoutMS) * time.Millisecond
+}
+
+// PushTimeout is a typed-time accessor.
+func (m MirrorPushConfig) PushTimeout() time.Duration {
+	return time.Duration(m.PushTimeoutMS) * time.Millisecond
+}
+
+// MirrorPushTarget is one mirror the log replicates itself to.
+type MirrorPushTarget struct {
+	// ID is the mirror's cosigner trust anchor ID, in the same
+	// relative-OID form as ca_cosigner.id.
+	ID string `json:"id"`
+	// SubmissionPrefix is the base URL of the mirror's write APIs; the
+	// client appends "/add-checkpoint" and "/add-entries".
+	SubmissionPrefix string `json:"submission_prefix"`
+	// MonitoringPrefix is the base URL of the mirror's read APIs, under
+	// which it serves "<origin hash>/checkpoint". Used only to
+	// bootstrap a starting index for a mirror we have no state for.
+	MonitoringPrefix string `json:"monitoring_prefix"`
+	Algorithm        string `json:"algorithm"`
+	// PublicKeyPath points to a PEM "PUBLIC KEY" file holding the
+	// mirror's cosigner key, resolved relative to data_dir.
+	PublicKeyPath string `json:"public_key_path"`
 }
 
 // MirrorEndpointConfig is one mirror the CA fans out to.
@@ -134,6 +189,12 @@ func Default() Config {
 		},
 		Monitoring: ListenerConfig{Listen: ":14080"},
 		Metrics:    MetricsConfig{Listen: "127.0.0.1:14090"},
+		MirrorPush: MirrorPushConfig{
+			RequestTimeoutMS: 30000,
+			// Mirrors are permitted a five-minute deadline on an
+			// add-entries request; allow a whole push the same budget.
+			PushTimeoutMS: 300000,
+		},
 		Landmarks: LandmarkConfig{
 			TimeBetweenLandmarksMS: 3600000,   // 1 hour
 			MaxCertLifetimeMS:      604800000, // 7 days
@@ -228,6 +289,31 @@ func (c *Config) Validate() error {
 	}
 	if c.Landmarks.MaxCertLifetimeMS <= 0 {
 		return fmt.Errorf("landmarks.max_cert_lifetime_ms must be > 0")
+	}
+	if len(c.MirrorPush.Targets) > 0 {
+		if c.MirrorPush.RequestTimeoutMS <= 0 {
+			return fmt.Errorf("mirror_push.request_timeout_ms must be > 0")
+		}
+		if c.MirrorPush.PushTimeoutMS <= 0 {
+			return fmt.Errorf("mirror_push.push_timeout_ms must be > 0")
+		}
+		for i, t := range c.MirrorPush.Targets {
+			if t.ID == "" {
+				return fmt.Errorf("mirror_push.targets[%d].id required", i)
+			}
+			if t.SubmissionPrefix == "" {
+				return fmt.Errorf("mirror_push.targets[%d].submission_prefix required", i)
+			}
+			// The monitoring prefix is only used to bootstrap a
+			// starting index, and a 409 corrects any guess, so it is
+			// optional.
+			if t.Algorithm != "mldsa-44" {
+				return fmt.Errorf("mirror_push.targets[%d].algorithm must be \"mldsa-44\" (c2sp.org/tlog-cosignature has no other subtree-capable type), got %q", i, t.Algorithm)
+			}
+			if t.PublicKeyPath == "" {
+				return fmt.Errorf("mirror_push.targets[%d].public_key_path required", i)
+			}
+		}
 	}
 	if len(c.CACosignerQuorum.Mirrors) > 0 {
 		if c.CACosignerQuorum.MinSignatures < 1 {

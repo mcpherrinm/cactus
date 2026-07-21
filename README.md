@@ -128,6 +128,7 @@ top-level config blocks are populated:
 |---|---|---|
 | **CA** (default) | Issuance log + ACME server + landmark-relative certs | `acme`, `log`, `ca_cosigner` |
 | **CA-side mirror collection** | Multi-mirror cosignatures during issuance | `ca_cosigner_quorum.mirrors[]` |
+| **Mirror push** | Replicating the log to c2sp.org/tlog-mirror mirrors | `mirror_push.targets[]` |
 
 Landmark-relative cert support is always on; only its cadence is
 tunable (see `landmarks` below).
@@ -311,6 +312,58 @@ mirror sigs to arrive before `Wait` returns. The retry deadline lets
 the requester poll-and-retry while mirrors catch up to the new
 checkpoint (mirrors can't sign a subtree until they've verified the
 checkpoint that contains it).
+
+Note that a mirror will only answer `sign-subtree` if the reference
+checkpoint in the request already carries **that mirror's own
+cosignature** (c2sp.org/tlog-witness; otherwise it responds 403). The
+only place such a cosignature is produced is the `add-entries` success
+response, so `ca_cosigner_quorum` against a real c2sp mirror requires
+`mirror_push` to be configured for the same mirror. Against a witness
+that does not enforce the rule, `ca_cosigner_quorum` works alone.
+
+### `mirror_push` (optional, c2sp.org/tlog-mirror push client)
+
+```json
+"mirror_push": {
+  "targets": [
+    {
+      "id": "example.mirror.1",
+      "submission_prefix": "https://mirror-1.example",
+      "monitoring_prefix": "https://mirror-1.example/mon",
+      "algorithm": "mldsa-44",
+      "public_key_path": "keys/mirror-1.pub.pem"
+    }
+  ],
+  "request_timeout_ms": 30000,
+  "push_timeout_ms": 300000,
+  "disable_gzip": false
+}
+```
+
+When set, every flush pushes the new checkpoint and any new entries to
+each target, in parallel and best effort:
+
+1. `POST <submission_prefix>/add-checkpoint` moves the mirror's pending
+   checkpoint to ours, with an RFC 6962 tree consistency proof.
+2. `POST <submission_prefix>/add-entries` uploads the entries the mirror
+   is missing as 256-aligned packages, each carrying a draft §4.4
+   subtree consistency proof. Uploads are capped at 32 packages (8192
+   entries) per request and continue via the 202 loop.
+3. The `200` response carries the mirror's checkpoint cosignature, which
+   is retained and folded into the reference checkpoint that
+   `ca_cosigner_quorum` presents to `sign-subtree`.
+
+`monitoring_prefix` is optional and only used to guess a starting index
+for a mirror cactus has no state for; the mirror corrects any guess.
+Resume state (next entry, pending size, and the mirror's opaque ticket)
+is persisted under `<data_dir>/mirrorpush/`.
+
+A `422` from `add-entries` is treated as fatal and is **not** retried:
+it means the mirror could not verify a consistency proof against its
+pending checkpoint, which is an integrity signal rather than a
+transient error.
+
+With no targets configured the subsystem is entirely inert.
 
 ---
 

@@ -3,6 +3,8 @@ package tilewriter
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/letsencrypt/cactus/storage"
@@ -210,5 +212,95 @@ func TestAppendAcrossDataTileBoundary(t *testing.T) {
 	}
 	if len(parsed) != EntriesPerDataTile {
 		t.Errorf("first data tile has %d entries, want %d", len(parsed), EntriesPerDataTile)
+	}
+}
+
+// TestReadEntries covers the read path the tlog-mirror push client
+// depends on: entries must come back byte-for-byte, across data tile
+// boundaries, from arbitrary sub-ranges.
+func TestReadEntries(t *testing.T) {
+	w, _ := newTestWriter(t)
+	// Span three data tiles, ending mid-tile so the last one is partial.
+	const n = 2*EntriesPerDataTile + 37
+	want := make([][]byte, n)
+	for i := range want {
+		want[i] = fmt.Appendf(nil, "entry-%d-%s", i, strings.Repeat("x", i%13))
+	}
+	if _, err := w.Append(want); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range [][2]uint64{
+		{0, n},
+		{0, 0},
+		{5, 5},
+		{0, 1},
+		{0, EntriesPerDataTile},
+		{EntriesPerDataTile - 1, EntriesPerDataTile + 1}, // straddles a boundary
+		{100, 300},
+		{2 * EntriesPerDataTile, n},
+		{n - 1, n},
+	} {
+		start, end := tc[0], tc[1]
+		got, err := w.ReadEntries(start, end)
+		if err != nil {
+			t.Fatalf("ReadEntries(%d,%d): %v", start, end, err)
+		}
+		if uint64(len(got)) != end-start {
+			t.Fatalf("ReadEntries(%d,%d) returned %d entries, want %d", start, end, len(got), end-start)
+		}
+		for i, g := range got {
+			if !bytes.Equal(g, want[start+uint64(i)]) {
+				t.Fatalf("ReadEntries(%d,%d)[%d] = %q, want %q", start, end, i, g, want[start+uint64(i)])
+			}
+		}
+	}
+
+	if _, err := w.ReadEntries(0, n+1); err == nil {
+		t.Error("ReadEntries accepted an end past the tree size")
+	}
+	if _, err := w.ReadEntries(10, 5); err == nil {
+		t.Error("ReadEntries accepted start > end")
+	}
+}
+
+// TestReadEntriesAfterReload checks the disk path specifically. A
+// reloaded writer has no in-memory partial data tiles, so ReadEntries
+// must reconstruct the correct partial-tile width from the tree size.
+func TestReadEntriesAfterReload(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := storage.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := New(fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = EntriesPerDataTile + 5 // one full tile plus a partial one
+	want := make([][]byte, n)
+	for i := range want {
+		want[i] = fmt.Appendf(nil, "reload-entry-%d", i)
+	}
+	if _, err := w.Append(want); err != nil {
+		t.Fatal(err)
+	}
+
+	fs2, err := storage.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := New(fs2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w2.ReadEntries(0, n)
+	if err != nil {
+		t.Fatalf("ReadEntries after reload: %v", err)
+	}
+	for i := range want {
+		if !bytes.Equal(got[i], want[i]) {
+			t.Fatalf("entry %d after reload = %q, want %q", i, got[i], want[i])
+		}
 	}
 }

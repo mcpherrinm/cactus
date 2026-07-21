@@ -92,6 +92,64 @@ func (w *TileWriter) SnapshotHashes() []tlog.Hash {
 	return out
 }
 
+// ReadEntries returns the raw log entries with indices in [start, end),
+// in order, read back out of the level=-1 data tiles.
+//
+// The read path exists for the c2sp.org/tlog-mirror push client, which
+// has to re-transmit already-sequenced entries to a mirror and so needs
+// the exact bytes that were hashed into the tree. It deliberately goes
+// through the same data tiles a monitor would fetch, rather than keeping
+// a second copy of every entry in memory.
+//
+// Entries are read from the in-memory copy of a still-growing partial
+// tile when one is present, and otherwise from disk. Those two sources
+// never disagree: persistAfterAppend rewrites the partial tile file on
+// every single append, so the on-disk width always matches the tree
+// size. The in-memory map is only consulted first to save a read, and
+// it is empty after a restart (loadFromDisk replays entries without
+// repopulating it), which is exactly why the disk path must handle
+// partial tiles too.
+func (w *TileWriter) ReadEntries(start, end uint64) ([][]byte, error) {
+	if start > end {
+		return nil, fmt.Errorf("tilewriter: ReadEntries start %d > end %d", start, end)
+	}
+	if end > uint64(w.size) {
+		return nil, fmt.Errorf("tilewriter: ReadEntries end %d > tree size %d", end, w.size)
+	}
+	if start == end {
+		return nil, nil
+	}
+	out := make([][]byte, 0, end-start)
+	for tileN := int64(start / EntriesPerDataTile); tileN*EntriesPerDataTile < int64(end); tileN++ {
+		base := uint64(tileN * EntriesPerDataTile)
+		// The tile holds every entry the tree has in [base, base+256).
+		width := min(uint64(w.size)-base, uint64(EntriesPerDataTile))
+		raw, ok := w.dataTiles[tileN]
+		if !ok {
+			var err error
+			raw, err = w.fs.Get(dataTilePath(tileN, int(width)))
+			if err != nil {
+				return nil, fmt.Errorf("tilewriter: read data tile %d (width %d): %w", tileN, width, err)
+			}
+		}
+		es, err := SplitDataTile(raw)
+		if err != nil {
+			return nil, fmt.Errorf("tilewriter: parse data tile %d: %w", tileN, err)
+		}
+		if uint64(len(es)) != width {
+			return nil, fmt.Errorf("tilewriter: data tile %d has %d entries, want %d", tileN, len(es), width)
+		}
+		// Clip the tile to the requested range.
+		lo := max(start, base) - base
+		hi := min(end, base+width) - base
+		out = append(out, es[lo:hi]...)
+	}
+	if uint64(len(out)) != end-start {
+		return nil, fmt.Errorf("tilewriter: read %d entries for [%d,%d)", len(out), start, end)
+	}
+	return out, nil
+}
+
 // Append appends entries and returns the assigned indices [oldSize,
 // oldSize+len(entries)). Storage is updated atomically: on error, the
 // in-memory state is rolled back so a retry sees the original size.

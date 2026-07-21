@@ -41,8 +41,10 @@ func OIDName(id TrustAnchorID) string {
 }
 
 // MarshalSignatureInput returns the bytes a cosigner signs: the §5.3.1
-// CosignedMessage for the given subtree, with timestamp = 0 (the value
-// required for Merkle Tree Certificate proofs, §6.1):
+// CosignedMessage for the given subtree, with timestamp = 0 — the value
+// required for Merkle Tree Certificate proofs (§6.1) and, equivalently,
+// for c2sp.org/tlog-witness `sign-subtree` responses, whose timestamp
+// "MUST be zero".
 //
 //	struct {
 //	    uint8 label[12] = "subtree/v1\n\0";
@@ -53,7 +55,32 @@ func OIDName(id TrustAnchorID) string {
 //	    uint64 end;
 //	    HashValue subtree_hash;
 //	} CosignedMessage;
+//
+// Use MarshalSignatureInputAt for the other flavour of cosignature: a
+// *checkpoint* cosignature (c2sp.org/tlog-witness `add-checkpoint`, and
+// the `add-entries` 200 response of c2sp.org/tlog-mirror), where the
+// timestamp MUST NOT be zero.
 func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byte, error) {
+	return MarshalSignatureInputAt(cosignerID, subtree, 0)
+}
+
+// MarshalSignatureInputAt is MarshalSignatureInput with an explicit
+// CosignedMessage timestamp.
+//
+// The two callers want opposite things and the spec is strict about it:
+//
+//   - Subtree cosignatures (MTC §6.1, tlog-witness `sign-subtree`) MUST
+//     carry timestamp 0, and start/end are the subtree's own bounds.
+//   - Checkpoint cosignatures (tlog-witness `add-checkpoint`,
+//     tlog-mirror `add-entries`) MUST carry a non-zero timestamp — it is
+//     the cosigner's freshness assertion — and cover the whole tree, so
+//     start MUST be 0 and end is the checkpoint's tree size.
+//
+// Neither rule is enforced here: the timestamp is an input to the
+// signature, and both signing and verification have to reproduce
+// whatever value is on the wire. Callers enforce the rules before
+// trusting a signature (see mirrorpush.VerifyCosignatures).
+func MarshalSignatureInputAt(cosignerID TrustAnchorID, subtree *MTCSubtree, timestamp uint64) ([]byte, error) {
 	if len(SubtreeSignatureLabel) != 12 {
 		return nil, fmt.Errorf("internal: SubtreeSignatureLabel is %d bytes", len(SubtreeSignatureLabel))
 	}
@@ -68,7 +95,7 @@ func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byt
 	var b cryptobyte.Builder
 	b.AddBytes([]byte(SubtreeSignatureLabel))
 	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(cosignerName) })
-	b.AddUint64(0) // timestamp
+	b.AddUint64(timestamp)
 	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(logOrigin) })
 	b.AddUint64(subtree.Start)
 	b.AddUint64(subtree.End)
