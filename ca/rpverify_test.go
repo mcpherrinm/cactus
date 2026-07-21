@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -84,6 +85,7 @@ func TestRelyingPartyVerifyFromCACertificate(t *testing.T) {
 		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlgOID,
 		MinSerial:    0,
+		MaxSerial:    math.MaxUint64,
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	})
@@ -134,7 +136,7 @@ func TestRelyingPartyVerifyFromCACertificate(t *testing.T) {
 
 	// (2) Revoked range covering the serial must reject (§7.5).
 	revoked := cfg
-	revoked.RevokedRanges = cert.RevokedRanges{{Start: 0, End: serial + 1}}
+	revoked.RevokedRanges = cert.RevokedRanges{{Start: 0, End: serial}}
 	if err := cert.VerifyCertificate(der, revoked); !errors.Is(err, cert.ErrRevoked) {
 		t.Errorf("revoked serial: got %v, want ErrRevoked", err)
 	}

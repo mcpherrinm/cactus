@@ -26,9 +26,10 @@ import (
 	"github.com/letsencrypt/cactus/storage"
 )
 
-// TestEnhancementURLPending pins the draft §9 "enhancement" behaviour
+// TestEnhancementURLPending pins the draft §9.1 "acme-optional-alternate"
+// behaviour
 // before a covering landmark exists: the standalone cert advertises the
-// landmark-relative cert via rel="enhancement" at a URL pinned to the
+// landmark-relative cert via rel="acme-optional-alternate" at a URL pinned to the
 // landmark number it will be relative to, and that URL returns HTTP 202
 // (Accepted) + Retry-After — non-blocking, never the rel="alternate" +
 // 503 that stalled clients.
@@ -49,7 +50,7 @@ func TestEnhancementURLPending(t *testing.T) {
 	issuer, _ := ca.New(l, "32473.1", 1)
 
 	// TimeBetweenLandmarks is long: no landmark is allocated during the
-	// test, so the enhancement URL stays in the pending (202) state.
+	// test, so the optional-alternate URL stays in the pending (202) state.
 	seq, err := landmark.New(landmark.Config{
 		CAID: logID, LogNumber: 1,
 		TimeBetweenLandmarks: time.Hour, MaxCertLifetime: time.Hour,
@@ -95,22 +96,22 @@ func TestEnhancementURLPending(t *testing.T) {
 	}
 
 	// The standalone cert response advertises the landmark-relative cert
-	// as an enhancement, pinned to a landmark number.
+	// as an optional alternate, pinned to a landmark number.
 	certResp, _ := postAsGet(t, hsrv.URL, ord2.Certificate, acctKey, kid, "")
 	link := certResp.Header.Get("Link")
-	if !strings.Contains(link, `rel="enhancement"`) {
-		t.Errorf("cert Link missing rel=enhancement: %q", link)
+	if !strings.Contains(link, `rel="acme-optional-alternate"`) {
+		t.Errorf("cert Link missing rel=acme-optional-alternate: %q", link)
 	}
 	enh := linkURL(link)
 	if !strings.Contains(enh, "/landmark-relative/") {
-		t.Fatalf("enhancement URL not a landmark-relative URL: %q", enh)
+		t.Fatalf("optional-alternate URL not a landmark-relative URL: %q", enh)
 	}
 	// Index 0's covering landmark is the next one to be allocated (1).
 	if !strings.HasSuffix(enh, "/landmark-relative/1") {
-		t.Errorf("enhancement URL = %q, want it pinned to landmark 1", enh)
+		t.Errorf("optional-alternate URL = %q, want it pinned to landmark 1", enh)
 	}
 
-	// Before the landmark is allocated, the enhancement URL returns 202 +
+	// Before the landmark is allocated, the optional-alternate URL returns 202 +
 	// Retry-After.
 	r2, _ := postAsGet(t, hsrv.URL, enh, acctKey, kid, "")
 	if r2.StatusCode != http.StatusAccepted {

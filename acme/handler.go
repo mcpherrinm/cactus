@@ -54,7 +54,7 @@ type Config struct {
 	// "invalid" on failure. Optional.
 	OrdersByStatus cactusmetrics.CounterVec
 
-	// Landmarks, if non-nil, enables the rel="enhancement" URL
+	// Landmarks, if non-nil, enables the rel="acme-optional-alternate" URL
 	// /cert/{id}/landmark-relative/{number}: it returns the
 	// landmark-relative cert once the covering landmark exists, and HTTP
 	// 202 (Accepted) until then.
@@ -1006,12 +1006,13 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.issueNonce(w)
 	accept := r.Header.Get("Accept")
-	// draft §9 / trust-anchor-ids: advertise the landmark-relative cert
-	// as an "enhancement" — an optional substitute the client may also
-	// accept. Unlike rel="alternate" (which clients fetch eagerly and
-	// treat as load-bearing, so a 503+Retry-After could block issuance
-	// for the full interval), an enhancement is non-blocking: a
-	// not-yet-available one returns HTTP 202 and never stalls issuance.
+	// draft §9.1: advertise the landmark-relative cert as an
+	// "acme-optional-alternate" — an alternate chain that is explicitly
+	// optional. Unlike rel="alternate" (which clients fetch eagerly and
+	// treat as load-bearing, so an unavailable one can fail the whole
+	// transaction), an optional alternate is non-blocking: a
+	// not-yet-available one returns HTTP 202 + Retry-After, and clients
+	// SHOULD NOT block deployment on it.
 	//
 	// The URL is pinned to the number of the single landmark this cert is
 	// relative to, so it names an immutable resource: 202 until that
@@ -1019,7 +1020,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Landmarks != nil {
 		if idx, ok := s.certIndex(der); ok {
 			n := s.coveringLandmarkNumber(idx)
-			w.Header().Add("Link", fmt.Sprintf(`<%s>;rel="enhancement"`,
+			w.Header().Add("Link", fmt.Sprintf(`<%s>;rel="acme-optional-alternate"`,
 				s.urlFor(fmt.Sprintf("/cert/%s/landmark-relative/%d", id, n))))
 		}
 	}
@@ -1086,7 +1087,8 @@ func (s *Server) coveringLandmarkNumber(index uint64) uint64 {
 
 // handleCertLandmarkRelative serves the landmark-relative form of a cert,
 // pinned in the URL to the specific landmark number it is relative to
-// (draft-04 §6.3). It is the rel="enhancement" target advertised on the
+// (draft-04 §6.3). It is the rel="acme-optional-alternate" target
+// advertised on the
 // standalone cert response. Each entry belongs to exactly one landmark
 // (ContainingIndex), so there is exactly one valid number per cert and
 // the resource is immutable: HTTP 202 (Accepted) + Retry-After until that
@@ -1203,8 +1205,9 @@ func (s *Server) handleCertLandmarkRelative(w http.ResponseWriter, r *http.Reque
 	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// serveEnhancementPending is the §9 "not yet available" response for a
-// landmark-relative (enhancement) URL: HTTP 202 (Accepted) + Retry-After.
+// serveEnhancementPending is the §9.1 "not yet available" response for a
+// landmark-relative (optional alternate) URL: HTTP 202 (Accepted) +
+// Retry-After.
 // Clients treat it as non-blocking — retry later honouring Retry-After,
 // but never fail issuance or block deploying the standalone cert.
 //

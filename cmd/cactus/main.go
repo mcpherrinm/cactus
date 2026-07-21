@@ -18,6 +18,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -647,8 +648,10 @@ func die(format string, args ...any) {
 // buildCACertPEM builds the §5.5 CA certificate (an unsigned cert,
 // RFC 9925) representing this CA, as a PEM CERTIFICATE block. A relying
 // party derives its configuration from it via cert.ConfigFromCACertificate
-// (§7.1). minSerial is 0: cactus does not prune, so no serials are
-// initially revoked.
+// (§7.1). minSerial is 0 because cactus does not prune, and maxSerial is
+// 2^64-1 because cactus does not bound its log numbers, so no serials are
+// initially revoked. An operator wanting to bound a relying party's
+// monitoring scope would lower maxSerial (§7.5).
 func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) {
 	alg := cert.SignatureAlgorithm(sgn.Algorithm())
 	sigAlg, err := cert.SigAlgOID(alg)
@@ -666,6 +669,7 @@ func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) 
 		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlg,
 		MinSerial:    0,
+		MaxSerial:    math.MaxUint64,
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.AddDate(10, 0, 0),
 	})
