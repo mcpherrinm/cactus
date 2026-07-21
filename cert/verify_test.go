@@ -80,7 +80,8 @@ func buildTBSWithTail(tailA, tailB []byte) []byte {
 	var body []byte
 	body = append(body, tlv(0xa0, tlv(0x02, []byte{0x02}))...)                        // version [0] INTEGER 2
 	body = append(body, tlv(0x02, []byte{0x01, 0, 0, 0, 0, 0, 0x05})...)              // serialNumber
-	body = append(body, tlv(0x30, tlv(0x06, []byte{0x2a}))...)                        // signature AlgId
+	algID, _ := asn1.Marshal(struct{ Algorithm asn1.ObjectIdentifier }{OIDAlgMTCProof})
+	body = append(body, algID...)                                                     // signature AlgId (id-alg-mtcProof)
 	body = append(body, tlv(0x30, nil)...)                                            // issuer
 	utc := tlv(0x17, []byte("250101000000Z"))                                         // Time
 	body = append(body, tlv(0x30, append(append([]byte{}, utc...), utc...))...)       // validity
