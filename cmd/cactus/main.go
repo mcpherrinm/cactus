@@ -44,9 +44,11 @@ import (
 	cactuslog "github.com/letsencrypt/cactus/log"
 	"github.com/letsencrypt/cactus/logging"
 	"github.com/letsencrypt/cactus/metrics"
+	"github.com/letsencrypt/cactus/mirrorpush"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tile"
+	"github.com/letsencrypt/cactus/tlogx"
 )
 
 // pemDecode is just pem.Decode kept here so the file can keep the
@@ -87,6 +89,70 @@ func buildMirrorEndpoints(mirrors []config.MirrorEndpointConfig, dataDir string)
 				PublicKey: key,
 			},
 		})
+	}
+	return out, nil
+}
+
+// logSource adapts *cactuslog.Log to the mirrorpush.Source interface.
+// The names differ deliberately: mirrorpush needs both proof systems
+// side by side and spells out which is which, whereas the log's own
+// ConsistencyProof has always meant the MTC §4.4 subtree proof.
+type logSource struct{ l *cactuslog.Log }
+
+func (s logSource) Checkpoint() (uint64, tlogx.Hash, []byte) {
+	cp := s.l.CurrentCheckpoint()
+	return cp.Size, cp.Root, cp.SignedNote
+}
+
+func (s logSource) Entries(start, end uint64) ([][]byte, error) {
+	return s.l.Entries(start, end)
+}
+
+func (s logSource) SubtreeConsistencyProof(start, end, treeSize uint64) ([]tlogx.Hash, error) {
+	return s.l.ConsistencyProof(start, end, treeSize)
+}
+
+func (s logSource) TreeConsistencyProof(oldSize, newSize uint64) ([]tlogx.Hash, error) {
+	return s.l.TreeConsistencyProof(oldSize, newSize)
+}
+
+// buildPushClients converts the mirror_push target list into
+// mirrorpush.Client values, loading each mirror's public key from its
+// PEM file (resolved relative to dataDir).
+func buildPushClients(
+	cfg config.Config,
+	logID cert.TrustAnchorID,
+	src mirrorpush.Source,
+	fsys storage.FS,
+	logger *slog.Logger,
+) ([]*mirrorpush.Client, error) {
+	httpClient := &http.Client{Timeout: cfg.MirrorPush.RequestTimeout()}
+	out := make([]*mirrorpush.Client, 0, len(cfg.MirrorPush.Targets))
+	for i, t := range cfg.MirrorPush.Targets {
+		alg, err := signer.ParseAlgorithm(t.Algorithm)
+		if err != nil {
+			return nil, fmt.Errorf("mirror_push.targets[%d]: %w", i, err)
+		}
+		key, err := loadPEMSPKI(filepath.Join(cfg.DataDir, t.PublicKeyPath))
+		if err != nil {
+			return nil, fmt.Errorf("mirror_push.targets[%d] public_key_path: %w", i, err)
+		}
+		c, err := mirrorpush.New(logID, mirrorpush.Target{
+			SubmissionPrefix: t.SubmissionPrefix,
+			MonitoringPrefix: t.MonitoringPrefix,
+			Key: cert.CosignerKey{
+				ID:        cert.TrustAnchorID(t.ID),
+				Algorithm: signerAlgToCertAlg(alg),
+				PublicKey: key,
+			},
+			HTTPClient:  httpClient,
+			Timeout:     cfg.MirrorPush.RequestTimeout(),
+			DisableGzip: cfg.MirrorPush.DisableGzip,
+		}, src, fsys, logger)
+		if err != nil {
+			return nil, fmt.Errorf("mirror_push.targets[%d]: %w", i, err)
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -206,6 +272,13 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// needs `l` to compute consistency proofs, so we forward-declare
 	// via a pointer the closure captures.
 	var l *cactuslog.Log
+	// pushPool is the c2sp.org/tlog-mirror push client set. It is
+	// likewise assigned after the log exists (its clients read from
+	// it), and the closures below capture the variable. A nil *Pool is
+	// inert, so the initial flush that log.New performs — which fires
+	// OnFlush before this is set — and any deployment with no
+	// mirror_push targets both behave exactly as before.
+	var pushPool *mirrorpush.Pool
 	logCfg := cactuslog.Config{
 		LogID:       logID,
 		CosignerID:  caID,
@@ -221,6 +294,14 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		},
 	}
 	logCfg.OnFlush = func(treeSize uint64) {
+		// Push before allocating a landmark: a landmark is only useful
+		// once mirrors can serve the range it names, and a push failure
+		// must not stop the landmark from being allocated either way.
+		if pushPool != nil {
+			pushCtx, cancel := context.WithTimeout(ctx, cfg.MirrorPush.PushTimeout())
+			pushPool.Push(pushCtx)
+			cancel()
+		}
 		lm, ok, err := landmarkSeq.Append(ctx, treeSize, time.Now())
 		if err != nil {
 			logger.Error("landmark append", "err", err)
@@ -237,7 +318,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("ca_cosigner_quorum: %w", err)
 		}
 		logCfg.WaitForCosigners = 1 + cfg.CACosignerQuorum.MinSignatures
-		logCfg.MirrorRequester = func(ctx context.Context, st *cert.MTCSubtree, caSig cert.MTCSignature) ([]cert.MTCSignature, error) {
+		logCfg.MirrorRequester = func(ctx context.Context, st *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
 			deadline := time.Now().Add(cfg.CACosignerQuorum.RetryDeadline())
 			sleep := func(d time.Duration) error {
 				select {
@@ -263,16 +344,15 @@ func run(cfg config.Config, logger *slog.Logger) error {
 					return nil, err
 				}
 				req := &cert.SubtreeRequest{
-					Subtree:          st,
-					CACheckpointBody: cp.SignedNote,
+					Subtree: st,
+					// The reference checkpoint must carry the responding
+					// mirror's own cosignature or it answers 403, and the
+					// only source of one is an add-entries 200. Fold in
+					// whatever the push pool has collected for this exact
+					// size; with no push targets this returns the CA-signed
+					// note unchanged.
+					CACheckpointBody: pushPool.CheckpointWithCosignatures(cp.SignedNote, cp.Size),
 					ConsistencyProof: proof,
-					// Include the CA's own subtree cosignature so mirrors
-					// that enforce the tlog-witness DoS gate
-					// (require_ca_signature_on_subtree, on by default)
-					// will honour the request.
-					CASignature:   &caSig,
-					CACosignerID:  caID,
-					CACosignerKey: sgn.PublicKey(),
 				}
 				subCtx, cancel := context.WithTimeout(ctx, cfg.CACosignerQuorum.RequestTimeout())
 				sigs, err := cert.RequestCosignaturesWithMetrics(
@@ -306,6 +386,20 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	}
 	defer l.Stop()
 	logger.Info("log ready", "size", l.CurrentCheckpoint().Size)
+
+	// c2sp.org/tlog-mirror push clients. Built after the log because
+	// they read entries and proofs from it.
+	if len(cfg.MirrorPush.Targets) > 0 {
+		clients, err := buildPushClients(cfg, logID, logSource{l}, fsRoot, logger)
+		if err != nil {
+			return fmt.Errorf("mirror_push: %w", err)
+		}
+		pushPool = mirrorpush.NewPool(clients, logger)
+		logger.Info("mirror push enabled",
+			"targets", len(clients),
+			"request_timeout", cfg.MirrorPush.RequestTimeout(),
+			"push_timeout", cfg.MirrorPush.PushTimeout())
+	}
 
 	// CA issuer.
 	issuer, err := ca.New(l, cfg.CACosigner.ID, cfg.Log.Number)

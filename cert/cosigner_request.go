@@ -49,28 +49,29 @@ type SubtreeRequest struct {
 	// end, hash). The mirrors will sign CosignedMessage for
 	// these values.
 	Subtree *MTCSubtree
-	// CACheckpointBody is the bytes of a signed-note checkpoint the
-	// CA is presenting (typically the CA's own latest signed-note).
-	// In stateful mode mirrors use it only to compare (size, root)
-	// to their own verified state; the signatures inside are
-	// inspected by mirrors that run in stateless mode.
+	// CACheckpointBody is the bytes of the *reference checkpoint*: a
+	// signed-note checkpoint that MUST already carry a cosignature
+	// from the responding mirror's own key.
+	//
+	// c2sp.org/tlog-witness sign-subtree: "The witness MUST verify that
+	// the checkpoint includes a valid cosignature from one of its own
+	// keys. If the witness can't verify the checkpoint, it MUST respond
+	// with a 403 Forbidden." The CA's own signature alone is therefore
+	// not enough — a strict mirror rejects it.
+	//
+	// A mirror's cosignature over a checkpoint is only ever produced by
+	// the c2sp.org/tlog-mirror add-entries 200 response, so the caller
+	// has to push entries first and feed the resulting cosigned
+	// checkpoint back in here. See package mirrorpush, whose
+	// Pool.CheckpointWithCosignatures does exactly that. Because a
+	// signed note may carry many signature lines and each mirror
+	// ignores lines that aren't its own, one body with every mirror's
+	// cosignature appended satisfies all of them at once — which is
+	// what lets this function keep fanning a single body out.
 	CACheckpointBody []byte
 	// ConsistencyProof is the §4.4 subtree consistency proof from
 	// (start, end, hash) up to the checkpoint root.
 	ConsistencyProof []tlogx.Hash
-	// CASignature, if non-nil, is included as a subtree cosignature
-	// line (c2sp.org/tlog-witness sign-subtree DoS protection). Mirrors
-	// with `RequireCASignatureOnSubtree` set will only honour the
-	// request if this is present and verifies. It MUST be an ML-DSA-44
-	// cosignature.
-	CASignature *MTCSignature
-	// CACosignerID is the trust anchor ID of the CA cosigner that
-	// produced CASignature. Used only when CASignature != nil.
-	CACosignerID TrustAnchorID
-	// CACosignerKey is the raw ML-DSA-44 public key of the CA cosigner
-	// that produced CASignature, needed to derive the c2sp signed-note
-	// key ID. Used only when CASignature != nil.
-	CACosignerKey []byte
 }
 
 // RequestCosignatures fans the request out to all configured mirrors
@@ -266,11 +267,18 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 //
 //	subtree <start> <end>
 //	<base64 subtree hash>
-//	[— <CA key> <base64(keyID || timestamped_signature)>]   (0..8 subtree cosignature lines)
 //	<base64 consistency-proof hash>        (0..63 lines)
 //	...
 //	<empty line>
 //	<reference checkpoint, a full signed checkpoint>
+//
+// Note there is no CA cosignature line. An earlier revision of
+// c2sp.org/tlog-witness allowed the client to prepend a subtree
+// cosignature of its own as a DoS gate; C2SP has since deleted it from
+// the grammar, which now runs subtree-range / subtree-hash / proof
+// lines / blank / checkpoint. A strict mirror parses the first
+// non-"subtree" line as base64 proof hash, so emitting a "— ..." line
+// there is a 400.
 func buildSignSubtreeBody(req *SubtreeRequest) ([]byte, error) {
 	if req == nil || req.Subtree == nil {
 		return nil, errors.New("nil request")
@@ -286,17 +294,6 @@ func buildSignSubtreeBody(req *SubtreeRequest) ([]byte, error) {
 	// Subtree range + hash.
 	fmt.Fprintf(&b, "subtree %d %d\n", req.Subtree.Start, req.Subtree.End)
 	b.WriteString(base64.StdEncoding.EncodeToString(req.Subtree.Hash[:]) + "\n")
-
-	// Optional subtree cosignature line (DoS protection). ML-DSA-44 only.
-	if req.CASignature != nil {
-		caKey := OIDName(req.CACosignerID)
-		keyID, err := CosignatureKeyID(caKey, AlgMLDSA44, req.CACosignerKey)
-		if err != nil {
-			return nil, fmt.Errorf("cert: CA subtree cosignature key ID: %w", err)
-		}
-		blob := append(append([]byte(nil), keyID[:]...), MarshalTimestampedSignature(0, req.CASignature.Signature)...)
-		fmt.Fprintf(&b, "— %s %s\n", caKey, base64.StdEncoding.EncodeToString(blob))
-	}
 
 	// Consistency proof lines: each one base64 hash on its own line.
 	for _, h := range req.ConsistencyProof {

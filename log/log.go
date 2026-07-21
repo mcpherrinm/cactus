@@ -331,6 +331,57 @@ func (l *Log) ConsistencyProof(start, end, treeSize uint64) ([]tlogx.Hash, error
 	)
 }
 
+// Entries returns the raw log entries with indices in [start, end), in
+// order. It reads them back out of the data tiles rather than keeping a
+// second in-memory copy.
+//
+// Used by the c2sp.org/tlog-mirror push client, which must re-transmit
+// already-sequenced entries to a mirror byte-for-byte so the mirror can
+// recompute the same leaf hashes.
+func (l *Log) Entries(start, end uint64) ([][]byte, error) {
+	// The tile writer is not goroutine-safe and is mutated by flush
+	// under l.mu, so read under the same lock.
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.tw.ReadEntries(start, end)
+}
+
+// TreeConsistencyProof returns the RFC 6962 §2.1.2 *tree* consistency
+// proof from a tree of size oldSize to one of size newSize.
+//
+// This is deliberately a different animal from ConsistencyProof above,
+// which returns the MTC §4.4 *subtree* consistency proof. The two are
+// not interchangeable and the protocols pick one each:
+//
+//   - c2sp.org/tlog-witness add-checkpoint (and therefore
+//     c2sp.org/tlog-mirror add-checkpoint) wants this RFC 6962 proof.
+//   - c2sp.org/tlog-witness sign-subtree and the per-package proofs in
+//     tlog-mirror add-entries want the §4.4 subtree proof.
+//
+// An oldSize of 0 has an empty proof: the empty tree is consistent with
+// every tree, so tlog-witness requires the proof to be empty in that
+// case (and rejects a non-empty one with a 422).
+func (l *Log) TreeConsistencyProof(oldSize, newSize uint64) ([]tlogx.Hash, error) {
+	if oldSize > newSize {
+		return nil, fmt.Errorf("log: old size %d > new size %d", oldSize, newSize)
+	}
+	if oldSize == 0 {
+		return nil, nil
+	}
+	l.mu.Lock()
+	hashes := l.tw.SnapshotHashes()
+	l.mu.Unlock()
+	proof, err := tlog.ProveTree(int64(newSize), int64(oldSize), hashesAsTlog(hashes))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tlogx.Hash, len(proof))
+	for i, h := range proof {
+		out[i] = tlogx.Hash(h)
+	}
+	return out, nil
+}
+
 // CurrentCheckpoint returns the latest signed checkpoint, or zero-value
 // if none has been published yet.
 func (l *Log) CurrentCheckpoint() Checkpoint {

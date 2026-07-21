@@ -16,6 +16,7 @@ type RedactedConfig struct {
 	Log              LogConfig        `json:"log"`
 	CACosigner       RedactedCosigner `json:"ca_cosigner"`
 	CACosignerQuorum RedactedQuorum   `json:"ca_cosigner_quorum"`
+	MirrorPush       RedactedPush     `json:"mirror_push"`
 	ACME             RedactedACME     `json:"acme"`
 	Monitoring       RedactedListener `json:"monitoring"`
 	Landmarks        LandmarkConfig   `json:"landmarks"`
@@ -56,6 +57,25 @@ type RedactedMirrorEndpoint struct {
 	Algorithm string `json:"algorithm"`
 }
 
+// RedactedPush mirrors MirrorPushConfig with per-target public key
+// paths dropped.
+type RedactedPush struct {
+	Targets          []RedactedPushTarget `json:"targets"`
+	RequestTimeoutMS int                  `json:"request_timeout_ms"`
+	PushTimeoutMS    int                  `json:"push_timeout_ms"`
+	DisableGzip      bool                 `json:"disable_gzip"`
+}
+
+// RedactedPushTarget drops MirrorPushTarget.PublicKeyPath. The two URL
+// prefixes are kept: they are public endpoints, and publishing which
+// mirrors a log replicates to is the point of the exercise.
+type RedactedPushTarget struct {
+	ID               string `json:"id"`
+	SubmissionPrefix string `json:"submission_prefix"`
+	MonitoringPrefix string `json:"monitoring_prefix"`
+	Algorithm        string `json:"algorithm"`
+}
+
 // Redacted returns the public-safe view of c. See RedactedConfig.
 func (c Config) Redacted() RedactedConfig {
 	rc := RedactedConfig{
@@ -71,6 +91,11 @@ func (c Config) Redacted() RedactedConfig {
 			ExternalURL:   c.ACME.ExternalURL,
 			ChallengeMode: c.ACME.ChallengeMode,
 		},
+		MirrorPush: RedactedPush{
+			RequestTimeoutMS: c.MirrorPush.RequestTimeoutMS,
+			PushTimeoutMS:    c.MirrorPush.PushTimeoutMS,
+			DisableGzip:      c.MirrorPush.DisableGzip,
+		},
 		Monitoring: RedactedListener{ExternalURL: c.Monitoring.ExternalURL},
 		Landmarks:  c.Landmarks,
 		LogLevel:   c.LogLevel,
@@ -80,6 +105,14 @@ func (c Config) Redacted() RedactedConfig {
 			ID:        m.ID,
 			URL:       m.URL,
 			Algorithm: m.Algorithm,
+		})
+	}
+	for _, t := range c.MirrorPush.Targets {
+		rc.MirrorPush.Targets = append(rc.MirrorPush.Targets, RedactedPushTarget{
+			ID:               t.ID,
+			SubmissionPrefix: t.SubmissionPrefix,
+			MonitoringPrefix: t.MonitoringPrefix,
+			Algorithm:        t.Algorithm,
 		})
 	}
 	return rc
