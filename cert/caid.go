@@ -2,7 +2,7 @@ package cert
 
 import "fmt"
 
-// This file implements the draft-04 §5.1 Certification Authority
+// This file implements the draft-05 §5.1 Certification Authority
 // identifier model. A CA has a single CA ID (a trust anchor ID). All
 // other identifiers — log IDs, landmark IDs, landmark group IDs — are
 // derived from it by appending OID components. cactus stores trust
@@ -27,7 +27,7 @@ func LogID(caID TrustAnchorID, logNumber uint16) (TrustAnchorID, error) {
 }
 
 // LandmarkID derives the trust anchor ID of a single landmark per
-// §6.3.1 / §8.2: CA-ID ‖ 1 ‖ logNumber ‖ landmarkNumber.
+// §6.4.1 / §8.2: CA-ID ‖ 1 ‖ logNumber ‖ landmarkNumber.
 func LandmarkID(caID TrustAnchorID, logNumber uint16, landmarkNumber uint64) TrustAnchorID {
 	return TrustAnchorID(fmt.Sprintf("%s.1.%d.%d", string(caID), logNumber, landmarkNumber))
 }
@@ -40,11 +40,11 @@ func LandmarkGroupID(caID TrustAnchorID, logNumber uint16, landmarkNumber uint64
 }
 
 // serialIndexBits is the width of the entry-index portion of a serial
-// number (§6.1). The log number occupies the bits above it.
+// number (§6.2). The log number occupies the bits above it.
 const serialIndexBits = 48
 
 // ComposeSerial builds a certificate serial number from a log number
-// and an entry index per §6.1: serial = (logNumber << 48) | index.
+// and an entry index per §6.2: serial = (logNumber << 48) | index.
 // index MUST fit in 48 bits.
 func ComposeSerial(logNumber uint16, index uint64) (uint64, error) {
 	if index > maxUint48 {
@@ -54,7 +54,7 @@ func ComposeSerial(logNumber uint16, index uint64) (uint64, error) {
 }
 
 // SplitSerial decomposes a serial number into its log number and entry
-// index per §6.1. It rejects a zero log number (§7.2).
+// index per §6.2. It rejects a zero log number (§7.2).
 func SplitSerial(serial uint64) (logNumber uint16, index uint64, err error) {
 	logNumber = uint16(serial >> serialIndexBits)
 	index = serial & maxUint48

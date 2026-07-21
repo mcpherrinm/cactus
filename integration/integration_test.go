@@ -386,7 +386,7 @@ func verifyAgainstLog(der []byte, s *stack) error {
 	if err != nil {
 		return err
 	}
-	// draft-04 §6.1/§7.2: serial = (log_number << 48) | index.
+	// draft-05 §6.2/§7.2: serial = (log_number << 48) | index.
 	_, index, err := cert.SplitSerial(serial)
 	if err != nil {
 		return err

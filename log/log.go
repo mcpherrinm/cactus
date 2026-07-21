@@ -30,7 +30,7 @@ import (
 )
 
 // Issued is the result of Wait: everything the CA needs to assemble a
-// standalone certificate (§6.2) for this entry.
+// standalone certificate (§6.3) for this entry.
 type Issued struct {
 	Index          uint64
 	Subtree        cert.MTCSubtree
@@ -59,7 +59,7 @@ type Config struct {
 
 	// OnFlush, if set, is invoked after each successful flush with
 	// the *new* tree size. Used by the landmark allocator to call
-	// `seq.Append(treeSize, now)` per §6.3.2. Runs in its own
+	// `seq.Append(treeSize, now)` per §6.4.2. Runs in its own
 	// goroutine so a slow callback can't stall the sequencer.
 	OnFlush func(treeSize uint64)
 
@@ -160,10 +160,10 @@ type signedSubtree struct {
 const subtreeRetention = 10 * time.Minute
 
 // New constructs a Log and starts its sequencing goroutine. A fresh log
-// starts empty; the first appended entry is assigned index 0. draft-04
+// starts empty; the first appended entry is assigned index 0. draft-05
 // §5.2.1 allows any index (including 0) to be a real entry and no longer
 // reserves index 0 as a null_entry — zero serial numbers are instead
-// prevented by the log number being >= 1 (§6.1).
+// prevented by the log number being >= 1 (§6.2).
 func New(ctx context.Context, cfg Config) (*Log, error) {
 	if cfg.Signer == nil {
 		return nil, errors.New("log: cfg.Signer required")
@@ -227,7 +227,7 @@ func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64,
 	}
 	// Index assignment: the next index is the current tree size plus the
 	// number of entries already queued in the pool. The first entry of a
-	// fresh log gets index 0 (draft-04 §5.2.1).
+	// fresh log gets index 0 (draft-05 §5.2.1).
 	// But we don't know treeSize here without calling tw which is single-writer.
 	// We assign indices when the sequencer flushes; for now we just queue
 	// and return a "tentative" index based on queue position. That's fine

@@ -90,7 +90,7 @@ type TimestampRule int
 const (
 	// TimestampZero is the sign-subtree rule: "If the cosignature
 	// format supports timestamps, the timestamp MUST be zero." It is
-	// also what MTC §6.1 requires of the cosignatures embedded in an
+	// also what MTC §6.2 requires of the cosignatures embedded in an
 	// MTCProof, which is precisely why a sign-subtree response can be
 	// dropped into a certificate unmodified.
 	TimestampZero TimestampRule = iota

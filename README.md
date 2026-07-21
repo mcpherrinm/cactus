@@ -44,12 +44,12 @@ operate it, and where to look in the code.
 - Maintains a CA-operated **issuance log** with on-disk tiles, signed
   checkpoints (c2sp signed-note format), and signed §4.5 covering
   subtrees.
-- Issues **standalone X.509 certificates** (§6.2) whose
+- Issues **standalone X.509 certificates** (§6.3) whose
   `signatureAlgorithm` is `id-alg-mtcProof` and whose `signatureValue`
   body is an `MTCProof` blob carrying an inclusion proof + cosigner
   signatures.
-- Supports **landmark-relative certificates** (§6.3). Allocates
-  landmarks per §6.3.2 and serves a `/landmarks` endpoint per §6.3.1.
+- Supports **landmark-relative certificates** (§6.4). Allocates
+  landmarks per §6.4.2 and serves a `/landmarks` endpoint per §6.4.1.
   The standalone cert advertises the signature-free landmark-relative
   form as a `rel="acme-optional-alternate"` URL (an optional, non-blocking substitute
   that returns HTTP 202 until a covering landmark exists). The same form
@@ -309,12 +309,12 @@ valid; for tests) or `http-01` (real fetch of
 
 Landmarks are always on; this block only tunes the cadence and the
 max cert lifetime (both optional, with the defaults shown). The
-§6.3.1 list is always served at `/landmarks`. Landmark trust anchor
+§6.4.1 list is always served at `/landmarks`. Landmark trust anchor
 IDs are derived from the CA ID and log number (`CA-ID.1.logNumber.L`,
-§6.3.1) — there's no separate `base_id`. Defaults: 1-hour landmark
+§6.4.1) — there's no separate `base_id`. Defaults: 1-hour landmark
 cadence, 7-day max cert lifetime ⇒ `max_active_landmarks =
 ceil(168) + 1 = 169` ⇒ ~10 KiB of relying party state per CA. See
-§6.3.1 of the draft.
+§6.4.1 of the draft.
 
 ### `ca_cosigner_quorum` (optional, CA-side mirror requests)
 

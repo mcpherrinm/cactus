@@ -9,7 +9,7 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
-// This file implements the draft-04 §7 relying-party side: deriving a
+// This file implements the draft-05 §7 relying-party side: deriving a
 // relying party's configuration from a CA certificate (§7.1) and the
 // full certificate-signature verification procedure (§7.2), including
 // revoked-range (§7.5) and trusted-subtree (§7.4) handling.

@@ -14,13 +14,13 @@ import (
 // `opaque TrustAnchorID<1..2^8-1>`. cactus stores it in its canonical
 // relative-OID ASCII form (e.g. "32473.1"); see trustanchorid.go for
 // the DN, "oid/" name, and binary (wire) representations derived from
-// it. On the wire (MTCProof.cosigner_id, §6.1) the binary form from
+// it. On the wire (MTCProof.cosigner_id, §6.2) the binary form from
 // TrustAnchorID.Binary is used; in memory cactus keeps the relative
 // ASCII so cosigner IDs compare and log identically everywhere else.
 type TrustAnchorID []byte
 
 // MTCSubtree is an internal carrier for the (log ID, [start, end),
-// subtree hash) tuple a cosigner signs. In draft-04 there is no
+// subtree hash) tuple a cosigner signs. In draft-05 there is no
 // standalone MTCSubtree wire struct; these fields are folded into the
 // CosignedMessage (§5.3.1) produced by MarshalSignatureInput.
 type MTCSubtree struct {
@@ -42,7 +42,7 @@ func OIDName(id TrustAnchorID) string {
 
 // MarshalSignatureInput returns the bytes a cosigner signs: the §5.3.1
 // CosignedMessage for the given subtree, with timestamp = 0 — the value
-// required for Merkle Tree Certificate proofs (§6.1) and, equivalently,
+// required for Merkle Tree Certificate proofs (§6.2) and, equivalently,
 // for c2sp.org/tlog-witness `sign-subtree` responses, whose timestamp
 // "MUST be zero".
 //
@@ -69,7 +69,7 @@ func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byt
 //
 // The two callers want opposite things and the spec is strict about it:
 //
-//   - Subtree cosignatures (MTC §6.1, tlog-witness `sign-subtree`) MUST
+//   - Subtree cosignatures (MTC §6.2, tlog-witness `sign-subtree`) MUST
 //     carry timestamp 0, and start/end are the subtree's own bounds.
 //   - Checkpoint cosignatures (tlog-witness `add-checkpoint`,
 //     tlog-mirror `add-entries`) MUST carry a non-zero timestamp — it is
@@ -103,7 +103,7 @@ func MarshalSignatureInputAt(cosignerID TrustAnchorID, subtree *MTCSubtree, time
 	return b.Bytes()
 }
 
-// MTCSignature mirrors the §6.1 struct:
+// MTCSignature mirrors the §6.2 struct:
 //
 //	struct {
 //	    TrustAnchorID cosigner_id;
@@ -114,7 +114,7 @@ type MTCSignature struct {
 	Signature  []byte
 }
 
-// MTCProof is the §6.1 signatureValue contents — emitted raw into the
+// MTCProof is the §6.2 signatureValue contents — emitted raw into the
 // X.509 BIT STRING with no ASN.1 wrapping:
 //
 //	struct {
@@ -125,7 +125,7 @@ type MTCSignature struct {
 //	    MTCSignature signatures<0..2^16-1>;
 //	} MTCProof;
 //
-// Per §6.1, `inclusion_proof<0..2^16-1>` is a length-prefixed byte
+// Per §6.2, `inclusion_proof<0..2^16-1>` is a length-prefixed byte
 // vector containing concatenated HashValues; the verifier slices into
 // HASH_SIZE pieces. `extensions` MUST equal the log entry's extensions
 // (§5.2.1); `start`/`end` are 48-bit big-endian, capping the log index
@@ -161,7 +161,7 @@ func readUint48(s *cryptobyte.String, v *uint64) bool {
 
 // MarshalTLS encodes the proof in the on-wire format. The output is
 // what gets placed (verbatim, no further ASN.1) into the certificate's
-// signatureValue BIT STRING per §6.1.
+// signatureValue BIT STRING per §6.2.
 func (p *MTCProof) MarshalTLS() ([]byte, error) {
 	if p.Start > maxUint48 || p.End > maxUint48 {
 		return nil, fmt.Errorf("MTCProof: start/end exceed uint48 (%d, %d)", p.Start, p.End)
@@ -195,7 +195,7 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 	}
 
 	// signatures<0..2^16-1>: outer length-prefix wraps the concatenated
-	// MTCSignature encodings. Per §6.1 each cosigner_id is the trust
+	// MTCSignature encodings. Per §6.2 each cosigner_id is the trust
 	// anchor ID's *binary* representation (TAI §3), and the list MUST be
 	// sorted by cosigner_id (shorter byte strings first, then
 	// lexicographic) with no duplicates. We convert the in-memory
@@ -287,7 +287,7 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 		if len(idBytes) == 0 {
 			return nil, errors.New("MTCProof: empty cosigner_id")
 		}
-		// §6.1 ordering/uniqueness is checked over the binary cosigner_id
+		// §6.2 ordering/uniqueness is checked over the binary cosigner_id
 		// bytes as read from the wire.
 		if prevBin != nil {
 			if string(prevBin) == string(idBytes) {
@@ -319,7 +319,7 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 	return &p, nil
 }
 
-// cosignerIDLess orders cosigner_id byte strings as §6.1 requires:
+// cosignerIDLess orders cosigner_id byte strings as §6.2 requires:
 // shorter strings sort first; equal-length strings sort
 // lexicographically. It operates on the binary cosigner_id bytes.
 func cosignerIDLess(a, b []byte) bool {

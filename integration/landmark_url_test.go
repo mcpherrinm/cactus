@@ -20,7 +20,7 @@ import (
 
 // TestLandmarkURLFormat brings up a tile server with landmark mode
 // enabled, allocates several landmarks, hits /landmarks over HTTP,
-// parses the §6.3.1 body, and asserts the invariants.
+// parses the §6.4.1 body, and asserts the invariants.
 func TestLandmarkURLFormat(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := storage.New(dir)

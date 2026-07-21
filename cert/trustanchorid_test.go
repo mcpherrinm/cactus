@@ -7,8 +7,8 @@ import (
 )
 
 // TestTrustAnchorIDBinary pins the binary (RELATIVE-OID) representation
-// used on the wire for MTCProof.cosigner_id (§6.1) and the
-// trust_anchor_id property (TAI §7). draft-04 §5.1 gives the ground
+// used on the wire for MTCProof.cosigner_id (§6.2) and the
+// trust_anchor_id property (TAI §7). draft-05 §5.1 gives the ground
 // truth: trust anchor ID 32473.1 has RELATIVE-OID content octets
 // 81 fd 59 01. (Regression for review finding 1.)
 func TestTrustAnchorIDBinary(t *testing.T) {

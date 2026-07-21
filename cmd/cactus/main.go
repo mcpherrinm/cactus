@@ -234,7 +234,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// Metrics first so the log and ACME server can register.
 	m := metrics.New()
 
-	// draft-04 identity model: the CA cosigner ID is the CA ID (§5.4),
+	// draft-05 identity model: the CA cosigner ID is the CA ID (§5.4),
 	// and the issuance log ID is derived as CA-ID.0.<log.number> (§5.2).
 	caID := cert.TrustAnchorID(cfg.CACosigner.ID)
 	logID, err := cert.LogID(caID, cfg.Log.Number)

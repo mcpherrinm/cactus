@@ -25,7 +25,7 @@ var (
 	oidExtBasicConstraints = asn1.ObjectIdentifier{2, 5, 29, 19}
 )
 
-// This file implements the draft-04 §5.5 "Representing Certification
+// This file implements the draft-05 §5.5 "Representing Certification
 // Authorities" X.509 extension and the relying-party configuration a
 // CA certificate carries (§7.1).
 

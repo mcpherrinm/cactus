@@ -18,7 +18,7 @@ var (
 	OIDRDNATrustAnchorID = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 1}
 
 	// OIDExtMTCCertificationAuthority — the experimental
-	// id-pe-mtcCertificationAuthority arc (draft-04 §5.5 / §13.3). The
+	// id-pe-mtcCertificationAuthority arc (draft-05 §5.5 / §13.3). The
 	// IANA-track value is {iso(1) ... pkix(7) pe(1) TBD}; until assignment
 	// cactus uses this private-enterprise placeholder.
 	OIDExtMTCCertificationAuthority = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 2}

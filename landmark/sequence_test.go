@@ -31,7 +31,7 @@ func newTestSeq(t *testing.T) (*Sequence, storage.FS, time.Time) {
 }
 
 // TestTimeUntilNextLandmark checks the Retry-After source: the remainder
-// of the §6.3.2 interval since the most recent landmark, floored at zero,
+// of the §6.4.2 interval since the most recent landmark, floored at zero,
 // and reset when a new landmark is allocated.
 func TestTimeUntilNextLandmark(t *testing.T) {
 	s, _, t0 := newTestSeq(t) // 1h interval, seed landmark 0 at t0
@@ -56,7 +56,7 @@ func TestTimeUntilNextLandmark(t *testing.T) {
 	}
 }
 
-// TestMaxActiveMatchesDraftFormula pins §6.3.2's formula:
+// TestMaxActiveMatchesDraftFormula pins §6.4.2's formula:
 // max_active_landmarks = ceil(max_cert_lifetime / time_between_landmarks) + 1.
 // 7-day lifetime, 1-hour interval → 169.
 func TestMaxActiveMatchesDraftFormula(t *testing.T) {
@@ -79,7 +79,7 @@ func TestMaxActiveMatchesDraftFormula(t *testing.T) {
 }
 
 // TestNewSeedsLandmarkZero confirms a fresh sequence starts with one
-// landmark at (number=0, treeSize=0), per §6.3.1.
+// landmark at (number=0, treeSize=0), per §6.4.1.
 func TestNewSeedsLandmarkZero(t *testing.T) {
 	s, _, _ := newTestSeq(t)
 	all := s.All()
@@ -91,7 +91,7 @@ func TestNewSeedsLandmarkZero(t *testing.T) {
 	}
 }
 
-// TestAppendRespectsTimeBetween confirms the §6.3.2 step-2 condition:
+// TestAppendRespectsTimeBetween confirms the §6.4.2 step-2 condition:
 // at most once per TimeBetweenLandmarks.
 func TestAppendRespectsTimeBetween(t *testing.T) {
 	s, _, t0 := newTestSeq(t)
@@ -124,7 +124,7 @@ func TestAppendRespectsTimeBetween(t *testing.T) {
 	}
 }
 
-// TestAppendRequiresGrowth confirms the §6.3.1 monotonic-growth rule:
+// TestAppendRequiresGrowth confirms the §6.4.1 monotonic-growth rule:
 // new landmark MUST have strictly greater tree size.
 func TestAppendRequiresGrowth(t *testing.T) {
 	s, _, t0 := newTestSeq(t)
@@ -195,7 +195,7 @@ func TestRestartResume(t *testing.T) {
 	}
 }
 
-// TestActiveDescending pins §6.3.1's ordering: most-recent-first, capped at MaxActive.
+// TestActiveDescending pins §6.4.1's ordering: most-recent-first, capped at MaxActive.
 func TestActiveDescending(t *testing.T) {
 	cfg := Config{
 		CAID:                 cert.TrustAnchorID("32473.1"),
@@ -282,7 +282,7 @@ func TestContainingIndex(t *testing.T) {
 	}
 }
 
-// TestLandmarkSubtrees pins §6.3.1's covering-subtree definition: for a
+// TestLandmarkSubtrees pins §6.4.1's covering-subtree definition: for a
 // landmark l, returns the §4.5 covering subtrees of [prev.TreeSize, l.TreeSize).
 func TestLandmarkSubtrees(t *testing.T) {
 	s, _, t0 := newTestSeq(t)
@@ -309,7 +309,7 @@ func TestLandmarkSubtrees(t *testing.T) {
 	}
 }
 
-// TestTrustAnchorID confirms §6.3.1/§8.2 naming:
+// TestTrustAnchorID confirms §6.4.1/§8.2 naming:
 // CA-ID ‖ 1 ‖ logNumber ‖ landmarkNumber.
 func TestTrustAnchorID(t *testing.T) {
 	l := Landmark{Number: 42}

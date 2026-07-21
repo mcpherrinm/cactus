@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Handler returns an http.Handler that serves the §6.3.1 landmark
+// Handler returns an http.Handler that serves the §6.4.1 landmark
 // list. Plain text, one line of `<last> <num_active>` followed by
 // `num_active + 1` tree sizes in strictly decreasing order.
 func (s *Sequence) Handler() http.Handler {
@@ -24,7 +24,7 @@ func (s *Sequence) serveLandmarks(w http.ResponseWriter, r *http.Request) {
 	body := s.encode()
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// §6.3.1: the file changes whenever a new landmark is allocated,
+	// §6.4.1: the file changes whenever a new landmark is allocated,
 	// so we cannot serve it as immutable. RPs poll on their own
 	// schedule.
 	w.Header().Set("Cache-Control", "no-cache")
@@ -35,7 +35,7 @@ func (s *Sequence) serveLandmarks(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// encode builds the §6.3.1 text body: `<last> <num_active>\n` followed
+// encode builds the §6.4.1 text body: `<last> <num_active>\n` followed
 // by num_active + 1 tree-size lines, strictly decreasing.
 //
 // Special case: when only landmark 0 exists, last = 0, num_active = 0,
@@ -50,7 +50,7 @@ func (s *Sequence) encode() []byte {
 	}
 	last := s.landmarks[len(s.landmarks)-1].Number
 
-	// num_active = min(last, maxActive). Per §6.3.1:
+	// num_active = min(last, maxActive). Per §6.4.1:
 	//   num_active_landmarks <= max_active_landmarks
 	//   num_active_landmarks <= last_landmark
 	numActive := uint64(maxActive)

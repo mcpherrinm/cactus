@@ -61,7 +61,7 @@ func newMLDSA(alg Algorithm, seed []byte) (Signer, error) {
 func (s *mldsaSigner) Algorithm() Algorithm { return s.alg }
 func (s *mldsaSigner) PublicKey() []byte    { return s.pub }
 func (s *mldsaSigner) Sign(r io.Reader, msg []byte) ([]byte, error) {
-	// draft-04 §5.3.3 / RFC 9881 §3: Merkle Tree Certificate cosignatures
+	// draft-05 §5.3.3 / RFC 9881 §3: Merkle Tree Certificate cosignatures
 	// use pure ML-DSA (FIPS 204) with an empty context string. A nil
 	// Options signs with the empty-context default; crypto/mldsa ignores
 	// the io.Reader argument.

@@ -127,7 +127,7 @@ func TestIssueRoundTripFullValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RebuildLogEntryFromTBS: %v", err)
 	}
-	// draft-04 §6.1: serial = (log_number << 48) | index. log_number is 1
+	// draft-05 §6.2: serial = (log_number << 48) | index. log_number is 1
 	// here, so the serial is always non-zero.
 	logNumber, index, err := cert.SplitSerial(serialFromCert)
 	if err != nil {

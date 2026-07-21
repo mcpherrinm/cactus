@@ -17,7 +17,7 @@ import (
 
 // TestCactusBinaryWithLandmarks builds the cactus binary, lets it
 // allocate at least one landmark (using a 50ms interval), then hits
-// /landmarks and confirms the body matches the §6.3.1 format with at
+// /landmarks and confirms the body matches the §6.4.1 format with at
 // least one allocated landmark.
 func TestCactusBinaryWithLandmarks(t *testing.T) {
 	if testing.Short() {

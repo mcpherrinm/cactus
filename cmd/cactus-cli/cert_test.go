@@ -21,7 +21,7 @@ func TestParseLandmarks(t *testing.T) {
 }
 
 func TestParseLandmarksOnlyZero(t *testing.T) {
-	// Special case from §6.3.1: only landmark 0 exists.
+	// Special case from §6.4.1: only landmark 0 exists.
 	lms, err := parseLandmarks([]byte("0 0\n0\n"))
 	if err != nil {
 		t.Fatal(err)

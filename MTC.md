@@ -200,7 +200,7 @@ In cactus, the cosigner abstraction is in `signer/`:
 
 ## §6: Building the certificate
 
-§6.1 specifies how the X.509 cert is laid out:
+§6.2 specifies how the X.509 cert is laid out:
 
 - `signatureAlgorithm` and `tbsCertificate.signature` both use
   `id-alg-mtcProof` with absent parameters.
@@ -222,18 +222,18 @@ struct {
   number.
 - `signatures` MUST be sorted by `cosigner_id` (shorter first, then
   lexicographically) with no duplicates.
-- `serialNumber` is `(log_number << 48) | index` (§6.1). The non-zero
+- `serialNumber` is `(log_number << 48) | index` (§6.2). The non-zero
   log number keeps the serial non-zero (RFC 5280 §4.1.2.2 forbids a
   zero serial), and lets a relying party revoke whole logs by serial
   range (§7.5).
 
 This MTCProof can carry **two flavors of cert**:
 
-- **Standalone certificate** (§6.2): the proof's subtree is one of
+- **Standalone certificate** (§6.3): the proof's subtree is one of
   the §4.5 covering subtrees from a recent checkpoint, and the
   `signatures<>` slice has at least one cosigner. Issuable
   immediately after the next checkpoint.
-- **Landmark-relative certificate** (§6.3): the proof's subtree is
+- **Landmark-relative certificate** (§6.4): the proof's subtree is
   a special pre-distributed *landmark subtree*, and the
   `signatures<>` slice is empty. Issuable only after the entry has
   been included in a landmark, but smaller and signature-free.
@@ -286,7 +286,7 @@ When a client wants the cert at index 97:
    and however many cosigner signatures are attached to subtree
    `(96, 100)`.
 
-## §6.3: Landmark-relative certificates
+## §6.4: Landmark-relative certificates
 
 This is the subtle part. The promise: **a cert with no signatures**
 that an up-to-date relying party can verify in ~constant time.
@@ -315,9 +315,9 @@ That's the size optimization: the cert ships an inclusion proof
 
 In cactus:
 
-- `landmark/sequence.go` is the CA-side allocator (§6.3.2). Append-only
+- `landmark/sequence.go` is the CA-side allocator (§6.4.2). Append-only
   on disk; the in-memory state replays from JSONL on restart.
-- `landmark.Sequence.Handler()` serves the §6.3.1 text-format URL
+- `landmark.Sequence.Handler()` serves the §6.4.1 text-format URL
   that relying parties poll.
 - `cert.BuildLandmarkRelativeCert` re-uses the existing standalone
   cert's TBS (so subject, validity, SPKI all match) and replaces
@@ -424,7 +424,7 @@ If you're reading the code, this is the order I'd recommend:
    wire.
 5. `ca/issuer.go` — assemble the X.509 cert from a CSR + a `log.Issued`.
 6. `acme/handler.go` — the ACME state machine.
-7. `landmark/sequence.go` — §6.3.1/2 allocator.
+7. `landmark/sequence.go` — §6.4.1/2 allocator.
 8. `mirror/follower.go` and `mirror/server.go` — the mirror role.
 
 The integration test `integration/TestParallelIssuance` exercises

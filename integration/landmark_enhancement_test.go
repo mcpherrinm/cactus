@@ -59,7 +59,7 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	// Nothing auto-allocates landmarks in this test — we call Append
 	// explicitly — so a short interval just lets that manual Append clear
-	// the §6.3.2 minimum-gap check.
+	// the §6.4.2 minimum-gap check.
 	seq, err := landmark.New(landmark.Config{
 		CAID: logID, LogNumber: 1,
 		TimeBetweenLandmarks: time.Millisecond,
@@ -176,7 +176,7 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 
 	// With the properties Accept header, the landmark-relative cert
 	// carries trust_anchor_id = the landmark ID (CA-ID.1.logNumber.L,
-	// draft-04 §8.2). Landmark 1 of log 1 under CA 32473.1 → 32473.1.1.1.1.
+	// draft-05 §8.2). Landmark 1 of log 1 under CA 32473.1 → 32473.1.1.1.1.
 	resp, body := postAsGetWithAccept(t, hsrv.URL, ctxs[0].enh,
 		"application/pem-certificate-chain-with-properties", ctxs[0].acctKey, ctxs[0].kid)
 	if resp.StatusCode != 200 {
