@@ -1,0 +1,25 @@
+# cactus runtime image.
+#
+# cactus needs Go 1.27+ for the built-in crypto/mldsa, and there is no
+# golang:1.27 image yet (1.27 is still devel — even a released Go cannot
+# fetch the toolchain). So unlike the sunlight image, this one does NOT
+# build from source: the binaries are built on the host with gotip and
+# copied in. `make docker-build` does that; see docker/README.md.
+#
+# Once Go 1.27 ships, this can become an ordinary multi-stage build.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Built by `make docker-build` (CGO_ENABLED=0, GOOS=linux).
+COPY bin/cactus /usr/local/bin/cactus
+COPY bin/cactus-cli /usr/local/bin/cactus-cli
+COPY bin/cactus-keygen /usr/local/bin/cactus-keygen
+
+# 14000 ACME, 14080 monitoring/tiles, 14090 metrics.
+EXPOSE 14000 14080 14090
+
+ENTRYPOINT ["/usr/local/bin/cactus"]
+CMD ["-config", "/etc/cactus/config.json"]

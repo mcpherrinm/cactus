@@ -1,0 +1,59 @@
+{
+  "data_dir": "/var/lib/cactus",
+  "log": {
+    "number": 1,
+    "shortname": "cactus-docker",
+    "hash": "sha256",
+    "checkpoint_period_ms": 1000,
+    "pool_size": 256
+  },
+  "ca_cosigner": {
+    "id": "44363.47.1.99",
+    "algorithm": "mldsa-44",
+    "seed_path": "keys/ca-cosigner.seed"
+  },
+  "acme": {
+    "listen": ":14000",
+    "external_url": "http://localhost:14000",
+    "challenge_mode": "auto-pass"
+  },
+  "monitoring": {
+    "listen": ":14080",
+    "external_url": "http://localhost:14080"
+  },
+  "metrics": {
+    "listen": "0.0.0.0:14090"
+  },
+  "landmarks": {
+    "time_between_landmarks_ms": 60000,
+    "max_cert_lifetime_ms": 3600000
+  },
+  "ca_cosigner_quorum": {
+    "mirrors": [
+      {
+        "id": "44363.47.2.1",
+        "url": "http://sunlight:8080/sign-subtree",
+        "algorithm": "mldsa-44",
+        "public_key_path": "keys/sunlight-mirror.pem"
+      }
+    ],
+    "min_signatures": 1,
+    "request_timeout_ms": 5000,
+    "best_effort_after_minimum": false,
+    "mirror_retry_deadline_ms": 15000
+  },
+  "log_level": "debug",
+  "mirror_push": {
+    "targets": [
+      {
+        "id": "44363.47.2.1",
+        "submission_prefix": "http://sunlight:8080",
+        "monitoring_prefix": "http://skylight:8081/mirror",
+        "algorithm": "mldsa-44",
+        "public_key_path": "keys/sunlight-mirror.pem"
+      }
+    ],
+    "request_timeout_ms": 10000,
+    "push_timeout_ms": 30000
+  }
+}

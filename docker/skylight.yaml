@@ -1,0 +1,19 @@
+# skylight serves the read/monitoring side of the mirror. Sunlight
+# writes checkpoint and tile files into a local directory; skylight (or
+# any static file server) publishes them.
+#
+# The mirror's data is served under <monitoringprefix>/mirror/, so
+# cactus's push client fetches
+#   <monitoringprefix>/mirror/<sha256hex(origin)>/checkpoint
+# when it needs a starting point for an upload.
+
+listen:
+  - ":8081"
+
+operatorname: cactus docker-compose
+
+witnesses:
+  # No port: net/http.ServeMux strips the port from the request Host
+  # before matching, so a pattern containing one never matches.
+  - monitoringprefix: https://skylight
+    localdirectory: /var/lib/sunlight/public

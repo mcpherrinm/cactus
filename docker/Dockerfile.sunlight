@@ -1,0 +1,49 @@
+# Sunlight, acting as a tlog-mirror and ML-DSA-44 cosigner for cactus.
+#
+# Sunlight declares `go 1.25.0` and gets ML-DSA from filippo.io/mldsa
+# rather than the standard library, so unlike cactus it builds with a
+# stock released toolchain and can be built inside the image.
+#
+# Upstream publishes no Dockerfile and no image, so this is ours.
+ARG GO_VERSION=1.26
+FROM golang:${GO_VERSION} AS build
+
+# Pin the revision so a rebuild is reproducible. Bump deliberately.
+ARG SUNLIGHT_REPO=https://github.com/FiloSottile/sunlight
+ARG SUNLIGHT_REF=main
+
+WORKDIR /src
+RUN git clone --filter=blob:none "${SUNLIGHT_REPO}" . \
+    && git checkout "${SUNLIGHT_REF}" \
+    && git rev-parse HEAD > /sunlight-revision
+
+# sunlight  — write path: witness + mirror endpoints (add-checkpoint,
+#             add-entries, sign-subtree)
+# skylight  — read path: serves the mirrored checkpoint and tiles
+# keygen    — derives the witness/mirror keys from a single seed
+#
+# CGO is required: the checkpoint lock backend uses crawshaw.io/sqlite,
+# a cgo binding, so sunlight and skylight will not build with
+# CGO_ENABLED=0 (sunlight-keygen alone would). Both the builder and the
+# runtime image are Debian, so the resulting glibc dynamic link is fine.
+RUN CGO_ENABLED=1 GOOS=linux go build -o /out/ \
+    ./cmd/sunlight ./cmd/skylight ./cmd/sunlight-keygen
+
+FROM debian:bookworm-slim
+
+# sqlite3 is required at init: sunlight deliberately refuses to create
+# its own checkpoint lock database, as a misconfiguration guard, so the
+# table has to be created before first start.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/sunlight /usr/local/bin/sunlight
+COPY --from=build /out/skylight /usr/local/bin/skylight
+COPY --from=build /out/sunlight-keygen /usr/local/bin/sunlight-keygen
+COPY --from=build /sunlight-revision /etc/sunlight-revision
+
+# 8080 submission (write API), 8081 monitoring (read API via skylight).
+EXPOSE 8080 8081
+
+ENTRYPOINT ["/usr/local/bin/sunlight"]
