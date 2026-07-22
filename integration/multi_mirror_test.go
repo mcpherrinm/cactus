@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,13 @@ func TestMultiCosignerQuorum(t *testing.T) {
 		if n := w.calls.Load(); n != 1 {
 			t.Errorf("witness %d served %d requests, want 1", i, n)
 		}
+	}
+	// tlog-tiles: the CA SHOULD identify itself with an operator
+	// contact in the User-Agent so mirrors can reach (and not
+	// rate-limit) it.
+	ua, _ := stubs[0].lastUA.Load().(string)
+	if !strings.Contains(ua, "+https://github.com/mcpherrinm/cactus") {
+		t.Errorf("witness saw User-Agent %q, want the cactus contact UA", ua)
 	}
 }
 
