@@ -99,21 +99,69 @@ func VerifyConsistencyProof(
 
 // GenerateConsistencyProof implements §4.4.1's SUBTREE_PROOF: builds
 // the consistency proof for [start, end) within a tree of n elements,
-// using leafHashFn(i) to retrieve the i-th leaf hash. To avoid a
-// recursive-tree closure, this implementation walks nodes via
-// subtreeHashAt, which reads from the same source.
-//
-// hashAt(level, n) must return the hash at storage level `level`,
-// position `n`. For the simplest binding, callers can supply a
-// closure that walks leaves and applies HashChildren as needed; the
-// `log` package builds this on top of tlog.HashReader.
+// using leafHashFn(i) to retrieve the i-th leaf hash.
 //
 // The simplest correct implementation here just rebuilds subtrees by
-// recursion; for a test server the cost is acceptable.
+// recursion; for a test server the cost is acceptable. Callers that can
+// read stored interior hashes (e.g. from tiles) should prefer
+// GenerateConsistencyProofFromNodes, which reads O(log n) node hashes
+// instead of hashing O(n) leaves.
 func GenerateConsistencyProof(
 	hash func([]byte) Hash,
 	start, end, n uint64,
 	leafHash func(uint64) (Hash, error),
+) ([]Hash, error) {
+	rangeFn := func(lo, hi uint64) (Hash, error) {
+		return computeRange(hash, lo, hi, leafHash)
+	}
+	return generateConsistencyProof(start, end, n, rangeFn)
+}
+
+// GenerateConsistencyProofFromNodes is GenerateConsistencyProof reading
+// stored interior node hashes instead of leaves. nodeHash(level, index)
+// must return the Merkle tree hash of the complete subtree
+// [index<<level, (index+1)<<level) — the node addressing scheme of
+// tlog.StoredHashIndex — so a proof costs O(log n) node reads instead of
+// O(n) leaf hashes. That is what makes proof generation over a *remote*
+// tree practical: every read maps to a (cached, authenticated) hash-tile
+// lookup rather than a replay of the whole log.
+func GenerateConsistencyProofFromNodes(
+	hash func([]byte) Hash,
+	start, end, n uint64,
+	nodeHash func(level int, index uint64) (Hash, error),
+) ([]Hash, error) {
+	var rangeFn func(lo, hi uint64) (Hash, error)
+	rangeFn = func(lo, hi uint64) (Hash, error) {
+		size := hi - lo
+		if size == 0 {
+			return Hash{}, errors.New("tlogx: empty range")
+		}
+		// A complete, aligned range is exactly a stored tree node.
+		if size&(size-1) == 0 && lo%size == 0 {
+			level := bits.TrailingZeros64(size)
+			return nodeHash(level, lo>>level)
+		}
+		// Otherwise split per the RFC 6962 MTH recursion: k is the
+		// largest power of two strictly smaller than the range size.
+		k := uint64(1) << (bits.Len64(size-1) - 1)
+		left, err := rangeFn(lo, lo+k)
+		if err != nil {
+			return Hash{}, err
+		}
+		right, err := rangeFn(lo+k, hi)
+		if err != nil {
+			return Hash{}, err
+		}
+		return HashChildren(hash, left, right), nil
+	}
+	return generateConsistencyProof(start, end, n, rangeFn)
+}
+
+// generateConsistencyProof is the shared §4.4.1 SUBTREE_PROOF skeleton;
+// rangeFn(lo, hi) must return MTH(D[lo:hi]).
+func generateConsistencyProof(
+	start, end, n uint64,
+	rangeFn func(lo, hi uint64) (Hash, error),
 ) ([]Hash, error) {
 	if !IsValid(start, end) {
 		return nil, fmt.Errorf("tlogx: invalid subtree [%d,%d)", start, end)
@@ -124,7 +172,7 @@ func GenerateConsistencyProof(
 	if start == 0 && end == n {
 		return nil, nil // §4.4.1 base case
 	}
-	return subtreeSubproof(hash, start, end, 0, n, true, leafHash)
+	return subtreeSubproof(start, end, 0, n, true, rangeFn)
 }
 
 // subtreeSubproof is the SUBTREE_SUBPROOF helper from §4.4.1, expressed
@@ -133,17 +181,16 @@ func GenerateConsistencyProof(
 // records whether the verifier already has MTH(D[start:end])
 // (true at the outermost call).
 func subtreeSubproof(
-	hash func([]byte) Hash,
 	start, end, lo, hi uint64,
 	known bool,
-	leafHash func(uint64) (Hash, error),
+	rangeFn func(lo, hi uint64) (Hash, error),
 ) ([]Hash, error) {
 	// Base case: the current range D[lo:hi] is exactly the subtree.
 	if start == lo && end == hi {
 		if known {
 			return nil, nil
 		}
-		h, err := computeRange(hash, lo, hi, leafHash)
+		h, err := rangeFn(lo, hi)
 		if err != nil {
 			return nil, err
 		}
@@ -157,11 +204,11 @@ func subtreeSubproof(
 	switch {
 	case end <= mid:
 		// Subtree fits entirely in left half D[lo:mid].
-		left, err := subtreeSubproof(hash, start, end, lo, mid, known, leafHash)
+		left, err := subtreeSubproof(start, end, lo, mid, known, rangeFn)
 		if err != nil {
 			return nil, err
 		}
-		rightHash, err := computeRange(hash, mid, hi, leafHash)
+		rightHash, err := rangeFn(mid, hi)
 		if err != nil {
 			return nil, err
 		}
@@ -169,11 +216,11 @@ func subtreeSubproof(
 
 	case mid <= start:
 		// Subtree fits entirely in right half D[mid:hi].
-		right, err := subtreeSubproof(hash, start, end, mid, hi, known, leafHash)
+		right, err := subtreeSubproof(start, end, mid, hi, known, rangeFn)
 		if err != nil {
 			return nil, err
 		}
-		leftHash, err := computeRange(hash, lo, mid, leafHash)
+		leftHash, err := rangeFn(lo, mid)
 		if err != nil {
 			return nil, err
 		}
@@ -188,11 +235,11 @@ func subtreeSubproof(
 		// Recurse looking for the right portion [mid, end), which is a
 		// strict subtree of D[mid:hi] — and one the verifier does NOT
 		// already know.
-		cross, err := subtreeSubproof(hash, mid, end, mid, hi, false, leafHash)
+		cross, err := subtreeSubproof(mid, end, mid, hi, false, rangeFn)
 		if err != nil {
 			return nil, err
 		}
-		leftHash, err := computeRange(hash, lo, mid, leafHash)
+		leftHash, err := rangeFn(lo, mid)
 		if err != nil {
 			return nil, err
 		}
