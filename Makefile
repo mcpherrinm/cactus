@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet integration stress clean \
+.PHONY: build test test-race vet lint fmt integration stress clean \
 	docker-binaries docker-build docker-up docker-down docker-logs
 
 # cactus requires Go 1.27+ (built-in crypto/mldsa). Until 1.27 ships, the
@@ -21,6 +21,20 @@ test-race:
 
 vet:
 	$(GO) vet ./...
+
+# golangci-lint must itself be built with a Go 1.27+ toolchain to
+# type-check this module, and its release binaries are built with the
+# latest released Go, so install it from source:
+#   gotip install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+# The PATH prefix makes golangci-lint's `go` invocations use $(GO)'s
+# toolchain.
+GOLANGCI_LINT ?= golangci-lint
+
+lint:
+	PATH="$$($(GO) env GOROOT)/bin:$$PATH" GOTOOLCHAIN=local $(GOLANGCI_LINT) run
+
+fmt:
+	PATH="$$($(GO) env GOROOT)/bin:$$PATH" GOTOOLCHAIN=local $(GOLANGCI_LINT) fmt
 
 integration:
 	$(GO) test -race -count=1 -tags=integration ./integration/...
