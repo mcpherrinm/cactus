@@ -1,0 +1,85 @@
+version: "2"
+
+run:
+  # The stress tag only adds integration/stress_test.go; linting with it
+  # on covers the whole tree in one pass.
+  build-tags:
+    - stress
+
+linters:
+  # Standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - gosec
+    - misspell
+    - unconvert
+  # golangci-lint vendors honnef.co/go/tools v0.7.0 (staticcheck
+  # 2026.1), whose IR builder panics on the Go 1.27 standard library.
+  # Re-enable staticcheck and unused once golangci-lint ships
+  # staticcheck 2026.2+.
+  disable:
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      exclude-functions:
+        # Best-effort HTTP response writes; there is nothing useful to
+        # do with a client that hung up.
+        - (net/http.ResponseWriter).Write
+        # Close on a read-only body; errors there are meaningless.
+        - (io.ReadCloser).Close
+        # Fprint* is used on HTTP responses and hash.Hash writers, where
+        # the error is likewise not actionable.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gosec:
+      excludes:
+        # G104 (unhandled errors) duplicates errcheck, which is
+        # configured precisely above.
+        - G104
+        # G115 (integer overflow on conversion): tlog tile/index math
+        # converts between uint64, int64, and int pervasively and
+        # intentionally; the flagged sites are all bounded by tree size.
+        - G115
+        # G304 (file path from variable): key seeds, configs, and the
+        # storage root are operator-supplied paths by design.
+        - G304
+      config:
+        # Log data (tiles, checkpoints) is public and served over HTTP;
+        # world-readable directories and files are intentional.
+        G301: "0755"
+        G302: "0644"
+  exclusions:
+    rules:
+      # Tests build/run local binaries, hit local test servers with
+      # constructed URLs, and write world-readable fixtures; gosec's
+      # G107/G204/G306/G602 hits there are all noise.
+      - path: _test\.go
+        linters:
+          - gosec
+      # cactus-cli's purpose is fetching operator-supplied log URLs and
+      # reading operator-supplied cert files, so G703 (path traversal)
+      # and G704 (SSRF) flag the tool working as intended.
+      - path: cmd/cactus-cli/
+        text: "G70[34]"
+      # The tile handler serves stored binary tiles as
+      # application/octet-stream; G705's XSS taint trace (URL path ->
+      # storage key -> response body) is not script injection.
+      - path: tile/server\.go
+        text: "G705"
+
+issues:
+  # Report everything; the default per-linter and per-issue caps hide
+  # findings.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/letsencrypt/cactus

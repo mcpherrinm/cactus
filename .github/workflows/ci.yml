@@ -35,15 +35,6 @@ jobs:
       - name: Toolchain version
         run: go version
 
-      - name: Check gofmt
-        run: |
-          fmtout=$(gofmt -l .)
-          if [ -n "$fmtout" ]; then
-            echo "These files are not gofmt-clean:"
-            echo "$fmtout"
-            exit 1
-          fi
-
       # The Makefile defaults to gotip for local development; CI has a
       # real 1.27 toolchain on PATH as `go`.
       - name: Vet
@@ -64,3 +55,26 @@ jobs:
       # workflow's job.
       - name: Vet stress-tagged tests
         run: go vet -tags=stress ./integration/...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # golangci-lint release binaries are built with the latest released
+      # Go and cannot type-check a `go 1.27` module, so build it from
+      # source with the toolchain installed above instead of using
+      # golangci/golangci-lint-action. setup-go's cache keeps this fast
+      # after the first run. Keep the pinned version in sync with the
+      # Makefile comment. Formatting (gofmt + goimports) is checked here
+      # too, via the formatters enabled in .golangci.yml.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      - name: Lint
+        run: make GO=go lint
