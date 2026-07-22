@@ -81,11 +81,21 @@ func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byt
 // whatever value is on the wire. Callers enforce the rules before
 // trusting a signature (see mirrorpush.VerifyCosignatures).
 func MarshalSignatureInputAt(cosignerID TrustAnchorID, subtree *MTCSubtree, timestamp uint64) ([]byte, error) {
+	return MarshalCosignedMessage(OIDName(cosignerID), OIDName(subtree.LogID),
+		timestamp, subtree.Start, subtree.End, subtree.Hash)
+}
+
+// MarshalCosignedMessage builds the §5.3.1 CosignedMessage from its raw
+// string components. It exists for logs whose checkpoint origin is not
+// an oid/-derived name — a c2sp.org/tlog-cosignature log_origin is just
+// the checkpoint origin, and real-world MTC logs (e.g. Cloudflare's
+// bootstrap CA) use plain hostname-path origins that TrustAnchorID
+// cannot represent. Callers with trust anchor IDs on both sides should
+// use MarshalSignatureInput / MarshalSignatureInputAt instead.
+func MarshalCosignedMessage(cosignerName, logOrigin string, timestamp, start, end uint64, hash tlogx.Hash) ([]byte, error) {
 	if len(SubtreeSignatureLabel) != 12 {
 		return nil, fmt.Errorf("internal: SubtreeSignatureLabel is %d bytes", len(SubtreeSignatureLabel))
 	}
-	cosignerName := []byte(OIDName(cosignerID))
-	logOrigin := []byte(OIDName(subtree.LogID))
 	if len(cosignerName) < 1 || len(cosignerName) > 0xff {
 		return nil, fmt.Errorf("cert: cosigner_name length %d out of range", len(cosignerName))
 	}
@@ -94,12 +104,12 @@ func MarshalSignatureInputAt(cosignerID TrustAnchorID, subtree *MTCSubtree, time
 	}
 	var b cryptobyte.Builder
 	b.AddBytes([]byte(SubtreeSignatureLabel))
-	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(cosignerName) })
+	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes([]byte(cosignerName)) })
 	b.AddUint64(timestamp)
-	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes(logOrigin) })
-	b.AddUint64(subtree.Start)
-	b.AddUint64(subtree.End)
-	b.AddBytes(subtree.Hash[:])
+	b.AddUint8LengthPrefixed(func(c *cryptobyte.Builder) { c.AddBytes([]byte(logOrigin)) })
+	b.AddUint64(start)
+	b.AddUint64(end)
+	b.AddBytes(hash[:])
 	return b.Bytes()
 }
 
