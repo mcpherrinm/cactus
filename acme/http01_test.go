@@ -101,7 +101,9 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: chHost}}}))
 	resp, body := post(t, hsrv.URL, "/new-order", jws)
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if ord.Status != "pending" {
 		t.Errorf("order should be pending in http-01 mode, got %q", ord.Status)
 	}
@@ -115,7 +117,9 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 	jws = jwsSign(t, acctKey, nil, kid, nonce, ord.Authorizations[0], []byte("{}"))
 	resp, body = post(t, hsrv.URL, authzPath, jws)
 	var az AuthzResp
-	json.Unmarshal(body, &az)
+	if err := json.Unmarshal(body, &az); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if len(az.Challenges) == 0 {
 		t.Fatalf("no challenges; body=%s", body)
 	}
@@ -139,14 +143,15 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 		t.Fatalf("challenge POST status=%d body=%s", resp.StatusCode, body)
 	}
 	var got ChallengeMsg
-	json.Unmarshal(body, &got)
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if got.Status != "valid" {
 		t.Errorf("challenge status = %q, want valid", got.Status)
 	}
 
 	// The order should now be ready.
 	nonce = resp.Header.Get("Replay-Nonce")
-	jws = jwsSign(t, acctKey, nil, kid, nonce, hsrv.URL+"/order/"+lastSeg(ord.Finalize), []byte("{}"))
 	orderURL := strings.TrimSuffix(ord.Finalize, "/finalize/"+lastSeg(ord.Finalize)) + "/order/" + lastSeg(ord.Finalize)
 	_ = orderURL
 	// Skip the GET-as-POST order check; instead just finalize and
@@ -166,7 +171,9 @@ func TestHTTP01ChallengeMode(t *testing.T) {
 		t.Fatalf("finalize status=%d body=%s", resp.StatusCode, body)
 	}
 	var ord2 OrderResp
-	json.Unmarshal(body, &ord2)
+	if err := json.Unmarshal(body, &ord2); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if ord2.Status != "valid" {
 		t.Errorf("post-finalize order status = %q, want valid", ord2.Status)
 	}
@@ -228,13 +235,17 @@ func TestHTTP01ChallengeRejectsBadResponse(t *testing.T) {
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: chHost}}}))
 	resp, body := post(t, hsrv.URL, "/new-order", jws)
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	nonce = resp.Header.Get("Replay-Nonce")
 	authzURL := ord.Authorizations[0]
 	jws = jwsSign(t, acctKey, nil, kid, nonce, authzURL, []byte("{}"))
 	resp, body = post(t, hsrv.URL, strings.TrimPrefix(authzURL, hsrv.URL), jws)
 	var az AuthzResp
-	json.Unmarshal(body, &az)
+	if err := json.Unmarshal(body, &az); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if len(az.Challenges) == 0 {
 		t.Fatalf("no challenges; body=%s", body)
 	}

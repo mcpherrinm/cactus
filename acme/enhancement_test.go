@@ -80,7 +80,9 @@ func TestEnhancementURLPending(t *testing.T) {
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: "enh.test"}}}))
 	resp, body := post(t, hsrv.URL, "/new-order", jws)
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 	csrKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csr, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject: pkix.Name{CommonName: "enh.test"}, DNSNames: []string{"enh.test"},
@@ -90,7 +92,9 @@ func TestEnhancementURLPending(t *testing.T) {
 		mustMarshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csr)}))
 	resp, body = post(t, hsrv.URL, strings.TrimPrefix(ord.Finalize, hsrv.URL), jws)
 	var ord2 OrderResp
-	json.Unmarshal(body, &ord2)
+	if err := json.Unmarshal(body, &ord2); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 	if ord2.Certificate == "" {
 		t.Fatal("missing cert URL")
 	}

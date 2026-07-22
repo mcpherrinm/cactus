@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/letsencrypt/cactus/tlogx"
 	"golang.org/x/crypto/cryptobyte"
+
+	"github.com/letsencrypt/cactus/tlogx"
 )
 
 // TrustAnchorID is the TrustAnchorID value from

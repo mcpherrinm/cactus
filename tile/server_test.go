@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/sumdb/tlog"
+
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/log"
 	"github.com/letsencrypt/cactus/log/tilewriter"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
-	"golang.org/x/mod/sumdb/tlog"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *log.Log) {

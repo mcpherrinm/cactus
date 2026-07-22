@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/letsencrypt/cactus/storage"
 	"golang.org/x/mod/sumdb/tlog"
+
+	"github.com/letsencrypt/cactus/storage"
 )
 
 func newTestWriter(t *testing.T) (*TileWriter, storage.FS) {

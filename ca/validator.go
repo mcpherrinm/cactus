@@ -17,9 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/letsencrypt/cactus/cert"
 	"golang.org/x/crypto/cryptobyte"
 	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
+
+	"github.com/letsencrypt/cactus/cert"
 )
 
 // OrderInput carries the relevant ACME order state. It is the

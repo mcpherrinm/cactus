@@ -10,10 +10,11 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/letsencrypt/cactus/cert"
-	cactuslog "github.com/letsencrypt/cactus/log"
 	"golang.org/x/crypto/cryptobyte"
 	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
+
+	"github.com/letsencrypt/cactus/cert"
+	cactuslog "github.com/letsencrypt/cactus/log"
 )
 
 // LogAPI is the subset of *log.Log the issuer needs. Defined as an

@@ -59,7 +59,9 @@ func TestRSALeafKeyIssuance(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ord acme.OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 	nonce = resp.Header.Get("Replay-Nonce")
 
 	// THE relevant part: RSA-2048 leaf key.
@@ -84,7 +86,9 @@ func TestRSALeafKeyIssuance(t *testing.T) {
 		t.Fatalf("finalize: %v", err)
 	}
 	var ord2 acme.OrderResp
-	json.Unmarshal(body, &ord2)
+	if err := json.Unmarshal(body, &ord2); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 	if ord2.Status != "valid" {
 		t.Fatalf("order status = %q, want valid", ord2.Status)
 	}
