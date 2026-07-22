@@ -125,9 +125,9 @@ func New(cfg Config, logger *slog.Logger, m *Metrics) (*Service, error) {
 			Timeout:   cfg.RequestTimeout(),
 			Transport: uaTransport{http.DefaultTransport},
 		},
-		cache:  newTileCache(cachedTiles),
-		state:  state,
-		logs:   make(map[string]*logHandle),
+		cache: newTileCache(cachedTiles),
+		state: state,
+		logs:  make(map[string]*logHandle),
 	}, nil
 }
 
