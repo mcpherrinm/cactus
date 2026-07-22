@@ -51,6 +51,24 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
+// serverUserAgent identifies the cactus server's outbound mirror
+// traffic. c2sp.org/tlog-tiles: clients SHOULD include a way for the
+// operator to contact them in the User-Agent, and logs MAY rate-limit
+// anonymous or unreachable clients.
+const serverUserAgent = "cactus (+https://github.com/mcpherrinm/cactus)"
+
+// uaTransport stamps serverUserAgent onto outgoing requests that don't
+// already carry a User-Agent.
+type uaTransport struct{ base http.RoundTripper }
+
+func (t uaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("User-Agent") == "" {
+		req = req.Clone(req.Context())
+		req.Header.Set("User-Agent", serverUserAgent)
+	}
+	return t.base.RoundTrip(req)
+}
+
 // caMirrorRequestsAdapter adapts a *prometheus.CounterVec to the
 // cert.CounterVec interface.
 type caMirrorRequestsAdapter struct {
@@ -120,7 +138,10 @@ func buildPushClients(
 	fsys storage.FS,
 	logger *slog.Logger,
 ) ([]*mirrorpush.Client, error) {
-	httpClient := &http.Client{Timeout: cfg.MirrorPush.RequestTimeout()}
+	httpClient := &http.Client{
+		Timeout:   cfg.MirrorPush.RequestTimeout(),
+		Transport: uaTransport{http.DefaultTransport},
+	}
 	out := make([]*mirrorpush.Client, 0, len(cfg.MirrorPush.Targets))
 	for i, t := range cfg.MirrorPush.Targets {
 		alg, err := signer.ParseAlgorithm(t.Algorithm)

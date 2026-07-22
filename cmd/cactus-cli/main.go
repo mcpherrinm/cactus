@@ -404,7 +404,14 @@ func certVerify(certPath, logURL string) {
 
 // httpGet fetches url and returns the body; treats 4xx/5xx as errors.
 func httpGet(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	// c2sp.org/tlog-tiles: clients SHOULD carry a contact in the
+	// User-Agent; logs MAY rate-limit anonymous clients.
+	req.Header.Set("User-Agent", "cactus-cli (+https://github.com/mcpherrinm/cactus)")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -208,6 +208,9 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		return MTCSignature{}, err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	// c2sp.org/tlog-tiles: clients SHOULD carry an operator contact in
+	// the User-Agent; mirrors MAY rate-limit anonymous clients.
+	req.Header.Set("User-Agent", "cactus (+https://github.com/mcpherrinm/cactus)")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return MTCSignature{}, err

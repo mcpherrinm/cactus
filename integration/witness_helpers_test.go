@@ -62,6 +62,10 @@ type stubWitness struct {
 
 	// calls counts served requests.
 	calls atomic.Int64
+
+	// lastUA records the most recent request's User-Agent, so tests can
+	// assert the CA identifies itself per tlog-tiles.
+	lastUA atomic.Value // string
 }
 
 // newStubWitness builds a stub witness signing for logID under the
@@ -92,6 +96,7 @@ func (w *stubWitness) endpoint(url string) cert.MirrorEndpoint {
 // cert/cosigner_request.go looks for.
 func (w *stubWitness) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.calls.Add(1)
+	w.lastUA.Store(r.Header.Get("User-Agent"))
 	if w.delay > 0 {
 		time.Sleep(w.delay)
 	}
