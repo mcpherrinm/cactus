@@ -11,6 +11,7 @@ build:
 	$(GO) build -o $(BIN_DIR)/cactus ./cmd/cactus
 	$(GO) build -o $(BIN_DIR)/cactus-cli ./cmd/cactus-cli
 	$(GO) build -o $(BIN_DIR)/cactus-keygen ./cmd/cactus-keygen
+	$(GO) build -o $(BIN_DIR)/cactus-pollinate ./cmd/cactus-pollinate
 
 test:
 	$(GO) test ./...
