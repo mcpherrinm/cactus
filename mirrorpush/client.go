@@ -89,6 +89,11 @@ type Target struct {
 	// SubmissionPrefix is the base URL of the write APIs; the client
 	// appends "/add-checkpoint", "/add-entries".
 	SubmissionPrefix string
+	// Origin overrides the log's checkpoint origin. Empty means the
+	// origin is derived from the log ID passed to New (the MTC-with-tlog
+	// profile's oid/ form). Set it when following a log whose origin is
+	// not oid-derived, e.g. a plain hostname-path origin.
+	Origin string
 	// MonitoringPrefix is the base URL of the read APIs, under which
 	// the mirror serves "<origin hash>/checkpoint".
 	MonitoringPrefix string
@@ -107,6 +112,14 @@ type Target struct {
 	// for packet-level debugging against a new peer.
 	DisableGzip bool
 }
+
+// ErrUnknownOrigin is wrapped into the (fatal) error returned when a
+// mirror answers 404 to add-checkpoint or add-entries: it does not
+// mirror this log at all. Callers that push opportunistically (rather
+// than to mirrors they configured themselves) can match it with
+// errors.Is to record "this mirror does not carry this log" instead of
+// treating the response as an operator-facing fault.
+var ErrUnknownOrigin = errors.New("mirror does not know origin")
 
 // errFatal marks a failure that must not be retried by re-pushing the
 // same data. See Client.Push for the classification.
@@ -137,7 +150,6 @@ func IsFatal(err error) bool {
 type Client struct {
 	target Target
 	src    Source
-	logID  cert.TrustAnchorID
 	origin string
 	fsys   storage.FS // optional; state is kept in memory only if nil
 	logger *slog.Logger
@@ -188,7 +200,7 @@ type persistedState struct {
 
 // New builds a push client for one (log, mirror) pair. fsys may be nil,
 // in which case state lives only in memory and is rediscovered from the
-// mirror after a restart.
+// mirror after a restart. logID may be empty when Target.Origin is set.
 func New(logID cert.TrustAnchorID, t Target, src Source, fsys storage.FS, logger *slog.Logger) (*Client, error) {
 	if t.SubmissionPrefix == "" {
 		return nil, errors.New("mirrorpush: submission prefix required")
@@ -200,14 +212,20 @@ func New(logID cert.TrustAnchorID, t Target, src Source, fsys storage.FS, logger
 		return nil, fmt.Errorf("mirrorpush: mirror %q must be ML-DSA-44, got 0x%04x",
 			t.Key.ID, uint16(t.Key.Algorithm))
 	}
+	origin := t.Origin
+	if origin == "" {
+		if len(logID) == 0 {
+			return nil, errors.New("mirrorpush: log ID or explicit origin required")
+		}
+		origin = cert.OIDName(logID)
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	c := &Client{
 		target: t,
 		src:    src,
-		logID:  logID,
-		origin: cert.OIDName(logID),
+		origin: origin,
 		fsys:   fsys,
 		logger: logger.With("mirror", string(t.Key.ID), "submission_prefix", t.SubmissionPrefix),
 	}
@@ -408,7 +426,7 @@ func (c *Client) pushCheckpoint(ctx context.Context, size uint64, note []byte) e
 			}
 			oldSize = advertised
 		case http.StatusNotFound:
-			return errFatal{fmt.Errorf("mirrorpush: add-checkpoint: mirror does not know origin %q", c.origin)}
+			return errFatal{fmt.Errorf("mirrorpush: add-checkpoint: %w %q", ErrUnknownOrigin, c.origin)}
 		case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusForbidden:
 			return errFatal{fmt.Errorf("mirrorpush: add-checkpoint: HTTP %d: %s", status, truncate(respBody))}
 		default:
@@ -501,16 +519,10 @@ func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.H
 		case http.StatusOK:
 			// The mirror committed everything through uploadEnd and
 			// cosigned the checkpoint at that size. Verify before we
-			// believe any of it.
-			subtree := &cert.MTCSubtree{
-				LogID: c.logID,
-				// A checkpoint cosignature covers the whole tree:
-				// start MUST be zero, end is the tree size.
-				Start: 0,
-				End:   uploadEnd,
-				Hash:  root,
-			}
-			cosigs, err := VerifyCosignatures(respBody, c.target.Key, subtree, TimestampNonZero)
+			// believe any of it. A checkpoint cosignature covers the
+			// whole tree: start MUST be zero, end is the tree size.
+			cosigs, err := VerifyCosignaturesForOrigin(respBody, c.target.Key,
+				c.origin, 0, uploadEnd, root, TimestampNonZero)
 			if err != nil {
 				// A bad cosignature on an otherwise successful upload
 				// is a serious mirror fault, not a retryable blip.
@@ -565,7 +577,7 @@ func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.H
 		case http.StatusBadRequest:
 			return errFatal{fmt.Errorf("mirrorpush: add-entries 400 (malformed request framing): %s", truncate(respBody))}
 		case http.StatusNotFound:
-			return errFatal{fmt.Errorf("mirrorpush: add-entries: mirror does not know origin %q", c.origin)}
+			return errFatal{fmt.Errorf("mirrorpush: add-entries: %w %q", ErrUnknownOrigin, c.origin)}
 		case http.StatusUnsupportedMediaType:
 			return errFatal{errors.New("mirrorpush: add-entries 415: mirror rejected the request content type")}
 		default:
