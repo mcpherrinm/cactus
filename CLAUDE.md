@@ -19,7 +19,7 @@ toolchain). The `Makefile` defaults `GO ?= gotip`; override with `make GO=go` on
 ## Commands
 
 ```sh
-make build              # builds bin/cactus, bin/cactus-cli, bin/cactus-keygen
+make build              # builds bin/cactus, bin/cactus-cli, bin/cactus-keygen, bin/cactus-pollinate
 make test               # gotip test ./...
 make test-race          # gotip test -race ./...
 make vet                # gotip vet ./...
@@ -85,6 +85,16 @@ abstraction. **`landmark/`** allocates §6.4 landmark sequences and serves `/lan
 **Single-writer assumption**: the log has no locks or shared-state coordination across
 processes — single-writer is enforced by documentation, not by code. See
 [docs/threat-model.md](docs/threat-model.md), [docs/disk-layout.md](docs/disk-layout.md).
+
+**`cactus-pollinate`** (`pollinate/` + `cmd/cactus-pollinate`) is a separate service, not
+part of the cactus server: it follows the Chrome MTC cosigners list
+(`specs/cosigners_schema.json`; live data at
+https://www.gstatic.com/mtcs/cosigners/v1/{cosigners.json,cosigners.pem}), polls every
+issuer's logs and every mirror's copy, and pushes missing entries to mirrors that stay
+behind the log head longer than a configured delay — reusing `mirrorpush` for the write
+side and `tlog.TileHashReader`-authenticated remote tile reads (no local log replica) for
+the read side. See the README's "Keeping mirrors in sync" section and
+`config-example-pollinate.json`.
 
 ## IDs are derived, not independent
 

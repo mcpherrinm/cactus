@@ -28,10 +28,11 @@ operate it, and where to look in the code.
 6. [Issuing your first cert](#issuing-your-first-cert)
 7. [Verifying certs with the CLI](#verifying-certs-with-the-cli)
 8. [Configuration reference](#configuration-reference)
-9. [Observability](#observability)
-10. [Layout of the codebase](#layout-of-the-codebase)
-11. [Tests](#tests)
-12. [Status](#status)
+9. [Keeping mirrors in sync: cactus-pollinate](#keeping-mirrors-in-sync-cactus-pollinate)
+10. [Observability](#observability)
+11. [Layout of the codebase](#layout-of-the-codebase)
+12. [Tests](#tests)
+13. [Status](#status)
 
 ---
 
@@ -406,6 +407,66 @@ With no targets configured the subsystem is entirely inert.
 
 ---
 
+## Keeping mirrors in sync: cactus-pollinate
+
+`cactus-pollinate` is a standalone service that repairs desynchronised
+mirrors across a whole MTC ecosystem. Point it at the Chrome MTC
+cosigners list and it follows every issuer's logs and every mirror's
+copy of them; when a mirror has been lagging a log head for longer than
+a configurable delay, it reads the missing entries from a healthy
+source (the CA's log or another mirror, load-balanced) and pushes them
+over the c2sp.org/tlog-mirror write API — the same `add-checkpoint` /
+`add-entries` flow cactus's own `mirror_push` uses.
+
+```sh
+./bin/cactus-pollinate -config config-example-pollinate.json
+```
+
+Design points:
+
+- **Inputs.** `cosigners.list`/`cosigners.keys` accept URLs or file
+  paths; the defaults are Chrome's published
+  [`cosigners.json`](https://www.gstatic.com/mtcs/cosigners/v1/cosigners.json)
+  and [`cosigners.pem`](https://www.gstatic.com/mtcs/cosigners/v1/cosigners.pem)
+  (schema in `specs/cosigners_schema.json`). Signers whose current state
+  is `REMOVED` are skipped; per-mirror overrides in `mirrors[]` can set
+  a distinct `submission_prefix` (default: the mirror's monitoring
+  `base_url`, which tlog-mirror permits) or `disable` a mirror.
+- **Log discovery.** Each issuer's `base_url` is probed at
+  `<base_url>/checkpoint` and `<base_url>/<n>/checkpoint` for
+  `n ≤ discovery.max_log_number`, since both single-log CAs and
+  mtc-tlog-profile CAs exist in the wild. A log's identity is the origin
+  its checkpoint declares — including non-`oid/` origins.
+- **The delay window (`push_delay_ms`).** CAs are expected to push on
+  their own, so pollinate records a history of log-head sizes and only
+  pushes to a mirror that is missing entries the head already had a full
+  delay window ago. After a restart it waits out one window before its
+  first push.
+- **Trust.** All reads go through `tlog.TileHashReader`, so every hash
+  and entry is authenticated against the source's checkpoint root before
+  being forwarded; checkpoints are additionally verified against the
+  issuer's key when it is ML-DSA-44. Nothing needs to *trust* pollinate
+  either — the receiving mirror re-verifies the log signature and every
+  subtree consistency proof.
+- **Coverage tracking.** Not every mirror carries every log: a mirror
+  whose submission API answers "unknown origin" is recorded as not
+  carrying that log and left alone until `not_carried_recheck_ms`
+  elapses or the cosigners list version changes.
+- **State.** Everything learned (logs, head history, per-mirror sizes
+  and verdicts) is a JSON file at `<data_dir>/pollinate/state.json`;
+  resumable upload positions live next to it under
+  `<data_dir>/mirrorpush/`.
+
+Metrics on `metrics.listen` (default `127.0.0.1:14091`), all prefixed
+`cactus_pollinate_`: log head and per-mirror sizes and lag
+(`log_head_size`, `mirror_size`, `mirror_lag_entries`,
+`mirror_carries`), push outcomes (`pushes_total{mirror,result}`,
+`pushed_entries_total`), read distribution (`source_reads_total`),
+sweep and error counters, and cosigners-list freshness. Logs are the
+same slog JSON as cactus.
+
+---
+
 ## Observability
 
 cactus emits structured JSON logs (slog) on stdout. Every line carries
@@ -437,12 +498,15 @@ cactus/
 ├── cmd/
 │   ├── cactus/         main server binary
 │   ├── cactus-cli/     debugging client (tree show, entry, cert verify, prove)
-│   └── cactus-keygen/  cosigner seed generator (-pub / -vkey / -from-vkey)
+│   ├── cactus-keygen/  cosigner seed generator (-pub / -vkey / -from-vkey)
+│   └── cactus-pollinate/ mirror-repair service (see section above)
 ├── acme/      RFC 8555 ACME server with §9 extensions
 ├── ca/        Issuer (CSR → X.509 cert via id-alg-mtcProof)
 ├── cert/      TBSCertificateLogEntry, MTCProof, CosignedMessage,
 │              CertificatePropertyList, multi-mirror sign-subtree client
 ├── mirrorpush/ c2sp.org/tlog-mirror push client (add-checkpoint, add-entries)
+├── pollinate/ mirror-repair service: follows the Chrome cosigners list,
+│              detects lagging mirrors, replays missing entries to them
 ├── landmark/  §6.4 landmark sequence allocator + /landmarks handler
 ├── log/       issuance log (single-writer, signed checkpoints + subtrees)
 ├── signer/    cosigner abstraction (ML-DSA-44/65/87, Go 1.27+)

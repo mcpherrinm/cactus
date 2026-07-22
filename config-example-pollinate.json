@@ -1,0 +1,23 @@
+{
+  "data_dir": "/tmp/cactus-pollinate-data",
+  "cosigners": {
+    "list": "https://www.gstatic.com/mtcs/cosigners/v1/cosigners.json",
+    "keys": "https://www.gstatic.com/mtcs/cosigners/v1/cosigners.pem",
+    "refresh_ms": 900000
+  },
+  "poll_interval_ms": 60000,
+  "push_delay_ms": 600000,
+  "discovery": {
+    "max_log_number": 8,
+    "interval_ms": 900000
+  },
+  "not_carried_recheck_ms": 21600000,
+  "request_timeout_ms": 30000,
+  "push_timeout_ms": 300000,
+  "max_concurrent_pushes": 4,
+  "mirrors": [],
+  "metrics": {
+    "listen": "127.0.0.1:14091"
+  },
+  "log_level": "info"
+}
