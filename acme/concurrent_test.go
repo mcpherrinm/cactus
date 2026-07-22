@@ -35,7 +35,9 @@ func TestConcurrentFinalizeOnSameOrder(t *testing.T) {
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: "race.test"}}}))
 	resp, body := post(t, base, "/new-order", jws)
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 
 	csrKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csrTmpl := &x509.CertificateRequest{

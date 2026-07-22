@@ -8,8 +8,9 @@ import (
 	"hash"
 	"time"
 
-	"github.com/letsencrypt/cactus/tlogx"
 	"golang.org/x/crypto/cryptobyte"
+
+	"github.com/letsencrypt/cactus/tlogx"
 )
 
 // TBSCertificateLogEntry is the §5.2.1 ASN.1 SEQUENCE that the log

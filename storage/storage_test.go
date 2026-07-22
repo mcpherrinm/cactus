@@ -86,7 +86,9 @@ func TestExists(t *testing.T) {
 	if ok, _ := d.Exists("nope"); ok {
 		t.Error("Exists on missing returned true")
 	}
-	d.Put("yep", []byte("x"), false)
+	if err := d.Put("yep", []byte("x"), false); err != nil {
+		t.Fatal(err)
+	}
 	if ok, _ := d.Exists("yep"); !ok {
 		t.Error("Exists on present returned false")
 	}
@@ -107,7 +109,9 @@ func TestConcurrentPutReadVisibility(t *testing.T) {
 	// Two goroutines: writer Puts a sequence of values, reader Gets and
 	// checks no half-written content is observed (atomic-rename guarantee).
 	d, _ := New(t.TempDir())
-	d.Put("k", []byte("init"), false)
+	if err := d.Put("k", []byte("init"), false); err != nil {
+		t.Fatal(err)
+	}
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})

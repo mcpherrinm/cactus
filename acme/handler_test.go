@@ -160,7 +160,9 @@ func TestDirectoryEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var d Directory
-	json.NewDecoder(resp.Body).Decode(&d)
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		t.Fatalf("decode directory: %v", err)
+	}
 	if d.NewAccount == "" || d.NewOrder == "" || d.NewNonce == "" {
 		t.Errorf("directory missing fields: %+v", d)
 	}
@@ -213,7 +215,9 @@ func TestEndToEndIssuance(t *testing.T) {
 		t.Fatalf("new-order status=%d body=%s", resp.StatusCode, body)
 	}
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal order: %v", err)
+	}
 	orderURL := resp.Header.Get("Location")
 	if ord.Status != "ready" {
 		t.Errorf("order status = %q, want ready (auto-pass)", ord.Status)
@@ -242,7 +246,9 @@ func TestEndToEndIssuance(t *testing.T) {
 		t.Fatalf("finalize status=%d body=%s", resp.StatusCode, body)
 	}
 	var ord2 OrderResp
-	json.Unmarshal(body, &ord2)
+	if err := json.Unmarshal(body, &ord2); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	if ord2.Status != "valid" {
 		t.Errorf("order status after finalize = %q", ord2.Status)
 	}
@@ -314,7 +320,9 @@ func newAccountAndOrder(t *testing.T, base, dnsName string) (*ecdsa.PrivateKey, 
 		t.Fatalf("new-order: %d %s", resp.StatusCode, body)
 	}
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	return acctKey, kid, ord, resp.Header.Get("Location")
 }
 

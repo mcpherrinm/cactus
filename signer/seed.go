@@ -30,9 +30,12 @@ func WriteSeed(path string) error {
 	if err != nil {
 		return fmt.Errorf("create seed %q: %w", path, err)
 	}
-	defer f.Close()
 	if _, err := f.Write(seed[:]); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write seed: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close seed %q: %w", path, err)
 	}
 	return nil
 }

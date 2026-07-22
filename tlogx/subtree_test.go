@@ -140,7 +140,7 @@ func hashTree(leaves []Hash, start, end uint64) Hash {
 }
 
 func bits63(n uint64) uint {
-	return uint(63 - leadingZeros(n))
+	return 63 - leadingZeros(n)
 }
 
 func leadingZeros(n uint64) uint {

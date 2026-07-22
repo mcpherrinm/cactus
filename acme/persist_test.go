@@ -124,7 +124,9 @@ func finalizeOneCert(t *testing.T, base, dnsName string) (certURL, certID string
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: dnsName}}}))
 	resp, body := post(t, base, "/new-order", jws)
 	var ord OrderResp
-	json.Unmarshal(body, &ord)
+	if err := json.Unmarshal(body, &ord); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 
 	// CSR.
 	csrKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -140,7 +142,9 @@ func finalizeOneCert(t *testing.T, base, dnsName string) (certURL, certID string
 		mustMarshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csrDER)}))
 	resp, body = post(t, base, strings.TrimPrefix(ord.Finalize, base), jws)
 	var ord2 OrderResp
-	json.Unmarshal(body, &ord2)
+	if err := json.Unmarshal(body, &ord2); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
 	return ord2.Certificate, lastSegment(ord2.Certificate), acctKey, kid
 }
 

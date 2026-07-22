@@ -20,8 +20,9 @@ import (
 	"io/fs"
 	"strconv"
 
-	"github.com/letsencrypt/cactus/storage"
 	"golang.org/x/mod/sumdb/tlog"
+
+	"github.com/letsencrypt/cactus/storage"
 )
 
 // TileHeight is the height of every published tile (hash and data).

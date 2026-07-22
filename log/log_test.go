@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/sumdb/tlog"
+
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tlogx"
-	"golang.org/x/mod/sumdb/tlog"
 )
 
 func newTestLog(t *testing.T) (*Log, signer.Signer, storage.FS) {

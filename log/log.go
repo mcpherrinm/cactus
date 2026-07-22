@@ -20,13 +20,14 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/sumdb/tlog"
+
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/log/tilewriter"
 	cactusmetrics "github.com/letsencrypt/cactus/metrics"
 	"github.com/letsencrypt/cactus/signer"
 	"github.com/letsencrypt/cactus/storage"
 	"github.com/letsencrypt/cactus/tlogx"
-	"golang.org/x/mod/sumdb/tlog"
 )
 
 // Issued is the result of Wait: everything the CA needs to assemble a

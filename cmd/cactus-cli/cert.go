@@ -198,7 +198,7 @@ func certLandmarkRelative(certPath, logURL string) {
 		if err != nil {
 			die("build properties: %v", err)
 		}
-		os.Stdout.Write(cert.EncodePEMWithProperties(out, pl))
+		_, _ = os.Stdout.Write(cert.EncodePEMWithProperties(out, pl))
 	} else {
 		_ = pem.Encode(stdout(), &pem.Block{Type: "CERTIFICATE", Bytes: out})
 	}

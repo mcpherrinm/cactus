@@ -1081,7 +1081,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		// If neither is configured, fall back to plain PEM rather than
 		// emitting an empty list (which BuildPropertyList rejects).
 		if len(taID) == 0 {
-			pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
+			_ = pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 			return
 		}
 		pl, err := cert.BuildPropertyList(props)
@@ -1093,7 +1093,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/pem-certificate-chain")
-	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
+	_ = pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
 // certIndex extracts the issuance-log index from a standalone cert's
@@ -1243,7 +1243,7 @@ func (s *Server) handleCertLandmarkRelative(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "application/pem-certificate-chain")
-	pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
+	_ = pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
 // serveEnhancementPending is the §9.1 "not yet available" response for a
