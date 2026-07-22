@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/letsencrypt/cactus/cert"
+	"github.com/letsencrypt/cactus/tlogx"
 )
 
 // sigLinePrefix is the c2sp.org/signed-note signature line marker: an
@@ -126,6 +127,22 @@ func VerifyCosignatures(
 	if subtree == nil {
 		return nil, errors.New("mirrorpush: nil subtree")
 	}
+	return VerifyCosignaturesForOrigin(body, key, cert.OIDName(subtree.LogID),
+		subtree.Start, subtree.End, subtree.Hash, rule)
+}
+
+// VerifyCosignaturesForOrigin is VerifyCosignatures with the log named
+// by its checkpoint origin string instead of a trust anchor ID, for
+// logs whose origin is not oid-derived. The cosigner itself must still
+// be an MTC cosigner (oid-named, ML-DSA-44).
+func VerifyCosignaturesForOrigin(
+	body []byte,
+	key cert.CosignerKey,
+	origin string,
+	start, end uint64,
+	hash tlogx.Hash,
+	rule TimestampRule,
+) ([]Cosignature, error) {
 	// The c2sp cosignature path is ML-DSA-44 only; refuse to fabricate
 	// a key ID for an algorithm that could never appear here.
 	if key.Algorithm != cert.AlgMLDSA44 {
@@ -164,7 +181,7 @@ func VerifyCosignatures(
 				return nil, fmt.Errorf("mirrorpush: checkpoint cosignature from %q has a zero timestamp", c.Name)
 			}
 		}
-		msg, err := cert.MarshalSignatureInputAt(key.ID, subtree, c.Timestamp)
+		msg, err := cert.MarshalCosignedMessage(wantName, origin, c.Timestamp, start, end, hash)
 		if err != nil {
 			return nil, err
 		}
