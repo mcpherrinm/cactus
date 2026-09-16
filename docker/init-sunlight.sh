@@ -24,7 +24,7 @@ MIRROR_NAME="${SUNLIGHT_MIRROR_NAME:-oid/1.3.6.1.4.1.44363.47.2.1}"
 
 # skylight opens the public directory at startup and exits if it is
 # missing; sunlight only creates it lazily on first upload.
-mkdir -p /var/lib/sunlight /var/lib/sunlight/public "$SHARED"
+mkdir -p /var/lib/sunlight /var/lib/sunlight/public /var/lib/sunlight/keepalive-public "$SHARED"
 
 # Wait for cactus's init to publish the log vkey; without it the log
 # list would be empty and every push would 404 on an unknown origin.
