@@ -269,3 +269,26 @@ func TestSignatureLabelIs12Bytes(t *testing.T) {
 		t.Errorf("SubtreeSignatureLabel bytes = %x, want %x", []byte(SubtreeSignatureLabel), want)
 	}
 }
+
+// TestMTCProofUnknownLargeArcCosigner checks that a cosigner ID with an
+// arc too large for a uint64 still parses. §7.2 requires unrecognized
+// cosigners to be ignored, so such a cosignature (e.g. GREASE) must not
+// make the whole certificate unparseable.
+func TestMTCProofUnknownLargeArcCosigner(t *testing.T) {
+	big := TrustAnchorID("32473.36893488147419103232") // 32473.2^65
+	p := &MTCProof{Start: 0, End: 1, Signatures: []Cosignature{
+		{CosignerID: TrustAnchorID("32473.1"), Signature: []byte{1}},
+		{CosignerID: big, Signature: []byte{2}},
+	}}
+	enc, err := p.MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := ParseMTCProof(enc)
+	if err != nil {
+		t.Fatalf("ParseMTCProof: %v", err)
+	}
+	if !reflect.DeepEqual(dec, p) {
+		t.Errorf("round trip = %+v, want %+v", dec, p)
+	}
+}

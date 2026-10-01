@@ -89,3 +89,47 @@ func TestBuildCANameDN(t *testing.T) {
 		t.Errorf("parseCANameDN = %q, want 32473.1", id)
 	}
 }
+
+// TestTrustAnchorIDLargeArcs pins that arcs beyond 63 bits decode and
+// re-encode exactly: OID components may be arbitrarily large (TAI §4),
+// so they must not make an MTCProof with an unknown cosigner
+// unparseable. Arcs from 2^63 to 2^64-1 fit in a uint64 but need 10
+// base-128 bytes, which an earlier bit-count check rejected.
+func TestTrustAnchorIDLargeArcs(t *testing.T) {
+	for _, tc := range []struct {
+		bin  []byte
+		want string
+	}{
+		{[]byte{0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00}, "9223372036854775808"},                                  // 2^63
+		{[]byte{0x81, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, "18446744073709551615"},                                 // 2^64-1
+		{[]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, "1180591620717411303423"},                               // 2^70-1
+		{[]byte{0x81, 0xfd, 0x59, 0x82, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00}, "32473.2361183241434822606848"}, // 32473.2^71
+	} {
+		id, err := TrustAnchorIDFromBinary(tc.bin)
+		if err != nil {
+			t.Errorf("TrustAnchorIDFromBinary(%x): %v", tc.bin, err)
+			continue
+		}
+		if string(id) != tc.want {
+			t.Errorf("TrustAnchorIDFromBinary(%x) = %s, want %s", tc.bin, id, tc.want)
+		}
+		back, err := id.Binary()
+		if err != nil || !bytes.Equal(back, tc.bin) {
+			t.Errorf("%s.Binary() = %x, %v; want %x", id, back, err, tc.bin)
+		}
+	}
+	for _, bad := range [][]byte{
+		{0x80, 0x01},       // non-minimal
+		{0x01, 0x80, 0x81}, // non-minimal second arc
+		{0x81, 0x80},       // truncated
+	} {
+		if _, err := TrustAnchorIDFromBinary(bad); err == nil {
+			t.Errorf("TrustAnchorIDFromBinary(%x) succeeded", bad)
+		}
+	}
+	for _, bad := range []string{"1.+2", "1.-2", "1.2a", "1..2"} {
+		if _, err := TrustAnchorID(bad).Binary(); err == nil {
+			t.Errorf("TrustAnchorID(%q).Binary() succeeded", bad)
+		}
+	}
+}

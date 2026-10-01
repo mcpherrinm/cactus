@@ -2,6 +2,7 @@ package cert
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -44,7 +45,8 @@ const OIDNamePrefix = "oid/"
 // of non-negative integers (a trust anchor ID is a relative OID, so
 // non-numeric components such as "foo" cannot be represented on the
 // wire), or if the binary representation exceeds the
-// MaxTrustAnchorIDLen bytes TAI §4 allows.
+// MaxTrustAnchorIDLen bytes TAI §4 allows. Arcs may be arbitrarily large
+// (TAI §4); in practice the length limit bounds them.
 func (id TrustAnchorID) Binary() ([]byte, error) {
 	s := string(id)
 	if s == "" {
@@ -55,11 +57,11 @@ func (id TrustAnchorID) Binary() ([]byte, error) {
 		if part == "" {
 			return nil, fmt.Errorf("cert: trust anchor ID %q has empty arc", s)
 		}
-		v, err := strconv.ParseUint(part, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("cert: trust anchor ID %q arc %q is not a non-negative integer: %w", s, part, err)
+		v, ok := new(big.Int).SetString(part, 10)
+		if !ok || strings.TrimLeft(part, "0123456789") != "" {
+			return nil, fmt.Errorf("cert: trust anchor ID %q arc %q is not a non-negative integer", s, part)
 		}
-		out = appendBase128(out, v)
+		out = appendBase128Big(out, v)
 	}
 	if len(out) > MaxTrustAnchorIDLen {
 		return nil, fmt.Errorf("cert: trust anchor ID %q is %d bytes, over the %d-byte limit", s, len(out), MaxTrustAnchorIDLen)
@@ -76,36 +78,65 @@ const MaxTrustAnchorIDLen = 32
 // TrustAnchorIDFromBinary is the inverse of Binary: it decodes the DER
 // content octets of a RELATIVE-OID into the canonical relative-ASCII
 // TrustAnchorID. It rejects non-minimal (leading 0x80) and truncated
-// (trailing continuation) encodings.
+// (trailing continuation) encodings, but not large arcs: OID components
+// may be arbitrarily large (TAI §4), and §7.2 requires a relying party to
+// ignore cosigners it doesn't recognize, so an unusual cosigner ID must
+// not make the whole MTCProof unparseable.
 func TrustAnchorIDFromBinary(b []byte) (TrustAnchorID, error) {
 	if len(b) == 0 {
 		return nil, fmt.Errorf("cert: empty binary trust anchor ID")
 	}
 	var arcs []string
-	var v uint64
-	started := false
-	bits := 0
-	for _, c := range b {
-		if !started && c == 0x80 {
+	for len(b) > 0 {
+		if b[0] == 0x80 {
 			return nil, fmt.Errorf("cert: non-minimal base-128 encoding in trust anchor ID")
 		}
-		started = true
-		bits += 7
-		if bits > 64 {
-			return nil, fmt.Errorf("cert: trust anchor ID arc overflows uint64")
+		end := 0
+		for end < len(b) && b[end]&0x80 != 0 {
+			end++
 		}
-		v = v<<7 | uint64(c&0x7f)
-		if c&0x80 == 0 {
+		if end == len(b) {
+			return nil, fmt.Errorf("cert: truncated base-128 encoding in trust anchor ID")
+		}
+		arc, rest := b[:end+1], b[end+1:]
+		if len(arc) <= 9 { // at most 63 bits
+			var v uint64
+			for _, c := range arc {
+				v = v<<7 | uint64(c&0x7f)
+			}
 			arcs = append(arcs, strconv.FormatUint(v, 10))
-			v = 0
-			started = false
-			bits = 0
+		} else {
+			v := new(big.Int)
+			for _, c := range arc {
+				v.Lsh(v, 7).Or(v, big.NewInt(int64(c&0x7f)))
+			}
+			arcs = append(arcs, v.String())
 		}
-	}
-	if started {
-		return nil, fmt.Errorf("cert: truncated base-128 encoding in trust anchor ID")
+		b = rest
 	}
 	return TrustAnchorID(strings.Join(arcs, ".")), nil
+}
+
+// appendBase128Big is appendBase128 for an arbitrarily large v >= 0.
+func appendBase128Big(dst []byte, v *big.Int) []byte {
+	if v.IsUint64() {
+		return appendBase128(dst, v.Uint64())
+	}
+	var digits []byte // little-endian base-128 digits
+	v = new(big.Int).Set(v)
+	mask := big.NewInt(0x7f)
+	for v.Sign() > 0 {
+		digits = append(digits, byte(new(big.Int).And(v, mask).Uint64()))
+		v.Rsh(v, 7)
+	}
+	for i := len(digits) - 1; i >= 0; i-- {
+		c := digits[i]
+		if i > 0 {
+			c |= 0x80
+		}
+		dst = append(dst, c)
+	}
+	return dst
 }
 
 // appendBase128 appends v to dst as a base-128, big-endian, minimal-
