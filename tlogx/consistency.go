@@ -24,12 +24,25 @@ func VerifyConsistencyProof(
 		return fmt.Errorf("tlogx: end %d > tree size %d", end, n)
 	}
 
-	// Step 2: initialize fn=start, sn=end-1, tn=n-1.
+	// Step 2: an empty subtree [x, x) is consistent with every tree, so
+	// its proof is empty and node_hash must be the hash of the empty
+	// string.
+	if start == end {
+		if len(proof) != 0 {
+			return fmt.Errorf("tlogx: non-empty proof for empty subtree [%d,%d)", start, end)
+		}
+		if nodeHash != hash(nil) {
+			return fmt.Errorf("tlogx: empty subtree [%d,%d) node_hash %x is not HASH()", start, end, nodeHash[:8])
+		}
+		return nil
+	}
+
+	// Step 3: initialize fn=start, sn=end-1, tn=n-1.
 	fn := start
 	sn := end - 1
 	tn := n - 1
 
-	// Step 3 & 4.
+	// Steps 4 & 5.
 	if sn == tn {
 		// fn == sn after some right-shifts; equalize.
 		for fn != sn {
@@ -45,7 +58,7 @@ func VerifyConsistencyProof(
 		}
 	}
 
-	// Steps 5-6: initialize fr, sr.
+	// Steps 6-7: initialize fr, sr.
 	var fr, sr Hash
 	if fn == sn {
 		// node_hash starts the reconstruction; consistency proof omits
@@ -61,7 +74,7 @@ func VerifyConsistencyProof(
 		proof = proof[1:]
 	}
 
-	// Step 7: incorporate remaining proof entries.
+	// Step 8: incorporate remaining proof entries.
 	for _, c := range proof {
 		if tn == 0 {
 			return errors.New("tlogx: proof has extra elements (tn=0)")
@@ -84,7 +97,7 @@ func VerifyConsistencyProof(
 		tn >>= 1
 	}
 
-	// Step 8: compare.
+	// Step 9: compare.
 	if tn != 0 {
 		return errors.New("tlogx: proof too short (tn != 0 at end)")
 	}
@@ -168,6 +181,9 @@ func generateConsistencyProof(
 	}
 	if end > n {
 		return nil, fmt.Errorf("tlogx: end %d > tree size %d", end, n)
+	}
+	if start == end {
+		return nil, nil // §4.4.1: SUBTREE_PROOF(start, start, D_n) = {}
 	}
 	if start == 0 && end == n {
 		return nil, nil // §4.4.1 base case
@@ -254,6 +270,9 @@ func computeRange(
 	lo, hi uint64,
 	leafHash func(uint64) (Hash, error),
 ) (Hash, error) {
+	if hi == lo {
+		return hash(nil), nil // MTH({}) = HASH()
+	}
 	if hi-lo == 1 {
 		return leafHash(lo)
 	}

@@ -60,7 +60,7 @@ func TestTBSEntryIsDER(t *testing.T) {
 // length is exercised and validated.
 func TestTBSEntryIsDERLongForm(t *testing.T) {
 	dn, _ := BuildCAName("32473.1")
-	bigSubject, _ := BuildCAName(strings.Repeat("a", 70_000))
+	bigSubject := testSubjectDN(t, strings.Repeat("a", 70_000))
 	algID := []byte{
 		0x30, 0x13,
 		0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,

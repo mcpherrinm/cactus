@@ -32,8 +32,8 @@ type Issuer struct {
 
 	// CADN is the precomputed DER-encoded CA ID Name (§5.1). It's used
 	// both as the TBSCertificateLogEntry.issuer and the
-	// TBSCertificate.issuer (draft-05: the issuer is the CA ID, not the
-	// per-log ID).
+	// TBSCertificate.issuer (the issuer is the CA ID, not the per-log
+	// ID).
 	CADN []byte
 
 	// LogNumber is this log's number (§5.2), used to compose serial

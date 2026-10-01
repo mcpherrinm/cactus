@@ -13,20 +13,13 @@ import (
 // Canonical form: cactus stores a TrustAnchorID as the *relative*
 // trust-anchor-ID ASCII (Section 3 of draft-ietf-tls-trust-anchor-ids),
 // e.g. "32473.1" — the dotted-decimal OID arcs *relative to the
-// 1.3.6.1.4.1 base*, exactly as draft-05 §5.1 shows in the DN example.
-// From this single form we derive:
+// 1.3.6.1.4.1 base*. From this single form we derive:
 //
-//   - the DN attribute value: UTF8String(<relative ASCII>)         (§5.1)
 //   - the cosigner_name / log_origin: "oid/1.3.6.1.4.1."+<rel ASCII> (§5.3.1)
 //   - the binary representation: DER content octets of the
-//     RELATIVE-OID, used in MTCProof.cosigner_id (§6.2), the
-//     trust_anchor_id certificate property, and the CA cert subjectKeyId.
-//
-// Keeping the relative form canonical is what lets all three be
-// simultaneously spec-exact (review finding 2): "oid/"+full and
-// UTF8String(relative) cannot both be produced from a single string
-// unless that string is the relative form and the 1.3.6.1.4.1 base is
-// re-attached only for the "oid/" name.
+//     RELATIVE-OID, used in the CA ID DN attribute value (§5.1),
+//     MTCProof.cosigner_id (§6.2), the trust_anchor_id certificate
+//     property, and the CA cert subjectKeyId.
 
 // TrustAnchorOIDBase is the absolute OID prefix that every Merkle Tree
 // Certificate trust anchor ID is relative to (§5.3.1 fixes the 16-byte
@@ -42,15 +35,16 @@ const OIDNamePrefix = "oid/"
 // 3 of draft-ietf-tls-trust-anchor-ids: the DER content octets of the
 // RELATIVE-OID (X.690 §8.20), i.e. each arc base-128 encoded with the
 // high bit set on every octet but the last of the arc, concatenated.
-// This is the form draft-05 §6.2 requires for MTCProof.cosigner_id and
-// TAI §7 requires for the trust_anchor_id certificate property.
+// This is the form draft-07 §6.2 requires for MTCProof.cosigner_id and
+// TAI §7.1 requires for the trust_anchor_id certificate property.
 //
 // For example, TrustAnchorID("32473.1").Binary() == {0x81,0xfd,0x59,0x01}.
 //
 // It returns an error if the ID is not a non-empty dotted-decimal string
 // of non-negative integers (a trust anchor ID is a relative OID, so
 // non-numeric components such as "foo" cannot be represented on the
-// wire).
+// wire), or if the binary representation exceeds the
+// MaxTrustAnchorIDLen bytes TAI §4 allows.
 func (id TrustAnchorID) Binary() ([]byte, error) {
 	s := string(id)
 	if s == "" {
@@ -67,8 +61,17 @@ func (id TrustAnchorID) Binary() ([]byte, error) {
 		}
 		out = appendBase128(out, v)
 	}
+	if len(out) > MaxTrustAnchorIDLen {
+		return nil, fmt.Errorf("cert: trust anchor ID %q is %d bytes, over the %d-byte limit", s, len(out), MaxTrustAnchorIDLen)
+	}
 	return out, nil
 }
+
+// MaxTrustAnchorIDLen is the longest binary representation a trust
+// anchor ID may have (draft-ietf-tls-trust-anchor-ids-06 §4). cactus
+// enforces it on IDs it produces; parsers stay lenient up to the
+// opaque<1..2^8-1> bound of MTCProof.cosigner_id.
+const MaxTrustAnchorIDLen = 32
 
 // TrustAnchorIDFromBinary is the inverse of Binary: it decodes the DER
 // content octets of a RELATIVE-OID into the canonical relative-ASCII

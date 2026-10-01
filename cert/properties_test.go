@@ -2,6 +2,7 @@ package cert
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/pem"
 	"reflect"
 	"testing"
@@ -46,15 +47,14 @@ func TestPropertyListRoundTripStandalone(t *testing.T) {
 }
 
 func TestPropertyListRoundTripLandmark(t *testing.T) {
-	// draft-05 §8.2: a landmark-relative certificate's property list
-	// carries only the individual landmark's trust anchor ID
-	// (CA-ID.1.logNumber.L); the additional_trust_anchor_ranges property
-	// was removed.
+	// §9.2: a landmark-relative certificate's property list carries the
+	// individual landmark's trust anchor ID (CA-ID.1.logNumber.L), its
+	// landmark group pattern (CA-ID.2.logNumber.{L-}), and
+	// trust_anchor_negotiation.
 	props := []CertificateProperty{
-		{
-			Type:          PropertyTrustAnchorID,
-			TrustAnchorID: TrustAnchorID("32473.1.1.8.42"),
-		},
+		{Type: PropertyTrustAnchorID, TrustAnchorID: TrustAnchorID("32473.1.1.8.42")},
+		{Type: PropertyTrustAnchorGroups, Patterns: []TrustAnchorIDPattern{LandmarkGroupPattern(TrustAnchorID("32473.1"), 8, 42)}},
+		{Type: PropertyTrustAnchorNegotiation},
 	}
 	raw, err := BuildPropertyList(props)
 	if err != nil {
@@ -66,6 +66,52 @@ func TestPropertyListRoundTripLandmark(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, props) {
 		t.Errorf("round trip differs:\n got %+v\nwant %+v", got, props)
+	}
+}
+
+// TestPropertyListTAIExample checks the CertificatePropertyList from the
+// PEM example in draft-ietf-tls-trust-anchor-ids-06 §7.4: trust_anchor_id
+// 32473.1, trust_anchor_groups 2187.2.{100-200} and
+// 32473.3.{42-}.{100-200}, and trust_anchor_negotiation.
+func TestPropertyListTAIExample(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString("ACoAAAAEgf1ZAQABABoAGAmRC5ELAgJkgUgNgf1Zgf1ZAwMqgGSBSAACAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CertificateProperty{
+		{Type: PropertyTrustAnchorID, TrustAnchorID: TrustAnchorID("32473.1")},
+		{Type: PropertyTrustAnchorGroups, Patterns: []TrustAnchorIDPattern{
+			MustParseTrustAnchorIDPattern("2187.2.{100-200}"),
+			MustParseTrustAnchorIDPattern("32473.3.{42-}.{100-200}"),
+		}},
+		{Type: PropertyTrustAnchorNegotiation},
+	}
+	got, err := ParsePropertyList(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParsePropertyList =\n %+v\nwant\n %+v", got, want)
+	}
+	enc, err := BuildPropertyList(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(enc, raw) {
+		t.Errorf("BuildPropertyList = %x, want %x", enc, raw)
+	}
+}
+
+// TestParsePropertyListKeepsUnknown checks that an unrecognized property
+// type is passed through rather than rejected (TAI §7).
+func TestParsePropertyListKeepsUnknown(t *testing.T) {
+	raw := []byte{0x00, 0x07, 0x12, 0x34, 0x00, 0x03, 0xaa, 0xbb, 0xcc}
+	got, err := ParsePropertyList(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Type != 0x1234 || !bytes.Equal(got[0].Data, []byte{0xaa, 0xbb, 0xcc}) {
+		t.Errorf("ParsePropertyList = %+v", got)
 	}
 }
 

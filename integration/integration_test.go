@@ -372,7 +372,7 @@ func acmeIssueOneInner(base, dnsName string) ([]byte, string, *ecdsa.PrivateKey,
 
 // verifyAgainstLog runs the §7.2 verification: split cert, decode
 // MTCProof, recompute leaf hash, evaluate inclusion proof, verify CA
-// cosignature via cert.VerifyMTCSignature.
+// cosignature via cert.VerifyCosignature.
 func verifyAgainstLog(der []byte, s *stack) error {
 	tbs, _, sigValue, err := cert.SplitCertificate(der)
 	if err != nil {
@@ -386,7 +386,7 @@ func verifyAgainstLog(der []byte, s *stack) error {
 	if err != nil {
 		return err
 	}
-	// draft-05 §6.2/§7.2: serial = (log_number << 48) | index.
+	// draft-07 §6.2/§7.2: serial = (log_number << 48) | index.
 	_, index, err := cert.SplitSerial(serial)
 	if err != nil {
 		return err
@@ -407,7 +407,7 @@ func verifyAgainstLog(der []byte, s *stack) error {
 	if len(proof.Signatures) != 1 {
 		return fmt.Errorf("got %d signatures", len(proof.Signatures))
 	}
-	return cert.VerifyMTCSignature(cert.CosignerKey{
+	return cert.VerifyCosignature(cert.CosignerKey{
 		ID:        s.cosigner,
 		Algorithm: cert.AlgMLDSA44,
 		PublicKey: s.signer.PublicKey(),

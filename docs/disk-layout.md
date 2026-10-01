@@ -54,7 +54,7 @@ emits via `tlog.ReadTileData(t, hr)` — this matches the
 Each entries ("data") tile holds up to 256 entries, each encoded as:
 
 ```
-uint16 length (2 bytes, big-endian) || MerkleTreeCertEntry bytes
+uint16 length (2 bytes, big-endian) || MTCLogEntry bytes
 ```
 
 This is the [c2sp tlog-tiles] entry-bundle framing ("entry bundles are

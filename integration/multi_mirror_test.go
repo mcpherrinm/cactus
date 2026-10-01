@@ -123,7 +123,7 @@ func TestMultiCosignerQuorum(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cert.VerifyMTCSignature(key, sig, msg); err != nil {
+		if err := cert.VerifyCosignature(key, sig, msg); err != nil {
 			t.Errorf("returned sig %q failed to verify: %v", sig.CosignerID, err)
 		}
 	}

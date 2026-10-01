@@ -3,6 +3,7 @@ package cert
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"reflect"
 	"testing"
@@ -41,15 +42,16 @@ func TestEntryHashShape(t *testing.T) {
 }
 
 func TestBuildCAName(t *testing.T) {
-	logID := "32473.1"
-	der, err := BuildCAName(logID)
+	caID := "32473.1"
+	der, err := BuildCAName(caID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Re-decode and check the structure.
+	// Re-decode and check the structure: one RDN, one attribute, a
+	// RELATIVE-OID value holding the trust anchor ID's binary form.
 	type atv struct {
 		Type  asn1.ObjectIdentifier
-		Value string `asn1:"utf8"`
+		Value asn1.RawValue
 	}
 	var seq []asn1.RawValue
 	if _, err := asn1.Unmarshal(der, &seq); err != nil {
@@ -68,9 +70,22 @@ func TestBuildCAName(t *testing.T) {
 	if !got.Type.Equal(OIDRDNATrustAnchorID) {
 		t.Errorf("ATV oid = %s, want %s", got.Type, OIDRDNATrustAnchorID)
 	}
-	if got.Value != logID {
-		t.Errorf("ATV value = %q, want %q", got.Value, logID)
+	if got.Value.Tag != 13 || !bytes.Equal(got.Value.Bytes, []byte{0x81, 0xfd, 0x59, 0x01}) {
+		t.Errorf("ATV value = tag %d %x, want RELATIVE-OID 81fd5901", got.Value.Tag, got.Value.Bytes)
 	}
+	if _, err := BuildCAName("cactus.test/example"); err == nil {
+		t.Error("BuildCAName accepted a non-OID CA ID")
+	}
+}
+
+// testSubjectDN returns the DER of a Name with a single commonName.
+func testSubjectDN(t *testing.T, cn string) []byte {
+	t.Helper()
+	der, err := asn1.Marshal(pkix.Name{CommonName: cn}.ToRDNSequence())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
 
 func TestMarshalDERIsParseable(t *testing.T) {
@@ -78,10 +93,7 @@ func TestMarshalDERIsParseable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjectDN, err := BuildCAName("cactus.test/example")
-	if err != nil {
-		t.Fatal(err)
-	}
+	subjectDN := testSubjectDN(t, "cactus.test")
 	// Minimal AlgorithmIdentifier { OID 1.2.840.10045.2.1 ecPublicKey }.
 	algID := []byte{
 		0x30, 0x13,
@@ -121,10 +133,7 @@ func TestParseTBSCertificateLogEntryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjectDN, err := BuildCAName("cactus.test/example")
-	if err != nil {
-		t.Fatal(err)
-	}
+	subjectDN := testSubjectDN(t, "cactus.test")
 	algID := []byte{
 		0x30, 0x13,
 		0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,

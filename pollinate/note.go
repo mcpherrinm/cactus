@@ -123,7 +123,7 @@ func (n *Note) VerifySignature(signerID cert.TrustAnchorID, rawKey []byte) error
 		if err != nil {
 			return err
 		}
-		if err := cert.VerifyMTCSignature(key, cert.MTCSignature{CosignerID: signerID, Signature: sig}, msg); err == nil {
+		if err := cert.VerifyCosignature(key, cert.Cosignature{CosignerID: signerID, Signature: sig}, msg); err == nil {
 			return nil
 		}
 	}

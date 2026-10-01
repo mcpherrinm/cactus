@@ -127,7 +127,7 @@ func TestIssueRoundTripFullValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RebuildLogEntryFromTBS: %v", err)
 	}
-	// draft-05 §6.2: serial = (log_number << 48) | index. log_number is 1
+	// draft-07 §6.2: serial = (log_number << 48) | index. log_number is 1
 	// here, so the serial is always non-zero.
 	logNumber, index, err := cert.SplitSerial(serialFromCert)
 	if err != nil {
@@ -194,9 +194,9 @@ func algIsMTCProof(algID []byte) bool {
 // public key, message, and signature.
 func verifySignature(t *testing.T, id cert.TrustAnchorID, pub, msg, sig []byte) bool {
 	t.Helper()
-	err := cert.VerifyMTCSignature(
+	err := cert.VerifyCosignature(
 		cert.CosignerKey{ID: id, Algorithm: cert.AlgMLDSA44, PublicKey: pub},
-		cert.MTCSignature{CosignerID: id, Signature: sig}, msg)
+		cert.Cosignature{CosignerID: id, Signature: sig}, msg)
 	if err != nil {
 		t.Logf("verify: %v", err)
 	}

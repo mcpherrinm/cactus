@@ -4,7 +4,7 @@
 //
 //   - Append a batch of entries, returning assigned indices.
 //   - Persist new tiles (level >= 0 hash tiles, plus a level=-1 "data
-//     tile" carrying full MerkleTreeCertEntry blobs).
+//     tile" carrying full MTCLogEntry blobs).
 //   - Serve as a tlog.HashReader so the rest of the log can build proofs.
 //
 // All state is owned by a single goroutine; the type is NOT

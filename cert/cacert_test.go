@@ -12,7 +12,6 @@ func TestMTCCertificationAuthorityRoundTrip(t *testing.T) {
 	// ecdsa-with-SHA256 = 1.2.840.10045.4.3.2
 	sigAlg := []int{1, 2, 840, 10045, 4, 3, 2}
 	ca := MTCCertificationAuthority{
-		LogHash:   OIDDigestSHA256,
 		SigAlg:    sigAlg,
 		MinSerial: (1 << 48) | 5,
 		MaxSerial: (9 << 48) | 7,
@@ -25,9 +24,6 @@ func TestMTCCertificationAuthorityRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.LogHash.Equal(OIDDigestSHA256) {
-		t.Errorf("logHash = %s, want %s", got.LogHash, OIDDigestSHA256)
-	}
 	if !got.SigAlg.Equal(sigAlg) {
 		t.Errorf("sigAlg = %s", got.SigAlg)
 	}
@@ -39,35 +35,58 @@ func TestMTCCertificationAuthorityRoundTrip(t *testing.T) {
 	}
 }
 
-// A draft-04 extension (no maxSerial) must be rejected rather than
-// silently parsed with a zero maxSerial, which would revoke everything.
-func TestMTCCertificationAuthorityRejectsDraft04(t *testing.T) {
+// A draft-05 extension (with the logHash field draft-06 removed) must be
+// rejected rather than misparsed: its first field is an
+// AlgorithmIdentifier where sigAlg is expected, and it has an extra
+// trailing INTEGER.
+func TestMTCCertificationAuthorityRejectsDraft05(t *testing.T) {
 	der, err := asn1.Marshal(struct {
 		LogHash   algorithmIdentifier
 		SigAlg    algorithmIdentifier
 		MinSerial *big.Int
+		MaxSerial *big.Int
 	}{
-		LogHash:   algorithmIdentifier{Algorithm: OIDDigestSHA256},
+		LogHash:   algorithmIdentifier{Algorithm: asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}},
 		SigAlg:    algorithmIdentifier{Algorithm: asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}},
-		MinSerial: big.NewInt(5),
+		MinSerial: big.NewInt(1 << 48),
+		MaxSerial: new(big.Int).SetUint64(math.MaxUint64),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ParseMTCCertificationAuthority(der); err == nil {
-		t.Error("draft-04 MTCCertificationAuthority (no maxSerial) parsed without error")
+		t.Error("draft-05 MTCCertificationAuthority (with logHash) parsed without error")
 	}
 }
 
 func TestMTCCertificationAuthorityRejectsMaxBelowMin(t *testing.T) {
 	_, err := MTCCertificationAuthority{
-		LogHash:   OIDDigestSHA256,
 		SigAlg:    asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2},
-		MinSerial: 10,
-		MaxSerial: 9,
+		MinSerial: 10 << 48,
+		MaxSerial: 9 << 48,
 	}.Marshal()
 	if err == nil {
 		t.Error("maxSerial below minSerial marshalled without error")
+	}
+}
+
+// §5.5 constrains both serial bounds to (mtcMinSerial..mtcMaxSerial):
+// no serial below 2^48 (log number 0) is valid.
+func TestMTCCertificationAuthoritySerialBelowMin(t *testing.T) {
+	sigAlg := asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	if _, err := (MTCCertificationAuthority{SigAlg: sigAlg, MinSerial: 0, MaxSerial: math.MaxUint64}).Marshal(); err == nil {
+		t.Error("minSerial 0 marshalled without error")
+	}
+	der, err := asn1.Marshal(mtcCertificationAuthorityASN1{
+		SigAlg:    algorithmIdentifier{Algorithm: sigAlg},
+		MinSerial: big.NewInt(1<<48 - 1),
+		MaxSerial: new(big.Int).SetUint64(math.MaxUint64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseMTCCertificationAuthority(der); err == nil {
+		t.Error("minSerial 2^48-1 parsed without error")
 	}
 }
 

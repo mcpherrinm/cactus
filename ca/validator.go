@@ -56,6 +56,14 @@ type Validator struct {
 	// does not pin a NotBefore/NotAfter.
 	DefaultLifetime time.Duration
 
+	// MaxLifetime, if non-zero, caps certificate validity: the default
+	// window is clamped to it, and an order whose notAfter is more than
+	// MaxLifetime from now is rejected. It must match the landmark
+	// sequence's max_cert_lifetime, since a landmark's expiry (allocation
+	// time + max_cert_lifetime) MUST be at or after the notAfter of every
+	// certificate below it (§6.4.1).
+	MaxLifetime time.Duration
+
 	// Now returns "now"; mocked in tests.
 	Now func() time.Time
 }
@@ -72,6 +80,10 @@ func NewValidator() *Validator {
 // identifiers don't match the order. ACME callers should map this to
 // the `urn:ietf:params:acme:error:badCSR` problem type (RFC 8555 §7.4).
 var ErrBadCSR = errors.New("badCSR")
+
+// ErrBadValidity is returned (wrapped) when the order's requested
+// notBefore/notAfter cannot be honoured.
+var ErrBadValidity = errors.New("unacceptable validity period")
 
 // Validate checks csr against order and returns a Validated.
 func (v *Validator) Validate(csr *x509.CertificateRequest, order OrderInput) (*Validated, error) {
@@ -129,10 +141,18 @@ func (v *Validator) Validate(csr *x509.CertificateRequest, order OrderInput) (*V
 		notBefore = v.Now().UTC()
 	}
 	if notAfter.IsZero() {
-		notAfter = notBefore.Add(v.DefaultLifetime)
+		lifetime := v.DefaultLifetime
+		if v.MaxLifetime > 0 {
+			lifetime = min(lifetime, v.MaxLifetime)
+		}
+		notAfter = notBefore.Add(lifetime)
 	}
 	if !notAfter.After(notBefore) {
-		return nil, errors.New("validity window has zero or negative duration")
+		return nil, fmt.Errorf("%w: validity window has zero or negative duration", ErrBadValidity)
+	}
+	if v.MaxLifetime > 0 && notAfter.After(v.Now().Add(v.MaxLifetime)) {
+		return nil, fmt.Errorf("%w: notAfter %s is more than the maximum certificate lifetime (%s) from now",
+			ErrBadValidity, notAfter.Format(time.RFC3339), v.MaxLifetime)
 	}
 
 	subjectDER := csr.RawSubject
@@ -167,7 +187,7 @@ func (v *Validator) Validate(csr *x509.CertificateRequest, order OrderInput) (*V
 // BuildLogEntry returns the TBSCertificateLogEntry's contents-octet
 // encoding (i.e. without the outer SEQUENCE header), plus the full DER
 // of the entry. The contents-octet form is what gets carried in
-// MerkleTreeCertEntry.tbs_cert_entry_data per §5.3.
+// MTCLogEntry.tbs_cert_entry_data per §5.3.
 func BuildLogEntry(v *Validated, issuerDN []byte) (*cert.TBSCertificateLogEntry, []byte, []byte, error) {
 	if len(v.SubjectPublicKeyInfo) == 0 {
 		return nil, nil, nil, errors.New("SubjectPublicKeyInfo missing")

@@ -8,7 +8,7 @@ import (
 
 // TestTrustAnchorIDBinary pins the binary (RELATIVE-OID) representation
 // used on the wire for MTCProof.cosigner_id (§6.2) and the
-// trust_anchor_id property (TAI §7). draft-05 §5.1 gives the ground
+// trust_anchor_id property (TAI §7). draft-07 §5.1 gives the ground
 // truth: trust anchor ID 32473.1 has RELATIVE-OID content octets
 // 81 fd 59 01. (Regression for review finding 1.)
 func TestTrustAnchorIDBinary(t *testing.T) {
@@ -69,15 +69,14 @@ func TestOIDName(t *testing.T) {
 
 // TestBuildCANameDN pins the §5.1 distinguished-name encoding: the CA ID
 // 32473.1 is a single RDN with attribute type id-rdna-trustAnchorID
-// (cactus experimental OID 1.3.6.1.4.1.44363.47.1) and a UTF8String value
-// holding the *relative* trust anchor ID "32473.1". The spec gives the
-// attribute value bytes as 0c0733323437332e31. (Regression for finding 2.)
+// (1.3.6.1.5.5.7.25.3) and a RELATIVE-OID value. The draft gives the
+// RFC 4514 form as 1.3.6.1.5.5.7.25.3=#0d0481fd5901.
 func TestBuildCANameDN(t *testing.T) {
 	dn, err := BuildCAName("32473.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantHex = "301931173015060a2b0601040182da4b2f010c0733323437332e31"
+	const wantHex = "30143112301006082b060105050719030d0481fd5901"
 	if got := hex.EncodeToString(dn); got != wantHex {
 		t.Errorf("BuildCAName(32473.1) DER =\n  %s\nwant\n  %s", got, wantHex)
 	}

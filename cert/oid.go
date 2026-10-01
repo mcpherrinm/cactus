@@ -1,27 +1,29 @@
 // Package cert deals with the X.509 / TLS encodings used by Merkle Tree
-// certificates per draft-ietf-plants-merkle-tree-certs-05.
+// certificates per draft-ietf-plants-merkle-tree-certs-07.
 package cert
 
 import "encoding/asn1"
 
-// Experimental OIDs locked in for v1, per §13 and §5.1 of the draft.
-// These will move to IANA-assigned arcs once the draft progresses;
-// callers should consume the named symbols, not the raw arcs.
+// PKIX OIDs allocated to draft-07 (§13.1). Earlier drafts used
+// experimental arcs under 1.3.6.1.4.1.44363.47, which cactus no longer
+// emits or accepts.
 var (
-	// OIDAlgMTCProof — id-alg-mtcProof, used as TBSCertificate.signature
-	// and Certificate.signatureAlgorithm. Parameters MUST be omitted.
-	OIDAlgMTCProof = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 0}
+	// OIDAlgMTCProof is id-alg-mtcProof {id-pkix algorithms(6) 67} (§6.2,
+	// §13.1.2), used as TBSCertificate.signature and
+	// Certificate.signatureAlgorithm. Parameters MUST be omitted.
+	OIDAlgMTCProof = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 67}
 
-	// OIDRDNATrustAnchorID — the experimental id-rdna-trustAnchorID arc.
-	// In v1 the attribute value is encoded as a UTF8String containing the
-	// CA ID's ASCII representation (per §5.1 "For initial experimentation").
-	OIDRDNATrustAnchorID = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 1}
+	// OIDRDNATrustAnchorID is id-rdna-trustAnchorID {id-pkix rdna(25) 3}
+	// (§5.1, §13.1.4). The attribute value is a RELATIVE-OID holding the
+	// trust anchor ID.
+	OIDRDNATrustAnchorID = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 25, 3}
 
-	// OIDExtMTCCertificationAuthority — the experimental
-	// id-pe-mtcCertificationAuthority arc (draft-05 §5.5 / §13.3). The
-	// IANA-track value is {iso(1) ... pkix(7) pe(1) TBD}; until assignment
-	// cactus uses this private-enterprise placeholder.
-	OIDExtMTCCertificationAuthority = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 2}
+	// OIDExtMTCCertificationAuthoritySHA256 is
+	// id-pe-mtcCertificationAuthority-SHA256 {id-pe 38} (§5.5, §13.1.3),
+	// the Merkle Tree CA extension type for CAs whose logs hash with
+	// SHA-256. Since draft-06 the extension type, not a field of the
+	// extension, identifies the tree hash.
+	OIDExtMTCCertificationAuthoritySHA256 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 38}
 )
 
 // SubtreeSignatureLabel is the 12-byte fixed prefix from §5.3.1:

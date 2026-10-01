@@ -5,9 +5,10 @@ the parts of [draft-ietf-plants-merkle-tree-certs][draft] that you
 need to keep in your head while reading the code.
 
 It's deliberately thinner than the IETF draft. For anything you can't
-find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-05.txt`
-is the version cactus targets, and section numbers in this doc match
-that file.
+find here, the draft is the source of truth — draft-07 is the version
+cactus targets (until it is published, `specs/draft-ietf-plants-merkle-tree-certs-07-pre.md`
+is the editor's copy it was cut from), and section numbers in this doc
+match it.
 
 ## Why MTC exists
 
@@ -99,10 +100,14 @@ directly contained in a tree of size exactly `end`, but it can still
 be efficiently shown consistent with bigger trees (§4.4).
 
 §4.5 is the algorithmic core of MTC: given any range `[start, end)`,
-return the **one or two** subtrees that efficiently cover it. After a
-checkpoint flush, the CA uses §4.5 to find the covering subtree(s)
-for "everything I added since the last checkpoint" and signs each
-one. That's why a single MTCProof has *one* subtree even though
+return the **two** subtrees that efficiently cover it. Since draft-07
+an empty interval `[x, x)` is also a valid subtree, so there are always
+exactly two; when the range holds a single entry, the second is the
+empty `[end, end)`. After a checkpoint flush, the CA uses §4.5 to find
+the covering subtrees for "everything I added since the last
+checkpoint" and signs each non-empty one (no certificate can point at
+an empty subtree, so cactus doesn't sign or request cosignatures for
+it). That's why a single MTCProof has *one* subtree even though
 multiple subtrees may be signed at each checkpoint — the proof picks
 the one that contains the cert's index.
 
@@ -121,19 +126,24 @@ log it operates has a **log number** (1–65535); the log's ID is derived
 as `CA-ID.0.logNumber` (§5.2). cactus runs one log, configured by its
 `log.number`.
 
-The log is an append-only tree of `MerkleTreeCertEntry` structures.
-Each entry begins with an `extensions<0..2^16-1>` vector (empty in
-cactus) followed by a type. Any index MAY be a `null_entry`. Serial
+The log is an append-only tree of at most 2^48-1 `MTCLogEntry`
+structures, each at most 65535 bytes. Each entry begins with an
+`extensions<0..2^16-1>` vector (empty in cactus) followed by a type. Any index MAY be a `null_entry`. Serial
 numbers are kept non-zero by requiring a non-zero log number (see §6).
 
 Each non-null entry is a `tbs_cert_entry`: the TBS-style fields of
 the cert with the public key replaced by `HASH(SubjectPublicKeyInfo)`.
-The cert's "issuer" is a special DN containing the **CA ID** (§5.1).
+The cert's "issuer" is a special DN containing the **CA ID** (§5.1): a
+single `id-rdna-trustAnchorID` (1.3.6.1.5.5.7.25.3) attribute whose
+value is a RELATIVE-OID, e.g. `1.3.6.1.5.5.7.25.3=#0d0481fd5901` for CA
+ID `32473.1`.
 
 A CA's parameters are published in its CA certificate via a critical
-`id-pe-mtcCertificationAuthority` extension (§5.5) carrying the log hash
-algorithm, the CA cosigner's signature algorithm, and a `minSerial`;
-cactus encodes/decodes this in `cert/cacert.go`.
+Merkle Tree CA extension (§5.5). The extension's *type* names the tree
+hash — cactus uses `id-pe-mtcCertificationAuthority-SHA256`
+(1.3.6.1.5.5.7.1.38) — and its body carries the CA cosigner's signature
+algorithm and the `minSerial`/`maxSerial` bounds (each at least 2^48,
+i.e. log number ≥ 1); cactus encodes/decodes this in `cert/cacert.go`.
 
 The log is published as **tiles** ([c2sp.org/tlog-tiles]). For cactus,
 that means the read-path (HTTP) serves files at:
@@ -203,25 +213,30 @@ In cactus, the cosigner abstraction is in `signer/`:
 §6.2 specifies how the X.509 cert is laid out:
 
 - `signatureAlgorithm` and `tbsCertificate.signature` both use
-  `id-alg-mtcProof` with absent parameters.
+  `id-alg-mtcProof` (1.3.6.1.5.5.7.6.67) with absent parameters. Drafts
+  before -07 used experimental OIDs under 1.3.6.1.4.1.44363.47; cactus
+  now only speaks the allocated PKIX OIDs.
 - `signatureValue` is a BIT STRING whose body — **with no further
   ASN.1 wrapping** — is the TLS-presentation encoding of:
 
 ```
 struct {
-    MerkleTreeCertEntryExtension extensions<0..2^16-1>;
+    MTCLogEntryExtension extensions<0..2^16-1>;
     uint48 start;
     uint48 end;
-    HashValue inclusion_proof<0..2^16-1>;
-    MTCSignature signatures<0..2^16-1>;
+    opaque inclusion_proof<0..2^16-1>;
+    Cosignature signatures<0..2^24-1>;
 } MTCProof;
 ```
 
 - `extensions` mirrors the log entry's extensions (empty in cactus).
 - `start`/`end` are 48-bit, leaving room in the serial for the log
   number.
-- `signatures` MUST be sorted by `cosigner_id` (shorter first, then
-  lexicographically) with no duplicates.
+- `signatures` has a 24-bit length (since draft-06, so several
+  post-quantum signatures fit) and MUST be sorted by `cosigner_id`
+  (shorter first, then lexicographically) with no duplicates. It may
+  carry GREASE cosignatures from unallocated cosigner IDs, which
+  verifiers ignore like any unknown cosigner.
 - `serialNumber` is `(log_number << 48) | index` (§6.2). The non-zero
   log number keeps the serial non-zero (RFC 5280 §4.1.2.2 forbids a
   zero serial), and lets a relying party revoke whole logs by serial
@@ -234,13 +249,13 @@ This MTCProof can carry **two flavors of cert**:
   `signatures<>` slice has at least one cosigner. Issuable
   immediately after the next checkpoint.
 - **Landmark-relative certificate** (§6.4): the proof's subtree is
-  a special pre-distributed *landmark subtree*, and the
-  `signatures<>` slice is empty. Issuable only after the entry has
-  been included in a landmark, but smaller and signature-free.
+  a special pre-distributed *landmark subtree*, so no signatures are
+  needed (cactus emits none). Issuable only after the entry has been
+  included in a landmark, but smaller and signature-free.
 
 The cert assembly code is in `cert/` and `ca/`:
 
-- `cert.MTCProof` / `cert.MTCSubtree` / `cert.MTCSignature` —
+- `cert.MTCProof` / `cert.MTCSubtree` / `cert.Cosignature` —
   TLS-presentation encoders.
 - `cert.BuildCAName` — the §5.2 issuer DN.
 - `ca.Validator` / `ca.Issuer` — turn an ACME order + CSR into a
@@ -269,7 +284,7 @@ The CA:
 
 2. Computes the Merkle hashes of those two subtrees from the tiles.
 
-3. Signs each subtree's `MTCSubtreeSignatureInput` with its CA
+3. Signs each subtree's `CosignedMessage` (§5.3.1) with its CA
    cosigner key.
 
 4. Optionally fans the request out to mirrors. Each mirror that has
@@ -293,18 +308,23 @@ When a client wants the cert at index 97:
 This is the subtle part. The promise: **a cert with no signatures**
 that an up-to-date relying party can verify in ~constant time.
 
-A *landmark* is a designated tree size. Landmarks are allocated by
-the CA (or some coordinating party) at a regular cadence — say, once
-per hour — and they're append-only and strictly increasing.
+A *landmark* is a designated tree size with a number and an expiry
+time (§6.4.1). Landmarks are allocated by the CA at a regular cadence
+— say, once per hour — and they're append-only, with strictly
+increasing tree sizes and non-decreasing expiries. Landmark 0 has tree
+size 0 and expires at the Epoch.
 
-For each landmark `N` with tree size `T_N`, define its **landmark
-subtrees** as the §4.5 covering subtrees of `[T_{N-1}, T_N)`. So if
-a CA runs hourly landmarks and issues 4M certs/hour, each landmark
-has one or two subtrees, each ~22 levels deep (~2M leaves).
+For each landmark `N` with tree size `T_N`, define its two **landmark
+subtrees** as the §4.5 covering subtrees of `[T_{N-1}, T_N)` (landmark
+0's are both `[0, 0)`). So if a CA runs hourly landmarks and issues 4M
+certs/hour, each landmark has two subtrees, each ~22 levels deep (~2M
+leaves).
 
-Relying parties periodically download the **active** landmarks (the
-most recent `max_active_landmarks` of them) and store *just the
-subtree hashes* — about 10 KiB per CA at typical settings. When an
+A landmark's expiry is at or after the `notAfter` of every cert below
+its tree size; the CA sets it to the allocation time plus its maximum
+cert lifetime. A landmark is **active** until it expires. Relying
+parties periodically download the active landmarks (§6.4.3) and store
+*just the subtree hashes* — about 10 KiB per CA at typical settings. When an
 authenticating party presents a landmark-relative cert:
 
 1. The cert's MTCProof has a subtree `[s, e)` and an inclusion proof.
@@ -319,8 +339,11 @@ In cactus:
 
 - `landmark/sequence.go` is the CA-side allocator (§6.4.2). Append-only
   on disk; the in-memory state replays from JSONL on restart.
-- `landmark.Sequence.Handler()` serves the §6.4.1 text-format URL
-  that relying parties poll.
+- `landmark.Sequence.Handler()` serves the §6.4.3 text-format URL
+  that relying parties poll: the latest landmark number, then
+  `<tree size> <expiry>` for each active landmark, newest first,
+  ending with the newest expired one. `landmark.ParseList` is the
+  strict decoder (used by `cactus-cli`).
 - `cert.BuildLandmarkRelativeCert` re-uses the existing standalone
   cert's TBS (so subject, validity, SPKI all match) and replaces
   only the signature value with a landmark MTCProof.
@@ -349,7 +372,7 @@ Step-by-step, the relying party's job:
    doesn't fully implement this, but the data model carries it.)
 4. Reconstruct `TBSCertificateLogEntry` from the cert's TBS by
    replacing `subjectPublicKeyInfo` with `HASH(SubjectPublicKeyInfo)`.
-5. Wrap that in a `MerkleTreeCertEntry{type=tbs_cert_entry,data=...}`
+5. Wrap that in an `MTCLogEntry{type=tbs_cert_entry,data=...}`
    and compute the leaf hash: `HASH(0x00 || entry)`.
 6. Evaluate the inclusion proof from the leaf hash up to the
    `MTCProof.subtree` hash.
@@ -364,7 +387,7 @@ Cactus's helpers:
 - `cert.RebuildLogEntryFromTBS` — step 4.
 - `cert.EntryHash` — step 5 (single-pass per §7.2's inline algorithm).
 - `tlogx.EvaluateInclusionProof` — step 6.
-- `cert.VerifyMTCSignature` — step 7's cosigner check.
+- `cert.VerifyCosignature` — step 7's cosigner check.
 
 The shape of all these helpers — small, composable, zero hidden
 state — is intentional. A relying-party library outside cactus
@@ -382,15 +405,20 @@ ACME is what the authenticating party (the cert holder) uses to
    from cosignature collection latency.
 2. **Cert download negotiation.** The client may send
    `Accept: application/pem-certificate-chain-with-properties`. The
-   server then includes a `CertificatePropertyList` alongside the
-   PEM (cactus uses an adjacent `MTC PROPERTIES` PEM block; the
-   trust-anchor-ids draft hasn't pinned the wire format yet). The
-   property list carries a single `trust_anchor_id` — the **CA ID**
-   (§8.1) for a standalone cert, or the specific landmark's ID
-   `CA-ID.1.logNumber.L` (§8.2) for a landmark-relative cert. A relying
-   party advertises a **landmark group** `CA-ID.2.logNumber.L` (§8.2.1)
-   in its `trust_anchors` to accept the CA's standalone certs and all
-   active landmarks at once.
+   server then prepends a `CERTIFICATE PROPERTIES` PEM block holding a
+   `CertificatePropertyList` (trust-anchor-ids §7). Per §9.2:
+   - A standalone cert carries `trust_anchor_id` = the **CA ID** (§8.1)
+     and `trust_anchor_groups` = the pattern `CA-ID.2.{0-}.{0-}`.
+   - A landmark-relative cert carries `trust_anchor_id` = the
+     landmark's ID `CA-ID.1.logNumber.L` (§8.2), `trust_anchor_groups`
+     = `CA-ID.2.logNumber.{L-}`, and `trust_anchor_negotiation`, so the
+     server only sends it to relying parties that ask for the landmark.
+
+   A relying party up to date as of landmark L advertises the
+   **landmark group** `CA-ID.2.logNumber.L` (§8.2.1) in its
+   `trust_anchors`. That group contains the CA ID and landmarks 0
+   through L of the log, so it matches both patterns above for every
+   landmark up to L.
 3. **Enhancement URL.** The standalone cert response carries a
    `Link: <…>; rel="acme-optional-alternate"` header (draft §9.1) pointing at
    the landmark-relative variant, at
@@ -422,7 +450,7 @@ If you're reading the code, this is the order I'd recommend:
 3. `log/log.go` — the issuance log: how new entries get into a
    checkpoint, how covering subtrees get signed, how Wait blocks
    for a committed entry.
-4. `cert/proof.go` — MTCProof, MTCSubtree, MTCSignature on the
+4. `cert/proof.go` — MTCProof, MTCSubtree, Cosignature on the
    wire.
 5. `ca/issuer.go` — assemble the X.509 cert from a CSR + a `log.Issued`.
 6. `acme/handler.go` — the ACME state machine.
@@ -437,7 +465,7 @@ re-verified using the §7.2 procedure on the live log.
 
 ## Further reading
 
-- [draft-ietf-plants-merkle-tree-certs-05][draft] — the spec.
+- [draft-ietf-plants-merkle-tree-certs-07][draft] — the spec.
 - [c2sp tlog-tiles] — the read-path layout cactus uses.
 - [c2sp tlog-cosignature] — the cosigner signed-note format.
 - [c2sp tlog-mirror] — the mirror role.
@@ -445,7 +473,7 @@ re-verified using the §7.2 procedure on the live log.
 - [RFC 9162] — Certificate Transparency v2; the Merkle-tree
   conventions MTC builds on.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt
 [c2sp.org/tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-tiles]: https://c2sp.org/tlog-tiles
 [c2sp tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md

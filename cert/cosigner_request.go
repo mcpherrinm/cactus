@@ -22,7 +22,7 @@ type MirrorEndpoint struct {
 	// "https://mirror-1.example/sign-subtree").
 	URL string
 	// Key is the mirror's cosigner identity + public key. Used to
-	// verify the response signature with VerifyMTCSignature.
+	// verify the response signature with VerifyCosignature.
 	Key CosignerKey
 }
 
@@ -96,7 +96,7 @@ func RequestCosignatures(
 	quorum int,
 	deadline time.Duration,
 	bestEffortAfterMin bool,
-) ([]MTCSignature, error) {
+) ([]Cosignature, error) {
 	return RequestCosignaturesWithMetrics(ctx, req, mirrors, quorum, deadline, bestEffortAfterMin, CosignerRequestMetrics{})
 }
 
@@ -111,7 +111,7 @@ func RequestCosignaturesWithMetrics(
 	deadline time.Duration,
 	bestEffortAfterMin bool,
 	mx CosignerRequestMetrics,
-) ([]MTCSignature, error) {
+) ([]Cosignature, error) {
 	if quorum < 0 {
 		return nil, errors.New("cert: negative quorum")
 	}
@@ -133,7 +133,7 @@ func RequestCosignaturesWithMetrics(
 	deadlineCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
-	results := make(chan MTCSignature, len(mirrors))
+	results := make(chan Cosignature, len(mirrors))
 	var wg sync.WaitGroup
 	for _, m := range mirrors {
 		wg.Add(1)
@@ -160,7 +160,7 @@ func RequestCosignaturesWithMetrics(
 	// Drain results until quorum / deadline / all mirrors finished.
 	finished := make(chan struct{})
 	go func() { wg.Wait(); close(finished) }()
-	var collected []MTCSignature
+	var collected []Cosignature
 	for {
 		select {
 		case sig := <-results:
@@ -189,23 +189,23 @@ func RequestCosignaturesWithMetrics(
 	}
 }
 
-func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTCSubtree) (MTCSignature, error) {
+func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTCSubtree) (Cosignature, error) {
 	// The witness sign-subtree path is ML-DSA-44 only (c2sp.org/tlog-
 	// cosignature has no ECDSA cosignature type); reject other keys up
 	// front rather than emitting a request we could never verify.
 	if m.Key.Algorithm != AlgMLDSA44 {
-		return MTCSignature{}, fmt.Errorf("cert: mirror %q must be ML-DSA-44, got 0x%04x",
+		return Cosignature{}, fmt.Errorf("cert: mirror %q must be ML-DSA-44, got 0x%04x",
 			m.Key.ID, uint16(m.Key.Algorithm))
 	}
 	wantKey := OIDName(m.Key.ID)
 	wantKeyID, err := CosignatureKeyID(wantKey, m.Key.Algorithm, m.Key.PublicKey)
 	if err != nil {
-		return MTCSignature{}, err
+		return Cosignature{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.URL, bytes.NewReader(body))
 	if err != nil {
-		return MTCSignature{}, err
+		return Cosignature{}, err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	// c2sp.org/tlog-tiles: clients SHOULD carry an operator contact in
@@ -213,15 +213,15 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 	req.Header.Set("User-Agent", "cactus (+https://github.com/mcpherrinm/cactus)")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return MTCSignature{}, err
+		return Cosignature{}, err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
 	if err != nil {
-		return MTCSignature{}, err
+		return Cosignature{}, err
 	}
 	if resp.StatusCode != 200 {
-		return MTCSignature{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
+		return Cosignature{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
 
 	// Response: one or more c2sp.org/signed-note signature lines. We
@@ -234,35 +234,35 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		}
 		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(line, prefix))
 		if err != nil {
-			return MTCSignature{}, fmt.Errorf("decode sig: %w", err)
+			return Cosignature{}, fmt.Errorf("decode sig: %w", err)
 		}
 		if len(raw) < 4 {
-			return MTCSignature{}, errors.New("sig too short for key ID")
+			return Cosignature{}, errors.New("sig too short for key ID")
 		}
 		if [4]byte(raw[:4]) != wantKeyID {
 			continue // same name, different key ID: not our key.
 		}
 		ts, rawSig, err := ParseTimestampedSignature(raw[4:])
 		if err != nil {
-			return MTCSignature{}, err
+			return Cosignature{}, err
 		}
 		// Subtree cosignatures MUST carry a zero timestamp
 		// (c2sp.org/tlog-witness / tlog-cosignature).
 		if ts != 0 {
-			return MTCSignature{}, fmt.Errorf("cert: mirror cosignature has non-zero timestamp %d", ts)
+			return Cosignature{}, fmt.Errorf("cert: mirror cosignature has non-zero timestamp %d", ts)
 		}
 		// Verify against the §5.3.1 CosignedMessage.
 		msg, err := MarshalSignatureInput(m.Key.ID, subtree)
 		if err != nil {
-			return MTCSignature{}, err
+			return Cosignature{}, err
 		}
-		sig := MTCSignature{CosignerID: m.Key.ID, Signature: rawSig}
-		if err := VerifyMTCSignature(m.Key, sig, msg); err != nil {
-			return MTCSignature{}, fmt.Errorf("verify: %w", err)
+		sig := Cosignature{CosignerID: m.Key.ID, Signature: rawSig}
+		if err := VerifyCosignature(m.Key, sig, msg); err != nil {
+			return Cosignature{}, fmt.Errorf("verify: %w", err)
 		}
 		return sig, nil
 	}
-	return MTCSignature{}, errors.New("no matching signature line in response")
+	return Cosignature{}, errors.New("no matching signature line in response")
 }
 
 // buildSignSubtreeBody assembles the c2sp.org/tlog-witness sign-subtree

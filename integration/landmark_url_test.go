@@ -2,10 +2,10 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +20,7 @@ import (
 
 // TestLandmarkURLFormat brings up a tile server with landmark mode
 // enabled, allocates several landmarks, hits /landmarks over HTTP,
-// parses the §6.4.1 body, and asserts the invariants.
+// parses the §6.4.3 body, and asserts the invariants.
 func TestLandmarkURLFormat(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := storage.New(dir)
@@ -43,13 +43,18 @@ func TestLandmarkURLFormat(t *testing.T) {
 	}
 	defer l.Stop()
 
-	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	// The handler lists landmarks as of the real clock, so allocate
+	// them in the recent past: landmark i at now - (7-i)*50m, each
+	// expiring 2h later. At "now", landmarks 5 and 6 are active and
+	// landmark 4 (expired 30m ago) ends the list.
+	now := time.Now()
+	allocAt := func(i int) time.Time { return now.Add(-time.Duration(7-i) * 50 * time.Minute) }
 	seq, err := landmark.New(landmark.Config{
 		CAID:                 cert.TrustAnchorID("32473.1"),
 		LogNumber:            1,
 		TimeBetweenLandmarks: time.Millisecond,
-		MaxCertLifetime:      3 * time.Millisecond, // MaxActive = 4
-	}, fs, t0)
+		MaxCertLifetime:      2 * time.Hour,
+	}, fs, allocAt(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +62,8 @@ func TestLandmarkURLFormat(t *testing.T) {
 	hsrv := httptest.NewServer(tile.New(l, fs).WithLandmarks(seq).Handler())
 	defer hsrv.Close()
 
-	// Allocate 6 landmarks.  MaxActive=4 means only the most recent 4
-	// will be served, plus the previous tree size as the floor (5
-	// tree-size lines total).
 	for i := 1; i <= 6; i++ {
-		_, ok, err := seq.Append(context.Background(), uint64(i*100), t0.Add(time.Duration(i)*time.Millisecond))
+		_, ok, err := seq.Append(context.Background(), uint64(i*100), allocAt(i))
 		if err != nil || !ok {
 			t.Fatalf("Append %d: ok=%v err=%v", i, ok, err)
 		}
@@ -84,49 +86,25 @@ func TestLandmarkURLFormat(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 
-	// Parse: first line is "<last> <num_active>", then num_active+1 tree sizes.
-	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("body too short: %q", body)
+	// §6.4.3: "<latest_landmark>", then "<tree_size> <expiry>" for each
+	// active landmark, newest first, and the newest expired one.
+	lines := strings.Split(strings.TrimSuffix(string(body), "\n"), "\n")
+	if lines[0] != "6" {
+		t.Errorf("latest_landmark line = %q, want 6", lines[0])
 	}
-	header := strings.Fields(lines[0])
-	if len(header) != 2 {
-		t.Fatalf("first line malformed: %q", lines[0])
+	var want []string
+	for _, i := range []int{6, 5, 4} {
+		want = append(want, fmt.Sprintf("%d %d", i*100, seq.All()[i].Expiry.Unix()))
 	}
-	last, err := strconv.ParseUint(header[0], 10, 64)
+	if got := lines[1:]; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("landmark lines = %q, want %q", got, want)
+	}
+	lms, err := landmark.ParseList(body, now)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ParseList: %v", err)
 	}
-	numActive, err := strconv.ParseUint(header[1], 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if last != 6 {
-		t.Errorf("last_landmark = %d, want 6", last)
-	}
-	if numActive != 4 {
-		t.Errorf("num_active_landmarks = %d, want 4 (capped at MaxActive)", numActive)
-	}
-	if uint64(len(lines)-1) != numActive+1 {
-		t.Errorf("got %d tree-size lines, want %d", len(lines)-1, numActive+1)
-	}
-
-	// Tree sizes strictly decreasing.
-	prev := uint64(0)
-	for i, line := range lines[1:] {
-		n, err := strconv.ParseUint(line, 10, 64)
-		if err != nil {
-			t.Fatalf("line %d: %v", i, err)
-		}
-		if i > 0 && n >= prev {
-			t.Errorf("not strictly decreasing at line %d: %d -> %d", i, prev, n)
-		}
-		prev = n
-	}
-	// First (most recent) tree size = landmark 6 = 600.
-	first, _ := strconv.ParseUint(lines[1], 10, 64)
-	if first != 600 {
-		t.Errorf("most recent tree size = %d, want 600", first)
+	if len(lms) != 3 || !lms[1].Active(now) || lms[2].Active(now) {
+		t.Errorf("ParseList = %+v, want landmarks 6 and 5 active, 4 expired", lms)
 	}
 
 	// HEAD also works — same headers, no body.

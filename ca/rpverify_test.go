@@ -82,9 +82,8 @@ func TestRelyingPartyVerifyFromCACertificate(t *testing.T) {
 	caCertDER, err := cert.BuildCACertificate(cert.CACertificateInput{
 		CAID:         caID,
 		CosignerSPKI: cosignerSPKI,
-		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlgOID,
-		MinSerial:    0,
+		MinSerial:    cert.MTCMinSerial,
 		MaxSerial:    math.MaxUint64,
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
@@ -100,9 +99,6 @@ func TestRelyingPartyVerifyFromCACertificate(t *testing.T) {
 	}
 	if string(cfg.CAID) != "32473.1" {
 		t.Errorf("cfg.CAID = %q, want 32473.1", cfg.CAID)
-	}
-	if !cfg.LogHash.Equal(cert.OIDDigestSHA256) {
-		t.Errorf("cfg.LogHash = %v, want id-sha256", cfg.LogHash)
 	}
 	if len(cfg.Cosigners) != 1 || string(cfg.Cosigners[0].ID) != "32473.1" {
 		t.Fatalf("cfg.Cosigners = %+v, want one cosigner with ID 32473.1", cfg.Cosigners)

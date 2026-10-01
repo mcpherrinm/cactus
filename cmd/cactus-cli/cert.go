@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
+	"time"
 
 	"github.com/letsencrypt/cactus/cert"
+	"github.com/letsencrypt/cactus/landmark"
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
@@ -65,8 +65,15 @@ func certText(certPath string) {
 		fmt.Printf("    entry extensions: %d\n", len(proof.Extensions))
 	}
 	for _, p := range props {
-		if p.Type == cert.PropertyTrustAnchorID {
+		switch p.Type {
+		case cert.PropertyTrustAnchorID:
 			fmt.Printf("  trust anchor id: %s\n", string(p.TrustAnchorID))
+		case cert.PropertyTrustAnchorGroups:
+			for _, pat := range p.Patterns {
+				fmt.Printf("  trust anchor group pattern: %s\n", pat)
+			}
+		case cert.PropertyTrustAnchorNegotiation:
+			fmt.Println("  trust anchor negotiation: required")
 		}
 	}
 }
@@ -109,12 +116,12 @@ func certLandmarkRelative(certPath, logURL string) {
 		die("decode serial: %v", err)
 	}
 
-	// Pick the covering landmark from the §6.4.1 list.
+	// Pick the covering landmark from the §6.4.3 list.
 	body, err := httpGet(logURL + "/landmarks")
 	if err != nil {
 		die("fetch landmarks: %v", err)
 	}
-	lms, err := parseLandmarks(body)
+	lms, err := landmark.ParseList(body, time.Now())
 	if err != nil {
 		die("parse landmarks: %v", err)
 	}
@@ -123,8 +130,9 @@ func certLandmarkRelative(certPath, logURL string) {
 		die("no active landmark covers entry index %d (entry too new, or older than the active window)", index)
 	}
 
-	// Choose the §4.5 covering subtree of [prevSize, lmSize) containing
-	// the entry, then build its hash + inclusion proof from the tiles.
+	// Choose the landmark subtree (§4.5.1 covering subtree of
+	// [prevSize, lmSize)) containing the entry, then build its hash +
+	// inclusion proof from the tiles.
 	var chosen tlogx.Subtree
 	for _, st := range tlogx.FindSubtrees(prevSize, lmSize) {
 		if index >= st.Start && index < st.End {
@@ -132,7 +140,7 @@ func certLandmarkRelative(certPath, logURL string) {
 			break
 		}
 	}
-	if chosen.End == 0 {
+	if chosen.Empty() {
 		die("internal: no covering subtree for index %d in landmark %d [%d,%d)", index, lmNum, prevSize, lmSize)
 	}
 
@@ -188,12 +196,15 @@ func certLandmarkRelative(certPath, logURL string) {
 	}
 
 	// If the input named the CA via a trust_anchor_id property (§8.1),
-	// emit the matching landmark trust anchor id (§8.2) so the output is
-	// a faithful with-properties cert; otherwise emit bare PEM.
+	// emit the properties §9.2 gives a landmark-relative cert so the
+	// output is a faithful with-properties cert; otherwise emit bare PEM.
 	if caTAID, ok := caTrustAnchorID(props); ok {
-		lmTAID := cert.LandmarkID(caTAID, logNumber, lmNum)
 		pl, err := cert.BuildPropertyList([]cert.CertificateProperty{
-			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: lmTAID},
+			{Type: cert.PropertyTrustAnchorID, TrustAnchorID: cert.LandmarkID(caTAID, logNumber, lmNum)},
+			{Type: cert.PropertyTrustAnchorGroups, Patterns: []cert.TrustAnchorIDPattern{
+				cert.LandmarkGroupPattern(caTAID, logNumber, lmNum),
+			}},
+			{Type: cert.PropertyTrustAnchorNegotiation},
 		})
 		if err != nil {
 			die("build properties: %v", err)
@@ -249,72 +260,24 @@ func caTrustAnchorID(props []cert.CertificateProperty) (cert.TrustAnchorID, bool
 	return nil, false
 }
 
-// landmarkEntry is one (number, treeSize) pair from the §6.4.1 list.
-type landmarkEntry struct {
-	number   uint64
-	treeSize uint64
-}
-
-// parseLandmarks decodes the §6.4.1 landmark list:
-//
-//	<last> <num_active>\n
-//	<treeSize of landmark last>\n
-//	<treeSize of landmark last-1>\n
-//	… (num_active + 1 size lines, strictly decreasing)
-//
-// It returns the entries in descending Number order (newest first).
-func parseLandmarks(body []byte) ([]landmarkEntry, error) {
-	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		return nil, errors.New("empty landmark list")
-	}
-	hdr := strings.Fields(lines[0])
-	if len(hdr) != 2 {
-		return nil, fmt.Errorf("bad header %q", lines[0])
-	}
-	last, err := strconv.ParseUint(hdr[0], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("bad last %q: %w", hdr[0], err)
-	}
-	numActive, err := strconv.ParseUint(hdr[1], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("bad num_active %q: %w", hdr[1], err)
-	}
-	if numActive > last {
-		return nil, fmt.Errorf("num_active %d > last %d", numActive, last)
-	}
-	sizeLines := lines[1:]
-	if uint64(len(sizeLines)) != numActive+1 {
-		return nil, fmt.Errorf("expected %d size lines, got %d", numActive+1, len(sizeLines))
-	}
-	out := make([]landmarkEntry, 0, len(sizeLines))
-	for i := uint64(0); i <= numActive; i++ {
-		ts, err := strconv.ParseUint(strings.TrimSpace(sizeLines[i]), 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("bad tree size %q: %w", sizeLines[i], err)
-		}
-		out = append(out, landmarkEntry{number: last - i, treeSize: ts})
-	}
-	return out, nil
-}
-
-// coveringLandmark finds the smallest-numbered landmark whose tree size
+// coveringLandmark finds the lowest-numbered landmark whose tree size
 // is strictly greater than index (§6.4.4), and its predecessor's tree
-// size (the lower bound of the landmark's entry range). It needs the
-// predecessor to be present in the list, which the §6.4.1 format
-// guarantees for every active landmark by including one extra older
-// size line.
-func coveringLandmark(desc []landmarkEntry, index uint64) (num, size, prev uint64, ok bool) {
+// size (the lower bound of the landmark's entry range). desc is a
+// §6.4.3 list, newest first. It needs the predecessor to be present in
+// the list, which the format guarantees for every active landmark by
+// ending with the newest expired one; an entry only covered by that
+// expired landmark has itself expired (§6.4.1).
+func coveringLandmark(desc []landmark.Landmark, index uint64) (num, size, prev uint64, ok bool) {
 	// Walk ascending by number (the list is descending).
 	for i := len(desc) - 1; i >= 0; i-- {
-		if desc[i].treeSize > index {
+		if desc[i].TreeSize > index {
 			if i == len(desc)-1 {
 				// Oldest entry in the list: its predecessor's tree
 				// size is outside the published window, so we can't
 				// bound the landmark's range.
 				return 0, 0, 0, false
 			}
-			return desc[i].number, desc[i].treeSize, desc[i+1].treeSize, true
+			return desc[i].Number, desc[i].TreeSize, desc[i+1].TreeSize, true
 		}
 	}
 	return 0, 0, 0, false

@@ -68,7 +68,7 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "application/pem-certificate-chain-with-properties" {
 		t.Errorf("Content-Type = %q", got)
 	}
-	// Per trust-anchor-ids §6.1 the property list is first, cert second.
+	// Per trust-anchor-ids §7.4 the property list is first, cert second.
 	pBlock, rest := pem.Decode(body)
 	if pBlock == nil || pBlock.Type != cert.PEMBlockProperties {
 		t.Fatalf("first block not %s: %+v", cert.PEMBlockProperties, pBlock)
@@ -81,10 +81,13 @@ func TestPEMWithPropertiesContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// draft-05 §8.1: a standalone cert carries a single trust_anchor_id
-	// naming the CA.
-	if len(props) != 1 || props[0].Type != cert.PropertyTrustAnchorID ||
-		string(props[0].TrustAnchorID) != string(logID) {
-		t.Errorf("standalone properties = %+v, want one trust_anchor_id = %q", props, logID)
+	// §9.2: a standalone cert carries a trust_anchor_id naming the CA
+	// (§8.1) and a trust_anchor_groups pattern matching every landmark
+	// group of the CA (§8.2.1), and no trust_anchor_negotiation.
+	if len(props) != 2 || props[0].Type != cert.PropertyTrustAnchorID ||
+		string(props[0].TrustAnchorID) != string(logID) ||
+		props[1].Type != cert.PropertyTrustAnchorGroups || len(props[1].Patterns) != 1 ||
+		props[1].Patterns[0].String() != "32473.1.2.{0-}.{0-}" {
+		t.Errorf("standalone properties = %+v, want trust_anchor_id %q and group pattern 32473.1.2.{0-}.{0-}", props, logID)
 	}
 }

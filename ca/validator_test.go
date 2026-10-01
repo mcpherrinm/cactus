@@ -82,6 +82,42 @@ func TestValidatorPinsValidityWindow(t *testing.T) {
 	}
 }
 
+// TestValidatorMaxLifetime pins the bound the landmark expiry relies on
+// (§6.4.1): the default window is clamped to MaxLifetime, and a notAfter
+// beyond now + MaxLifetime is rejected.
+func TestValidatorMaxLifetime(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	v := NewValidator()
+	v.Now = func() time.Time { return now }
+	v.MaxLifetime = time.Hour
+	csr := mkCSR(t, []string{"a.test"}, nil)
+
+	got, err := v.Validate(csr, OrderInput{AuthorizedDNSNames: []string{"a.test"}})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if want := now.Add(time.Hour); !got.NotAfter.Equal(want) {
+		t.Errorf("default NotAfter = %v, want %v", got.NotAfter, want)
+	}
+
+	_, err = v.Validate(csr, OrderInput{
+		AuthorizedDNSNames: []string{"a.test"},
+		NotAfter:           now.Add(2 * time.Hour),
+	})
+	if !errors.Is(err, ErrBadValidity) {
+		t.Errorf("notAfter past MaxLifetime: err = %v, want ErrBadValidity", err)
+	}
+
+	// A future notBefore doesn't extend the bound, which is relative to now.
+	_, err = v.Validate(csr, OrderInput{
+		AuthorizedDNSNames: []string{"a.test"},
+		NotBefore:          now.Add(30 * time.Minute),
+	})
+	if !errors.Is(err, ErrBadValidity) {
+		t.Errorf("future notBefore with default window: err = %v, want ErrBadValidity", err)
+	}
+}
+
 // TestValidatorRejectsNonDNSIPSANs guards against a SAN carrying an
 // rfc822Name / URI / otherName alongside an authorized dNSName: those
 // GeneralName types are never authorized against the order, so the CSR

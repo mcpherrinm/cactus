@@ -185,8 +185,8 @@ func VerifyCosignaturesForOrigin(
 		if err != nil {
 			return nil, err
 		}
-		sig := cert.MTCSignature{CosignerID: key.ID, Signature: c.Signature}
-		if err := cert.VerifyMTCSignature(key, sig, msg); err != nil {
+		sig := cert.Cosignature{CosignerID: key.ID, Signature: c.Signature}
+		if err := cert.VerifyCosignature(key, sig, msg); err != nil {
 			// Name and key ID matched, so this line asserts it is ours.
 			// Reject the whole response.
 			return nil, fmt.Errorf("mirrorpush: cosignature from %q (key ID %x) failed to verify: %w",

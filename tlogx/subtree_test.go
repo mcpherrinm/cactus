@@ -24,7 +24,9 @@ func TestIsValid(t *testing.T) {
 		{2, 8, false}, // size 6, bit_ceil=8, start=2 not multiple of 8
 		{1, 4, false}, // size 3, bit_ceil=4, start=1 not multiple of 4
 		{5, 7, false}, // size 2, start=5 not multiple of 2
-		{4, 4, false}, // empty
+		{4, 4, true},  // empty subtrees are valid since draft-07
+		{0, 0, true},
+		{5, 4, false}, // start > end
 	}
 	for _, tc := range cases {
 		if got := IsValid(tc.start, tc.end); got != tc.want {
@@ -47,7 +49,7 @@ func TestFullSubtree(t *testing.T) {
 // [4,8) and [8,13).
 func TestFindSubtreesDraftFigures(t *testing.T) {
 	got := FindSubtrees(5, 13)
-	want := []Subtree{{Start: 4, End: 8}, {Start: 8, End: 13}}
+	want := [2]Subtree{{Start: 4, End: 8}, {Start: 8, End: 13}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("FindSubtrees(5,13) = %+v, want %+v", got, want)
 	}
@@ -58,18 +60,20 @@ func TestFindSubtreesDraftFigures(t *testing.T) {
 func TestFindSubtreesAdditional(t *testing.T) {
 	cases := []struct {
 		start, end uint64
-		want       []Subtree
+		want       [2]Subtree
 	}{
-		// Single-entry case.
-		{7, 8, []Subtree{{Start: 7, End: 8}}},
+		// Single-entry case: the right subtree is the empty [end, end).
+		{7, 8, [2]Subtree{{Start: 7, End: 8}, {Start: 8, End: 8}}},
 		// Already a power-of-two-aligned subtree of size 1.
-		{0, 1, []Subtree{{Start: 0, End: 1}}},
+		{0, 1, [2]Subtree{{Start: 0, End: 1}, {Start: 1, End: 1}}},
+		// Empty interval: both subtrees are empty.
+		{5, 5, [2]Subtree{{Start: 5, End: 5}, {Start: 5, End: 5}}},
 		// Figure 10: [7,9) covered by [7,8) and [8,9).
-		{7, 9, []Subtree{{Start: 7, End: 8}, {Start: 8, End: 9}}},
+		{7, 9, [2]Subtree{{Start: 7, End: 8}, {Start: 8, End: 9}}},
 		// Whole tree of size 8: [0,8).
-		{0, 8, []Subtree{{Start: 0, End: 4}, {Start: 4, End: 8}}},
+		{0, 8, [2]Subtree{{Start: 0, End: 4}, {Start: 4, End: 8}}},
 		// New checkpoint adds three at the end of an empty tree.
-		{0, 3, []Subtree{{Start: 0, End: 2}, {Start: 2, End: 3}}},
+		{0, 3, [2]Subtree{{Start: 0, End: 2}, {Start: 2, End: 3}}},
 	}
 	for _, tc := range cases {
 		got := FindSubtrees(tc.start, tc.end)
@@ -80,45 +84,23 @@ func TestFindSubtreesAdditional(t *testing.T) {
 }
 
 func TestFindSubtreesInvariants(t *testing.T) {
-	// Spec invariants (§4.5): every result must
-	//   - cover [start, end) (left.start <= start, right.end == end)
-	//   - left.end == right.start (adjacent)
-	//   - left be full
-	//   - left.size < 2*(end-start) and right.size <= (end-start)
+	// Spec invariants (§4.5.1): for every [start, end), left and right
+	//   - are valid subtrees
+	//   - contain [start, end): left.start <= start <= left.end
+	//     = right.start <= end = right.end
+	//   - are each at most BIT_CEIL(end - start) in size
 	for start := uint64(0); start < 32; start++ {
-		for end := start + 1; end <= 64; end++ {
+		for end := start; end <= 64; end++ {
 			subs := FindSubtrees(start, end)
-			if len(subs) == 1 {
-				if subs[0].Start != start || subs[0].End != end {
-					t.Errorf("single subtree mismatch: got %+v for [%d,%d)", subs[0], start, end)
-				}
-				continue
-			}
 			l, r := subs[0], subs[1]
-			if l.Start > start {
-				t.Errorf("[%d,%d): left.start %d > start", start, end, l.Start)
+			if !IsValid(l.Start, l.End) || !IsValid(r.Start, r.End) {
+				t.Errorf("[%d,%d): invalid subtrees %+v %+v", start, end, l, r)
 			}
-			if r.End != end {
-				t.Errorf("[%d,%d): right.end %d != end", start, end, r.End)
+			if l.Start > start || start > l.End || l.End != r.Start || r.Start > end || r.End != end {
+				t.Errorf("[%d,%d): %+v %+v do not cover the interval", start, end, l, r)
 			}
-			if l.End != r.Start {
-				t.Errorf("[%d,%d): non-adjacent %+v %+v", start, end, l, r)
-			}
-			if !l.Full() {
-				t.Errorf("[%d,%d): left %+v not full", start, end, l)
-			}
-			width := end - start
-			if l.Size() >= 2*width {
-				t.Errorf("[%d,%d): left %+v too wide", start, end, l)
-			}
-			if r.Size() > width {
-				t.Errorf("[%d,%d): right %+v too wide", start, end, r)
-			}
-			if !IsValid(l.Start, l.End) {
-				t.Errorf("[%d,%d): left %+v not valid subtree", start, end, l)
-			}
-			if !IsValid(r.Start, r.End) {
-				t.Errorf("[%d,%d): right %+v not valid subtree", start, end, r)
+			if c := bitCeil(end - start); l.Size() > c || r.Size() > c {
+				t.Errorf("[%d,%d): %+v %+v exceed BIT_CEIL(%d) = %d", start, end, l, r, end-start, c)
 			}
 		}
 	}

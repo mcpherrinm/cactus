@@ -63,7 +63,7 @@ func TestEndToEndCAWithThreeCosigners(t *testing.T) {
 	// The requester needs the log to compute consistency proofs, so
 	// forward-declare the pointer the closure captures.
 	var caLog *cactuslog.Log
-	mirrorRequester := func(ctx context.Context, st *cert.MTCSubtree, caSig cert.MTCSignature) ([]cert.MTCSignature, error) {
+	mirrorRequester := func(ctx context.Context, st *cert.MTCSubtree, caSig cert.Cosignature) ([]cert.Cosignature, error) {
 		cp := caLog.CurrentCheckpoint()
 		if cp.Size == 0 {
 			return nil, fmt.Errorf("no checkpoint yet")
@@ -160,7 +160,7 @@ func TestEndToEndCAWithThreeCosigners(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cert.VerifyMTCSignature(key, s, msg); err != nil {
+		if err := cert.VerifyCosignature(key, s, msg); err != nil {
 			t.Errorf("cosignature %q in cert failed to verify: %v", s.CosignerID, err)
 			continue
 		}

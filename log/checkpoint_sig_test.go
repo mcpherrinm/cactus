@@ -130,8 +130,8 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 
 	// Verify the ML-DSA-44 cosignature.
 	key := cert.CosignerKey{ID: cosignerID, Algorithm: cert.AlgMLDSA44, PublicKey: s.PublicKey()}
-	if err := cert.VerifyMTCSignature(key,
-		cert.MTCSignature{CosignerID: cosignerID, Signature: rawSig}, sigInput); err != nil {
+	if err := cert.VerifyCosignature(key,
+		cert.Cosignature{CosignerID: cosignerID, Signature: rawSig}, sigInput); err != nil {
 		t.Errorf("checkpoint cosignature failed to verify: %v", err)
 	}
 }

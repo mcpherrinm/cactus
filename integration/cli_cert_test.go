@@ -91,7 +91,9 @@ func TestCLICertLandmarkRelative(t *testing.T) {
 	defer l.Stop()
 	issuer, _ := ca.New(l, "32473.1", 1)
 
-	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	// Real clock: the CLI reads /landmarks as of now, and §6.4.3 only
+	// lists unexpired landmarks (plus the newest expired one).
+	t0 := time.Now()
 	seq, err := landmark.New(landmark.Config{
 		CAID:                 cert.TrustAnchorID("32473.1"),
 		LogNumber:            1,

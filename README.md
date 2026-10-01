@@ -1,7 +1,7 @@
 # cactus
 
 A Go ACME server that issues **Merkle Tree certificates** per
-[draft-ietf-plants-merkle-tree-certs-05][draft], intended for
+[draft-ietf-plants-merkle-tree-certs-07][draft], intended for
 **testing environments only**.
 
 > ⚠ This is *not* a production CA. There is no fsync ladder, no
@@ -41,7 +41,9 @@ operate it, and where to look in the code.
 - Runs an **ACME server** (RFC 8555) extended with the §9
   cert-download negotiation from the draft, including
   `application/pem-certificate-chain-with-properties` with a real
-  `CertificatePropertyList`.
+  `CertificatePropertyList` (`trust_anchor_id`, `trust_anchor_groups`
+  for the §8.2.1 landmark groups, and `trust_anchor_negotiation` on
+  landmark-relative certs, per §9.2).
 - Maintains a CA-operated **issuance log** with on-disk tiles, signed
   checkpoints (c2sp signed-note format), and signed §4.5 covering
   subtrees.
@@ -50,7 +52,8 @@ operate it, and where to look in the code.
   body is an `MTCProof` blob carrying an inclusion proof + cosigner
   signatures.
 - Supports **landmark-relative certificates** (§6.4). Allocates
-  landmarks per §6.4.2 and serves a `/landmarks` endpoint per §6.4.1.
+  landmarks, each with an expiry, per §6.4.2 and serves the active ones
+  at a `/landmarks` endpoint per §6.4.3.
   The standalone cert advertises the signature-free landmark-relative
   form as a `rel="acme-optional-alternate"` URL (an optional, non-blocking substitute
   that returns HTTP 202 until a covering landmark exists). The same form
@@ -67,7 +70,8 @@ operate it, and where to look in the code.
   [tlog-mirror] (Sunlight). There is no follower and no `/sign-subtree`
   server.
 - **Witness-only cosigners** (§7.3).
-- **Log pruning** (§5.2.3).
+- **Partial log serving.** Every entry stays available; cactus never
+  stops serving old, expired entries (§5.2.2, §10.2).
 - **Real DNS-01 challenges.** `auto-pass` and `http-01` are
   supported; DNS-01 is not.
 - **Revoked ranges** (§7.5) as a config key. The relying-party data
@@ -185,7 +189,7 @@ lego --server http://localhost:14000/directory \
 ```
 
 Or hand-rolled with `cactus-cli` for inspection (run *after*
-issuing at least one cert; entries are §5.2.1 MerkleTreeCertEntry
+issuing at least one cert; entries are §5.2.1 MTCLogEntry
 blobs):
 
 ```sh
@@ -320,12 +324,23 @@ or not at all. When omitted, the listener serves plaintext HTTP.
 
 Landmarks are always on; this block only tunes the cadence and the
 max cert lifetime (both optional, with the defaults shown). The
-§6.4.1 list is always served at `/landmarks`. Landmark trust anchor
-IDs are derived from the CA ID and log number (`CA-ID.1.logNumber.L`,
-§6.4.1) — there's no separate `base_id`. Defaults: 1-hour landmark
-cadence, 7-day max cert lifetime ⇒ `max_active_landmarks =
-ceil(168) + 1 = 169` ⇒ ~10 KiB of relying party state per CA. See
-§6.4.1 of the draft.
+§6.4.3 list of active landmarks is always served at `/landmarks`.
+Landmark trust anchor IDs are derived from the CA ID and log number
+(`CA-ID.1.logNumber.L`, §5.1) — there's no separate `base_id`.
+
+`max_cert_lifetime_ms` does two things. Each landmark expires that long
+after it is allocated (§6.4.2), and a landmark stays active, and so in
+`/landmarks`, until it expires. Because a landmark MUST outlive every
+certificate below it (§6.4.1), it is also the longest validity period
+cactus will issue: the default validity is clamped to it, and an order
+requesting a `notAfter` further out than that from now fails to
+finalize. Defaults: 1-hour landmark cadence, 7-day max cert lifetime ⇒
+at most `ceil(168) + 1 = 169` active landmarks ⇒ ~10 KiB of relying
+party state per CA (§6.4.2).
+
+Landmark files written by an earlier cactus have no expiries; on
+startup each landmark is given `allocated_at + max_cert_lifetime_ms`
+and the file is rewritten.
 
 ### `ca_cosigner_quorum` (optional, CA-side mirror requests)
 
@@ -587,7 +602,7 @@ since those are served from the same in-memory hashes).
 Working draft; APIs may shift to track the upstream IETF and c2sp
 specs.
 
-[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt
+[draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
 [tlog-witness]: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md

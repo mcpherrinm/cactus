@@ -1,5 +1,5 @@
 // Package log is the cactus issuance log: a tiled, single-writer
-// append-only log of MerkleTreeCertEntry blobs (per §5.2.1 of the draft)
+// append-only log of MTCLogEntry blobs (per §5.2.1 of the draft)
 // that periodically signs checkpoints and covering subtrees (§4.5,
 // §5.3.1) using a CA cosigner.
 //
@@ -36,7 +36,7 @@ type Issued struct {
 	Index          uint64
 	Subtree        cert.MTCSubtree
 	InclusionProof []tlogx.Hash
-	Signatures     []cert.MTCSignature
+	Signatures     []cert.Cosignature
 }
 
 // Checkpoint summarises the current head of the log.
@@ -81,8 +81,8 @@ type Config struct {
 	MirrorRequester func(
 		ctx context.Context,
 		subtree *cert.MTCSubtree,
-		caSig cert.MTCSignature,
-	) ([]cert.MTCSignature, error)
+		caSig cert.Cosignature,
+	) ([]cert.Cosignature, error)
 
 	// WaitForCosigners, if > 0, makes Wait block until the entry's
 	// covering subtree has accumulated at least this many signatures
@@ -150,7 +150,7 @@ type signedSubtree struct {
 	// sigs are the cosigner signatures attached to this subtree.
 	// sigs[0] is always the CA cosigner; mirror cosigner signatures
 	// are appended afterwards.
-	sigs []cert.MTCSignature
+	sigs []cert.Cosignature
 	// committedAt is when this subtree was first published in a flush.
 	// Used to bound how long it is carried forward across later flushes
 	// (see subtreeRetention).
@@ -172,8 +172,8 @@ type signedSubtree struct {
 const subtreeRetention = 10 * time.Minute
 
 // New constructs a Log and starts its sequencing goroutine. A fresh log
-// starts empty; the first appended entry is assigned index 0. draft-05
-// §5.2.1 allows any index (including 0) to be a real entry and no longer
+// starts empty; the first appended entry is assigned index 0. §5.2.1
+// allows any index (including 0) to be a real entry and no longer
 // reserves index 0 as a null_entry — zero serial numbers are instead
 // prevented by the log number being >= 1 (§6.2).
 func New(ctx context.Context, cfg Config) (*Log, error) {
@@ -233,6 +233,9 @@ func (l *Log) Stop() {
 // with the same idempotency key was already appended, the existing
 // index is returned without re-appending.
 func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64, error) {
+	if len(entry) > cert.MaxLogEntrySize {
+		return 0, fmt.Errorf("log: entry is %d bytes, over the %d-byte limit (§5.2.1)", len(entry), cert.MaxLogEntrySize)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if idx, ok := l.dedup[idemKey]; ok {
@@ -240,7 +243,7 @@ func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64,
 	}
 	// Index assignment: the next index is the current tree size plus the
 	// number of entries already queued in the pool. The first entry of a
-	// fresh log gets index 0 (draft-05 §5.2.1).
+	// fresh log gets index 0 (§5.2.1).
 	// But we don't know treeSize here without calling tw which is single-writer.
 	// We assign indices when the sequencer flushes; for now we just queue
 	// and return a "tentative" index based on queue position. That's fine
@@ -255,6 +258,9 @@ func (l *Log) Append(_ context.Context, entry []byte, idemKey [32]byte) (uint64,
 	// We keep that invariant: l.mu must be held during flush's
 	// tw.Append. See flush().
 	pendingIdx := uint64(l.tw.Size()) + uint64(len(l.pool))
+	if pendingIdx >= cert.MaxLogEntries {
+		return 0, fmt.Errorf("log: full (%d entries, §5.2)", pendingIdx)
+	}
 	l.pool = append(l.pool, poolItem{entry: entry, idemKey: idemKey})
 	l.dedup[idemKey] = pendingIdx
 	// Wake the sequencer for an early flush once the pool is full enough,
@@ -542,6 +548,12 @@ func (l *Log) flush() error {
 	if newSize > committedSize {
 		covers := tlogx.FindSubtrees(committedSize, newSize)
 		for _, s := range covers {
+			// §4.5.1 returns an empty right subtree when one entry was
+			// added. No entry is ever proven against it, so don't sign it
+			// or ask mirrors to.
+			if s.Empty() {
+				continue
+			}
 			h, err := subtreeHashFromTW(l.tw, s.Start, s.End)
 			if err != nil {
 				return fmt.Errorf("flush subtree hash [%d,%d): %w", s.Start, s.End, err)
@@ -558,7 +570,7 @@ func (l *Log) flush() error {
 			}
 			subs = append(subs, signedSubtree{
 				subtree:     st,
-				sigs:        []cert.MTCSignature{caSig},
+				sigs:        []cert.Cosignature{caSig},
 				committedAt: now,
 			})
 		}
@@ -665,21 +677,21 @@ func (l *Log) collectMirrorSigs(subs []signedSubtree) {
 	}
 }
 
-func (l *Log) signSubtree(st *cert.MTCSubtree) (cert.MTCSignature, error) {
+func (l *Log) signSubtree(st *cert.MTCSubtree) (cert.Cosignature, error) {
 	msg, err := cert.MarshalSignatureInput(l.cfg.CosignerID, st)
 	if err != nil {
-		return cert.MTCSignature{}, err
+		return cert.Cosignature{}, err
 	}
 	start := time.Now()
 	sig, err := l.cfg.Signer.Sign(rand.Reader, msg)
 	if err != nil {
-		return cert.MTCSignature{}, err
+		return cert.Cosignature{}, err
 	}
 	if l.cfg.Metrics.SignatureDuration != nil {
 		l.cfg.Metrics.SignatureDuration.WithLabelValues(l.cfg.Signer.Algorithm().String()).
 			Observe(time.Since(start).Seconds())
 	}
-	return cert.MTCSignature{
+	return cert.Cosignature{
 		CosignerID: append([]byte(nil), l.cfg.CosignerID...),
 		Signature:  sig,
 	}, nil
@@ -763,8 +775,8 @@ func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []par
 		Algorithm: cert.SignatureAlgorithm(l.cfg.Signer.Algorithm()),
 		PublicKey: l.cfg.Signer.PublicKey(),
 	}
-	mtcSig := cert.MTCSignature{CosignerID: l.cfg.CosignerID, Signature: sig.sig}
-	return cert.VerifyMTCSignature(key, mtcSig, msg)
+	mtcSig := cert.Cosignature{CosignerID: l.cfg.CosignerID, Signature: sig.sig}
+	return cert.VerifyCosignature(key, mtcSig, msg)
 }
 
 func (l *Log) buildIssued(index uint64) (Issued, error) {
@@ -785,7 +797,7 @@ func (l *Log) buildIssued(index uint64) (Issued, error) {
 				Index:          index,
 				Subtree:        s.subtree,
 				InclusionProof: proof,
-				Signatures:     append([]cert.MTCSignature(nil), s.sigs...),
+				Signatures:     append([]cert.Cosignature(nil), s.sigs...),
 			}, nil
 		}
 	}

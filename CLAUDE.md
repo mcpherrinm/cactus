@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 cactus is a Go ACME server that issues **Merkle Tree certificates** per
-[draft-ietf-plants-merkle-tree-certs-05], for **testing only** (not a production CA).
+[draft-ietf-plants-merkle-tree-certs-07], for **testing only** (not a production CA).
 Read [MTC.md](MTC.md) for how MTC works (why certs have no real signature, what the
 inclusion proof proves, how landmarks and mirrors fit) and [README.md](README.md) for
 operating details and the full config reference.
@@ -81,7 +81,9 @@ sign-subtree request client. **`mirrorpush/`** is the c2sp.org/tlog-mirror push
 client: it replicates the log to external mirrors (`add-checkpoint`, `add-entries`)
 and retains the mirror-cosigned checkpoint that `sign-subtree` then requires. **`tlogx/`** extends `x/mod/sumdb/tlog` with the §4 subtree primitives
 (consistency, inclusion, covering subtrees). **`signer/`** is the ML-DSA cosigner
-abstraction. **`landmark/`** allocates §6.4 landmark sequences and serves `/landmarks`.
+abstraction. **`landmark/`** allocates §6.4 landmark sequences (each landmark expires
+`max_cert_lifetime` after allocation, which also caps certificate validity) and serves
+the active ones at `/landmarks`.
 **`storage/`** is on-disk K/V using atomic-rename writes.
 
 **Single-writer assumption**: the log has no locks or shared-state coordination across
@@ -114,4 +116,4 @@ cactus-cli cert verify <cert.pem> <log-url> # full §7.2 verification, prints OK
 cactus-cli prove <log-url> <index>          # JSON inclusion proof
 ```
 
-[draft-ietf-plants-merkle-tree-certs-05]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-05.txt
+[draft-ietf-plants-merkle-tree-certs-07]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt

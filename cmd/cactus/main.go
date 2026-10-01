@@ -18,7 +18,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -252,7 +251,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// Metrics first so the log and ACME server can register.
 	m := metrics.New()
 
-	// draft-05 identity model: the CA cosigner ID is the CA ID (§5.4),
+	// Identity model: the CA cosigner ID is the CA ID (§5.4),
 	// and the issuance log ID is derived as CA-ID.0.<log.number> (§5.2).
 	caID := cert.TrustAnchorID(cfg.CACosigner.ID)
 	logID, err := cert.LogID(caID, cfg.Log.Number)
@@ -284,7 +283,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		"ca_id", string(caID),
 		"log_number", cfg.Log.Number,
 		"interval", cfg.Landmarks.TimeBetweenLandmarks(),
-		"max_active", landmarkSeq.MaxActive())
+		"max_cert_lifetime", cfg.Landmarks.MaxCertLifetime())
 
 	// Issuance log. The MirrorRequester closure (CA-mode quorum)
 	// needs `l` to compute consistency proofs, so we forward-declare
@@ -337,7 +336,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("ca_cosigner_quorum: %w", err)
 		}
 		logCfg.WaitForCosigners = 1 + cfg.CACosignerQuorum.MinSignatures
-		logCfg.MirrorRequester = func(ctx context.Context, st *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
+		logCfg.MirrorRequester = func(ctx context.Context, st *cert.MTCSubtree, _ cert.Cosignature) ([]cert.Cosignature, error) {
 			deadline := time.Now().Add(cfg.CACosignerQuorum.RetryDeadline())
 			sleep := func(d time.Duration) error {
 				select {
@@ -425,6 +424,10 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("issuer: %w", err)
 	}
+	// A landmark expires max_cert_lifetime after allocation and MUST
+	// outlive every certificate below it (§6.4.1), so no certificate may
+	// be valid for longer than that.
+	issuer.Validator.MaxLifetime = cfg.Landmarks.MaxCertLifetime()
 
 	// ACME server.
 	acmeCfg := acme.Config{
@@ -668,10 +671,11 @@ func die(format string, args ...any) {
 // buildCACertPEM builds the §5.5 CA certificate (an unsigned cert,
 // RFC 9925) representing this CA, as a PEM CERTIFICATE block. A relying
 // party derives its configuration from it via cert.ConfigFromCACertificate
-// (§7.1). minSerial is 0 because cactus does not prune, and maxSerial is
-// 2^64-1 because cactus does not bound its log numbers, so no serials are
-// initially revoked. An operator wanting to bound a relying party's
-// monitoring scope would lower maxSerial (§7.5).
+// (§7.1). minSerial is 2^48, the lowest serial the format allows (index
+// 0 of log 1), because cactus does not drop old entries, and maxSerial is
+// 2^64-1 because cactus does not bound its log numbers, so no valid
+// serials are initially revoked. An operator wanting to bound a relying
+// party's monitoring scope would lower maxSerial (§7.5).
 func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) {
 	alg := cert.SignatureAlgorithm(sgn.Algorithm())
 	sigAlg, err := cert.SigAlgOID(alg)
@@ -686,10 +690,9 @@ func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) 
 	der, err := cert.BuildCACertificate(cert.CACertificateInput{
 		CAID:         caID,
 		CosignerSPKI: cosignerSPKI,
-		LogHash:      cert.OIDDigestSHA256,
 		SigAlg:       sigAlg,
-		MinSerial:    0,
-		MaxSerial:    math.MaxUint64,
+		MinSerial:    cert.MTCMinSerial,
+		MaxSerial:    cert.MTCMaxSerial,
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.AddDate(10, 0, 0),
 	})

@@ -21,7 +21,7 @@ import (
 type TrustAnchorID []byte
 
 // MTCSubtree is an internal carrier for the (log ID, [start, end),
-// subtree hash) tuple a cosigner signs. In draft-05 there is no
+// subtree hash) tuple a cosigner signs. In draft-07 there is no
 // standalone MTCSubtree wire struct; these fields are folded into the
 // CosignedMessage (§5.3.1) produced by MarshalSignatureInput.
 type MTCSubtree struct {
@@ -114,13 +114,13 @@ func MarshalCosignedMessage(cosignerName, logOrigin string, timestamp, start, en
 	return b.Bytes()
 }
 
-// MTCSignature mirrors the §6.2 struct:
+// Cosignature mirrors the §6.2 struct (MTCSignature before draft-07):
 //
 //	struct {
 //	    TrustAnchorID cosigner_id;
 //	    opaque signature<0..2^16-1>;
-//	} MTCSignature;
-type MTCSignature struct {
+//	} Cosignature;
+type Cosignature struct {
 	CosignerID TrustAnchorID
 	Signature  []byte
 }
@@ -129,25 +129,29 @@ type MTCSignature struct {
 // X.509 BIT STRING with no ASN.1 wrapping:
 //
 //	struct {
-//	    MerkleTreeCertEntryExtension extensions<0..2^16-1>;
+//	    MTCLogEntryExtension extensions<0..2^16-1>;
 //	    uint48 start;
 //	    uint48 end;
-//	    HashValue inclusion_proof<0..2^16-1>;
-//	    MTCSignature signatures<0..2^16-1>;
+//	    opaque inclusion_proof<0..2^16-1>;
+//	    Cosignature signatures<0..2^24-1>;
 //	} MTCProof;
 //
 // Per §6.2, `inclusion_proof<0..2^16-1>` is a length-prefixed byte
-// vector containing concatenated HashValues; the verifier slices into
-// HASH_SIZE pieces. `extensions` MUST equal the log entry's extensions
-// (§5.2.1); `start`/`end` are 48-bit big-endian, capping the log index
-// at 2^48-1. The `signatures` vector MUST be sorted by cosigner_id
-// (shorter byte strings first, then lexicographically) with no
-// duplicate cosigner_id values.
+// vector containing concatenated hashes; the verifier slices into
+// HASH_SIZE pieces. Since draft-06 `signatures` has a 24-bit length
+// prefix, so a proof can carry more than 64 KiB of (post-quantum)
+// cosignatures. `extensions` MUST equal the log entry's extensions
+// (§5.2.1); `start`/`end` are 48-bit big-endian, capping the tree size
+// at 2^48-1 and so the largest index at 2^48-2. The `signatures` vector
+// MUST be sorted by cosigner_id (shorter byte strings first, then
+// lexicographically) with no duplicate cosigner_id values. A proof MAY carry GREASE cosignatures
+// from unallocated cosigner IDs (§6.2); verifiers ignore cosigners they
+// do not recognize.
 type MTCProof struct {
-	Extensions     []MerkleTreeCertEntryExtension
+	Extensions     []MTCLogEntryExtension
 	Start, End     uint64
 	InclusionProof []tlogx.Hash
-	Signatures     []MTCSignature
+	Signatures     []Cosignature
 }
 
 // maxUint48 is the largest value a uint48 field can hold.
@@ -205,8 +209,8 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 		return nil, ipErr
 	}
 
-	// signatures<0..2^16-1>: outer length-prefix wraps the concatenated
-	// MTCSignature encodings. Per §6.2 each cosigner_id is the trust
+	// signatures<0..2^24-1>: outer length-prefix wraps the concatenated
+	// Cosignature encodings. Per §6.2 each cosigner_id is the trust
 	// anchor ID's *binary* representation (TAI §3), and the list MUST be
 	// sorted by cosigner_id (shorter byte strings first, then
 	// lexicographic) with no duplicates. We convert the in-memory
@@ -237,7 +241,7 @@ func (p *MTCProof) MarshalTLS() ([]byte, error) {
 			return nil, fmt.Errorf("MTCProof: duplicate cosigner_id %x", wsigs[i].id)
 		}
 	}
-	b.AddUint16LengthPrefixed(func(c *cryptobyte.Builder) {
+	b.AddUint24LengthPrefixed(func(c *cryptobyte.Builder) {
 		for _, s := range wsigs {
 			c.AddUint8LengthPrefixed(func(d *cryptobyte.Builder) { d.AddBytes(s.id) })
 			c.AddUint16LengthPrefixed(func(d *cryptobyte.Builder) { d.AddBytes(s.sig) })
@@ -286,7 +290,7 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 	}
 
 	var sigBytes cryptobyte.String
-	if !s.ReadUint16LengthPrefixed(&sigBytes) {
+	if !s.ReadUint24LengthPrefixed(&sigBytes) {
 		return nil, errors.New("MTCProof: short read signatures")
 	}
 	var prevBin []byte
@@ -319,7 +323,7 @@ func ParseMTCProof(data []byte) (*MTCProof, error) {
 		if !sigBytes.ReadUint16LengthPrefixed(&sigData) {
 			return nil, errors.New("MTCProof: short read signature")
 		}
-		p.Signatures = append(p.Signatures, MTCSignature{
+		p.Signatures = append(p.Signatures, Cosignature{
 			CosignerID: id,
 			Signature:  append([]byte(nil), sigData...),
 		})

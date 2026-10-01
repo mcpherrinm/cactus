@@ -175,8 +175,10 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 	}
 
 	// With the properties Accept header, the landmark-relative cert
-	// carries trust_anchor_id = the landmark ID (CA-ID.1.logNumber.L,
-	// draft-05 §8.2). Landmark 1 of log 1 under CA 32473.1 → 32473.1.1.1.1.
+	// carries (§9.2) trust_anchor_id = the landmark ID
+	// (CA-ID.1.logNumber.L, §8.2), the landmark group pattern
+	// CA-ID.2.logNumber.{L-} (§8.2.1), and trust_anchor_negotiation.
+	// Landmark 1 of log 1 under CA 32473.1 → 32473.1.1.1.1.
 	resp, body := postAsGetWithAccept(t, hsrv.URL, ctxs[0].enh,
 		"application/pem-certificate-chain-with-properties", ctxs[0].acctKey, ctxs[0].kid)
 	if resp.StatusCode != 200 {
@@ -190,9 +192,12 @@ func TestEnhancementURLSwitchover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(props) != 1 || props[0].Type != cert.PropertyTrustAnchorID ||
-		string(props[0].TrustAnchorID) != "32473.1.1.1.1" {
-		t.Errorf("landmark-relative properties = %+v, want trust_anchor_id 32473.1.1.1.1", props)
+	if len(props) != 3 || props[0].Type != cert.PropertyTrustAnchorID ||
+		string(props[0].TrustAnchorID) != "32473.1.1.1.1" ||
+		props[1].Type != cert.PropertyTrustAnchorGroups || len(props[1].Patterns) != 1 ||
+		props[1].Patterns[0].String() != "32473.1.2.1.{1-}" ||
+		props[2].Type != cert.PropertyTrustAnchorNegotiation {
+		t.Errorf("landmark-relative properties = %+v, want trust_anchor_id 32473.1.1.1.1, group 32473.1.2.1.{1-}, negotiation", props)
 	}
 }
 

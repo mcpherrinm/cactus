@@ -1,11 +1,12 @@
 // Package tlogx implements the subtree primitives from §4 of
-// draft-ietf-plants-merkle-tree-certs-05.
+// draft-ietf-plants-merkle-tree-certs-07.
 //
 // It complements golang.org/x/mod/sumdb/tlog (used elsewhere as the
 // authoritative tile/Merkle implementation) with the few operations the
 // upstream package does not provide:
 //
-//   - FindSubtrees: §4.5, the up-to-two subtrees that cover [start, end).
+//   - FindSubtrees: §4.5, the two (possibly empty) subtrees that cover
+//     [start, end).
 //   - EvaluateInclusionProof: §4.3.2, evaluation of a subtree inclusion proof.
 //   - HashChildren: the leaf/interior hash with §2.1.1-of-RFC9162 prefixes.
 //
@@ -26,12 +27,16 @@ const HashSize = 32
 type Hash [HashSize]byte
 
 // Subtree describes a [start, end) range plus its hash. start and end
-// MUST satisfy the validity constraint from §4.1: 0 <= start < end and
-// start is a multiple of BIT_CEIL(end - start).
+// MUST satisfy the validity constraint from §4.1: 0 <= start <= end and
+// start is a multiple of BIT_CEIL(end - start). Since draft-07 the
+// empty subtree [x, x) is valid; its hash is HASH() of the empty string.
 type Subtree struct {
 	Start, End uint64
 	Hash       Hash
 }
+
+// Empty reports whether the subtree contains no entries (start == end).
+func (s Subtree) Empty() bool { return s.Start == s.End }
 
 // Size returns end - start.
 func (s Subtree) Size() uint64 { return s.End - s.Start }
@@ -43,18 +48,25 @@ func (s Subtree) Full() bool {
 }
 
 // IsValid reports whether [start, end) is a valid subtree per §4.1:
-// start < end and start is a multiple of BIT_CEIL(end - start).
+// start <= end and start is a multiple of BIT_CEIL(end - start). Both
+// [0, x) and [x, x) are valid for every x.
+//
+// BIT_CEIL(end - start) is 2^64 when end - start > 2^63, which does not
+// fit in a uint64; only start == 0 is a multiple of it then (§4.1's
+// overflow note).
 func IsValid(start, end uint64) bool {
-	if start >= end {
+	if start > end {
 		return false
 	}
 	size := end - start
-	cap := bitCeil(size)
-	return start%cap == 0
+	if size > 1<<63 {
+		return start == 0
+	}
+	return start&(bitCeil(size)-1) == 0
 }
 
-// bitCeil returns the smallest power of 2 that is >= n. bitCeil(0) is 1
-// (the natural extension; we never pass 0 in valid inputs).
+// bitCeil returns the smallest power of 2 that is >= n. bitCeil(0) is 1,
+// as in §4.1. n MUST be at most 2^63.
 func bitCeil(n uint64) uint64 {
 	if n == 0 {
 		return 1
@@ -65,18 +77,22 @@ func bitCeil(n uint64) uint64 {
 	return uint64(1) << bits.Len64(n-1)
 }
 
-// FindSubtrees implements the §4.5 algorithm: returns the one or two
-// subtree intervals that efficiently cover [start, end).
+// FindSubtrees implements the §4.5.1 algorithm: returns the two
+// subtrees, left and right, that efficiently cover [start, end). Since
+// draft-07 there are always two: when end - start <= 1 they are
+// [start, end) and the empty [end, end). Callers that sign or request
+// cosignatures over the result can skip an Empty subtree, since no
+// entry is ever proven against it.
 //
 // Each returned interval is (start, end) and it is the caller's job to
 // look up the hash. Calling code that only needs the intervals can
 // ignore the Hash field of Subtree.
-func FindSubtrees(start, end uint64) []Subtree {
-	if start >= end {
-		panic(fmt.Sprintf("tlogx: FindSubtrees requires start<end, got [%d,%d)", start, end))
+func FindSubtrees(start, end uint64) [2]Subtree {
+	if start > end {
+		panic(fmt.Sprintf("tlogx: FindSubtrees requires start<=end, got [%d,%d)", start, end))
 	}
-	if end-start == 1 {
-		return []Subtree{{Start: start, End: end}}
+	if end-start <= 1 {
+		return [2]Subtree{{Start: start, End: end}, {Start: end, End: end}}
 	}
 	last := end - 1
 	// `split` = highest bit position where start and last differ.
@@ -89,7 +105,7 @@ func FindSubtrees(start, end uint64) []Subtree {
 	// mask) when interpreted within `split` bits.
 	leftSplit := bits.Len64(^start & mask)
 	leftStart := start &^ ((uint64(1) << leftSplit) - 1)
-	return []Subtree{
+	return [2]Subtree{
 		{Start: leftStart, End: mid},
 		{Start: mid, End: end},
 	}

@@ -2,10 +2,10 @@ package landmark
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,74 +14,22 @@ import (
 	"github.com/letsencrypt/cactus/storage"
 )
 
-// TestHandlerEmptySequence confirms the just-landmark-0 case: the body
-// is "0 0\n0\n" — `<last> <num_active>` followed by 1 tree-size line.
-func TestHandlerEmptySequence(t *testing.T) {
-	s, _, _ := newTestSeq(t)
-	body := requestBody(t, s, "GET")
-	if body != "0 0\n0\n" {
-		t.Errorf("body = %q, want %q", body, "0 0\n0\n")
-	}
-}
-
-// TestHandlerHappyPath drives the §6.4.1 example: with N landmarks and
-// MaxActive larger than N, num_active = N, and we emit N+1 tree sizes,
-// strictly decreasing.
-func TestHandlerHappyPath(t *testing.T) {
+// TestEncodeOnlyLandmarkZero confirms the just-landmark-0 case: the
+// latest landmark is 0 and the only line is landmark 0 itself (tree size
+// 0, expiry 0), which is expired and ends the (empty) active list.
+func TestEncodeOnlyLandmarkZero(t *testing.T) {
 	s, _, t0 := newTestSeq(t)
-	for i := 1; i <= 5; i++ {
-		_, ok, err := s.Append(context.Background(), uint64(i*100),
-			t0.Add(time.Duration(i)*time.Hour))
-		if !ok || err != nil {
-			t.Fatal(err)
-		}
+	if got, want := string(s.Encode(t0)), "0\n0 0\n"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
 	}
-	body := requestBody(t, s, "GET")
-	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("not enough lines: %q", body)
-	}
-	first := strings.SplitN(lines[0], " ", 2)
-	if len(first) != 2 {
-		t.Fatalf("first line missing space: %q", lines[0])
-	}
-	last, err := strconv.ParseUint(first[0], 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	numActive, err := strconv.ParseUint(first[1], 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if last != 5 {
-		t.Errorf("last = %d, want 5", last)
-	}
-	if numActive != 5 {
-		// MaxActive in this fixture is 169 (7d/1h), so num_active is
-		// capped by `last_landmark = 5`.
-		t.Errorf("num_active = %d, want 5", numActive)
-	}
-	if uint64(len(lines)-1) != numActive+1 {
-		t.Errorf("got %d tree-size lines, want %d", len(lines)-1, numActive+1)
-	}
-	// Tree sizes are strictly decreasing.
-	prev := uint64(0)
-	for i, line := range lines[1:] {
-		n, err := strconv.ParseUint(line, 10, 64)
-		if err != nil {
-			t.Fatalf("line %d: %v", i, err)
-		}
-		if i > 0 && n >= prev {
-			t.Errorf("not strictly decreasing at line %d: %d >= %d", i, n, prev)
-		}
-		prev = n
+	if body := requestBody(t, s, "GET"); body != "0\n0 0\n" {
+		t.Errorf("served body = %q, want %q", body, "0\n0 0\n")
 	}
 }
 
-// TestHandlerCapsAtMaxActive: when the sequence has more landmarks
-// than MaxActive(), the response includes only the most recent
-// MaxActive landmarks plus the one prior tree size for the floor.
-func TestHandlerCapsAtMaxActive(t *testing.T) {
+// TestEncodeActiveLandmarks drives the §6.4.3 format: every active
+// landmark, newest first, then the newest expired one.
+func TestEncodeActiveLandmarks(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := storage.New(dir)
 	if err != nil {
@@ -91,12 +39,12 @@ func TestHandlerCapsAtMaxActive(t *testing.T) {
 		CAID:                 cert.TrustAnchorID("32473.1"),
 		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
-		MaxCertLifetime:      3 * time.Hour, // MaxActive = 4
+		MaxCertLifetime:      3 * time.Hour,
 	}
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	s, err2 := New(cfg, fs, t0)
-	if err2 != nil {
-		t.Fatal(err2)
+	s, err := New(cfg, fs, t0)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for i := 1; i <= 10; i++ {
 		_, ok, err := s.Append(context.Background(), uint64(i*10),
@@ -105,27 +53,70 @@ func TestHandlerCapsAtMaxActive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	body := requestBody(t, s, "GET")
-	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	first := strings.Fields(lines[0])
-	last, _ := strconv.ParseUint(first[0], 10, 64)
-	numActive, _ := strconv.ParseUint(first[1], 10, 64)
-	if last != 10 {
-		t.Errorf("last = %d, want 10", last)
+	// Landmark i expires at t0 + (i+3)h. At t0+10h30m landmarks 8..10 are
+	// active and landmark 7 (expired at t0+10h) ends the list.
+	now := t0.Add(10*time.Hour + 30*time.Minute)
+	exp := func(i int) int64 { return t0.Add(time.Duration(i+3) * time.Hour).Unix() }
+	want := "10\n" +
+		lineFor(100, exp(10)) + lineFor(90, exp(9)) + lineFor(80, exp(8)) + lineFor(70, exp(7))
+	if got := string(s.Encode(now)); got != want {
+		t.Errorf("body =\n%s\nwant\n%s", got, want)
 	}
-	if numActive != 4 {
-		t.Errorf("num_active = %d, want 4 (MaxActive)", numActive)
+
+	// The body round-trips through ParseList.
+	lms, err := ParseList(s.Encode(now), now)
+	if err != nil {
+		t.Fatalf("ParseList: %v", err)
 	}
-	if len(lines)-1 != int(numActive)+1 {
-		t.Errorf("got %d tree-size lines, want %d", len(lines)-1, numActive+1)
+	if len(lms) != 4 || lms[0].Number != 10 || lms[3].Number != 7 || lms[3].Active(now) || !lms[2].Active(now) {
+		t.Errorf("ParseList = %+v", lms)
 	}
-	// Highest reported tree size is the latest landmark's (= 100).
-	if got, _ := strconv.ParseUint(lines[1], 10, 64); got != 100 {
-		t.Errorf("first tree size = %d, want 100", got)
+
+	// Long after everything expired, only the latest landmark is listed.
+	if got, want := string(s.Encode(t0.Add(100*time.Hour))), "10\n"+lineFor(100, exp(10)); got != want {
+		t.Errorf("all-expired body = %q, want %q", got, want)
 	}
 }
 
-// TestHandlerHeaders confirms the §6.4.1 Content-Type and the
+func lineFor(size uint64, expiry int64) string {
+	return fmt.Sprintf("%d %d\n", size, expiry)
+}
+
+// TestParseListRejects exercises §6.4.3's strict-decoding requirement.
+func TestParseListRejects(t *testing.T) {
+	now := time.Unix(2000, 0)
+	cases := map[string]string{
+		"no trailing newline":     "1\n10 3000\n0 0",
+		"no landmarks":            "1\n",
+		"too many lines":          "0\n10 3000\n0 0\n",
+		"leading zero":            "01\n10 3000\n0 0\n",
+		"extra whitespace":        "1\n10  3000\n0 0\n",
+		"trailing space":          "1\n10 3000 \n0 0\n",
+		"sign":                    "1\n+10 3000\n0 0\n",
+		"sizes not decreasing":    "2\n10 3000\n10 2500\n0 0\n",
+		"expiries increasing":     "2\n20 3000\n10 3500\n0 0\n",
+		"no expired landmark":     "2\n20 3000\n10 2500\n",
+		"bad landmark zero":       "1\n10 3000\n5 0\n",
+		"blank line":              "1\n10 3000\n\n",
+		"latest beyond 2^48-1":    "281474976710656\n10 3000\n5 0\n",
+		"tree size beyond 2^48-1": "1\n281474976710656 3000\n0 0\n",
+	}
+	for name, body := range cases {
+		if _, err := ParseList([]byte(body), now); err == nil {
+			t.Errorf("%s: ParseList(%q) succeeded", name, body)
+		}
+	}
+	// A list need not reach landmark 0 when an expired landmark ends it.
+	lms, err := ParseList([]byte("7\n30 3000\n20 1000\n"), now)
+	if err != nil {
+		t.Fatalf("ParseList: %v", err)
+	}
+	if len(lms) != 2 || lms[0].Number != 7 || lms[1].Number != 6 || lms[1].TreeSize != 20 || !lms[0].Active(now) || lms[1].Active(now) {
+		t.Errorf("ParseList = %+v", lms)
+	}
+}
+
+// TestHandlerHeaders confirms the c2sp.org/mtc-tlog Content-Type and the
 // no-cache directive.
 func TestHandlerHeaders(t *testing.T) {
 	s, _, _ := newTestSeq(t)

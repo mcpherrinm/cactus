@@ -2,6 +2,7 @@ package cert
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestMTCProofRoundTrip(t *testing.T) {
 		InclusionProof: []tlogx.Hash{
 			{0x01}, {0x02}, {0x03}, {0x04}, {0x05},
 		},
-		Signatures: []MTCSignature{
+		Signatures: []Cosignature{
 			{CosignerID: TrustAnchorID("32473.1"), Signature: bytes.Repeat([]byte{0xaa}, 70)},
 			{CosignerID: TrustAnchorID("32473.10"), Signature: bytes.Repeat([]byte{0xbb}, 71)},
 		},
@@ -94,6 +95,43 @@ func TestMTCProofRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMTCProofSignaturesUse24BitLength pins the draft-06 change to
+// `Cosignature signatures<0..2^24-1>`: an empty list is three zero bytes,
+// and a list over 64 KiB (here 30 ML-DSA-44-sized signatures) round-trips.
+func TestMTCProofSignaturesUse24BitLength(t *testing.T) {
+	enc, err := (&MTCProof{Start: 0, End: 1}).MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// extensions<2> || start[6] || end[6] || inclusion_proof<2> || signatures<3>
+	want := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0}
+	if !bytes.Equal(enc, want) {
+		t.Errorf("empty proof = %x, want %x", enc, want)
+	}
+
+	big := &MTCProof{Start: 0, End: 1}
+	for i := range 30 {
+		big.Signatures = append(big.Signatures, Cosignature{
+			CosignerID: TrustAnchorID(fmt.Sprintf("32473.%d", 100+i)),
+			Signature:  bytes.Repeat([]byte{byte(i)}, 2420),
+		})
+	}
+	enc, err = big.MarshalTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enc) <= 0xffff {
+		t.Fatalf("proof is %d bytes, want over 64 KiB", len(enc))
+	}
+	dec, err := ParseMTCProof(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(dec, big) {
+		t.Error("large proof did not round-trip")
+	}
+}
+
 func TestMTCProofRejectsInvalidInclusionProofLength(t *testing.T) {
 	// §6.2 layout: extensions<2> || start[6] || end[6] || ip_len[2] || ...
 	bad := []byte{
@@ -107,8 +145,8 @@ func TestMTCProofRejectsInvalidInclusionProofLength(t *testing.T) {
 		0x00, 0x21,
 	}
 	bad = append(bad, bytes.Repeat([]byte{0xaa}, 33)...)
-	// signatures length=0
-	bad = append(bad, 0x00, 0x00)
+	// signatures length=0 (uint24)
+	bad = append(bad, 0x00, 0x00, 0x00)
 
 	if _, err := ParseMTCProof(bad); err == nil {
 		t.Error("ParseMTCProof: expected error for non-multiple-of-32 inclusion_proof")
@@ -135,7 +173,7 @@ func TestMTCProofCosignerIDIsBinary(t *testing.T) {
 	p := &MTCProof{
 		Start: 0, End: 1,
 		InclusionProof: []tlogx.Hash{{}},
-		Signatures: []MTCSignature{
+		Signatures: []Cosignature{
 			{CosignerID: TrustAnchorID("32473.1"), Signature: []byte{0xAA, 0xBB}},
 		},
 	}
@@ -167,7 +205,7 @@ func TestMTCProofCosignerIDIsBinary(t *testing.T) {
 func TestMTCProofSignaturesSortedByBinary(t *testing.T) {
 	p := &MTCProof{
 		Start: 0, End: 1,
-		Signatures: []MTCSignature{
+		Signatures: []Cosignature{
 			{CosignerID: TrustAnchorID("32473.130"), Signature: []byte{0x01}},
 			{CosignerID: TrustAnchorID("32473.2"), Signature: []byte{0x02}},
 		},
@@ -188,11 +226,11 @@ func TestMTCProofSignaturesSortedByBinary(t *testing.T) {
 }
 
 // TestMTCProofExtensionsRoundTrip + TestEntryHashExtSensitiveToExtensions
-// pin that the MerkleTreeCertEntry extensions are carried in the MTCProof
+// pin that the MTCLogEntry extensions are carried in the MTCProof
 // and feed the leaf hash (§7.2 step 8.2). (Regression for review finding 5.)
 func TestMTCProofExtensionsRoundTrip(t *testing.T) {
 	p := &MTCProof{
-		Extensions:     []MerkleTreeCertEntryExtension{{Type: 5, Data: []byte{0xde, 0xad}}},
+		Extensions:     []MTCLogEntryExtension{{Type: 5, Data: []byte{0xde, 0xad}}},
 		Start:          1,
 		End:            2,
 		InclusionProof: []tlogx.Hash{{0x09}},
@@ -212,7 +250,7 @@ func TestMTCProofExtensionsRoundTrip(t *testing.T) {
 
 func TestEntryHashExtSensitiveToExtensions(t *testing.T) {
 	tbs := []byte{0x01, 0x02, 0x03}
-	withExt, err := EntryHashExt([]MerkleTreeCertEntryExtension{{Type: 1, Data: []byte{0xff}}}, tbs)
+	withExt, err := EntryHashExt([]MTCLogEntryExtension{{Type: 1, Data: []byte{0xff}}}, tbs)
 	if err != nil {
 		t.Fatal(err)
 	}

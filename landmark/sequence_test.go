@@ -2,6 +2,7 @@ package landmark
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,38 +57,76 @@ func TestTimeUntilNextLandmark(t *testing.T) {
 	}
 }
 
-// TestMaxActiveMatchesDraftFormula pins §6.4.2's formula:
-// max_active_landmarks = ceil(max_cert_lifetime / time_between_landmarks) + 1.
-// 7-day lifetime, 1-hour interval → 169.
-func TestMaxActiveMatchesDraftFormula(t *testing.T) {
-	cases := []struct {
-		life, interval time.Duration
-		want           int
-	}{
-		{7 * 24 * time.Hour, time.Hour, 169},
-		{24 * time.Hour, time.Hour, 25},
-		{time.Hour, time.Hour, 2},
-		{30 * time.Minute, time.Hour, 2},
+// TestAppendSetsExpiry pins §6.4.2: a landmark allocated at t expires at
+// t + max_cert_lifetime, rounded up to a whole second, and never before
+// the previous landmark.
+func TestAppendSetsExpiry(t *testing.T) {
+	s, _, t0 := newTestSeq(t) // 7d max lifetime
+	at := t0.Add(time.Hour + 300*time.Millisecond)
+	l, ok, err := s.Append(context.Background(), 10, at)
+	if err != nil || !ok {
+		t.Fatalf("Append: ok=%v err=%v", ok, err)
 	}
-	for _, tc := range cases {
-		got := Config{MaxCertLifetime: tc.life, TimeBetweenLandmarks: tc.interval}.MaxActive()
-		if got != tc.want {
-			t.Errorf("MaxActive(life=%v, int=%v) = %d, want %d",
-				tc.life, tc.interval, got, tc.want)
-		}
+	if want := t0.Add(time.Hour + 7*24*time.Hour + time.Second); !l.Expiry.Equal(want) {
+		t.Errorf("expiry = %v, want %v", l.Expiry, want)
+	}
+
+	// Lowering max_cert_lifetime must not make expiries decrease.
+	s.cfg.MaxCertLifetime = time.Hour
+	l2, ok, err := s.Append(context.Background(), 20, at.Add(time.Hour))
+	if err != nil || !ok {
+		t.Fatalf("Append: ok=%v err=%v", ok, err)
+	}
+	if !l2.Expiry.Equal(l.Expiry) {
+		t.Errorf("expiry after lowering lifetime = %v, want previous %v", l2.Expiry, l.Expiry)
+	}
+}
+
+// TestReplayMigratesMissingExpiry covers sequence files written before
+// draft-07 support: landmarks without an expiry get allocated_at +
+// max_cert_lifetime (landmark 0: the Epoch), and the file is rewritten.
+func TestReplayMigratesMissingExpiry(t *testing.T) {
+	fs, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := `{"number":0,"tree_size":0,"allocated_at":"2026-05-01T00:00:00Z"}
+{"number":1,"tree_size":10,"allocated_at":"2026-05-01T01:00:00Z"}
+`
+	if err := fs.Put(SequenceFile, []byte(old), false); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{CAID: cert.TrustAnchorID("32473.1"), LogNumber: 1, TimeBetweenLandmarks: time.Hour, MaxCertLifetime: 24 * time.Hour}
+	s, err := New(cfg, fs, time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := s.All()
+	if !all[0].Expiry.Equal(time.Unix(0, 0)) {
+		t.Errorf("landmark 0 expiry = %v, want the Epoch", all[0].Expiry)
+	}
+	if want := time.Date(2026, 5, 2, 1, 0, 0, 0, time.UTC); !all[1].Expiry.Equal(want) {
+		t.Errorf("landmark 1 expiry = %v, want %v", all[1].Expiry, want)
+	}
+	data, err := fs.Get(SequenceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"expiry":"2026-05-02T01:00:00Z"`) {
+		t.Errorf("migrated file not rewritten with expiries:\n%s", data)
 	}
 }
 
 // TestNewSeedsLandmarkZero confirms a fresh sequence starts with one
-// landmark at (number=0, treeSize=0), per §6.4.1.
+// landmark at (number=0, treeSize=0, expiry=0), per §6.4.1.
 func TestNewSeedsLandmarkZero(t *testing.T) {
 	s, _, _ := newTestSeq(t)
 	all := s.All()
 	if len(all) != 1 {
 		t.Fatalf("got %d landmarks, want 1", len(all))
 	}
-	if all[0].Number != 0 || all[0].TreeSize != 0 {
-		t.Errorf("seed = %+v, want (0,0)", all[0])
+	if all[0].Number != 0 || all[0].TreeSize != 0 || all[0].Expiry.Unix() != 0 {
+		t.Errorf("seed = %+v, want (0,0,0)", all[0])
 	}
 }
 
@@ -195,13 +234,14 @@ func TestRestartResume(t *testing.T) {
 	}
 }
 
-// TestActiveDescending pins §6.4.1's ordering: most-recent-first, capped at MaxActive.
+// TestActiveDescending pins §6.4.1: the active landmarks are the
+// unexpired ones, most recent first, and landmark 0 never is.
 func TestActiveDescending(t *testing.T) {
 	cfg := Config{
 		CAID:                 cert.TrustAnchorID("32473.1"),
 		LogNumber:            1,
 		TimeBetweenLandmarks: time.Hour,
-		MaxCertLifetime:      3 * time.Hour, // MaxActive = ceil(3) + 1 = 4
+		MaxCertLifetime:      3 * time.Hour,
 	}
 	dir := t.TempDir()
 	fs, _ := storage.New(dir)
@@ -210,9 +250,6 @@ func TestActiveDescending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.MaxActive(); got != 4 {
-		t.Fatalf("MaxActive = %d, want 4", got)
-	}
 	for i := 1; i <= 6; i++ {
 		_, ok, err := s.Append(context.Background(), uint64(i*10),
 			t0.Add(time.Duration(i)*time.Hour))
@@ -220,19 +257,22 @@ func TestActiveDescending(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	active := s.Active()
+	// Landmark i expires at t0 + (i+3)h, so at t0+6h landmarks 3..6 are
+	// active (expiry is inclusive).
+	active := s.Active(t0.Add(6 * time.Hour))
 	if len(active) != 4 {
-		t.Fatalf("Active len = %d, want 4 (capped at MaxActive)", len(active))
+		t.Fatalf("Active len = %d, want 4", len(active))
 	}
-	// First should be the most recent (number 6).
-	if active[0].Number != 6 {
-		t.Errorf("Active[0].Number = %d, want 6", active[0].Number)
-	}
-	// Strictly decreasing.
-	for i := 1; i < len(active); i++ {
-		if active[i-1].Number <= active[i].Number {
-			t.Errorf("Active not strictly decreasing: %d -> %d", active[i-1].Number, active[i].Number)
+	for i, l := range active {
+		if want := uint64(6 - i); l.Number != want {
+			t.Errorf("Active[%d].Number = %d, want %d", i, l.Number, want)
 		}
+	}
+	if got := s.Active(t0); len(got) != 6 {
+		t.Errorf("Active(t0) len = %d, want 6 (landmark 0 excluded)", len(got))
+	}
+	if got := s.Active(t0.Add(10 * time.Hour)); len(got) != 0 {
+		t.Errorf("Active after all expire = %+v, want none", got)
 	}
 }
 
@@ -303,9 +343,18 @@ func TestLandmarkSubtrees(t *testing.T) {
 		t.Errorf("subs[1] = [%d,%d), want [8,13)", subs[1].Start, subs[1].End)
 	}
 
-	// Landmark 0 has no covering subtrees.
-	if subs0 := s.LandmarkSubtrees(s.All()[0]); subs0 != nil {
-		t.Errorf("landmark 0 subtrees = %+v, want nil", subs0)
+	// Landmark 0's subtrees are both the empty [0, 0).
+	if subs0 := s.LandmarkSubtrees(s.All()[0]); len(subs0) != 2 || !subs0[0].Empty() || !subs0[1].Empty() || subs0[0].Start != 0 || subs0[1].Start != 0 {
+		t.Errorf("landmark 0 subtrees = %+v, want [0,0) [0,0)", subs0)
+	}
+
+	// A one-entry landmark has the entry's subtree plus an empty one.
+	if _, ok, err := s.Append(context.Background(), 14, t0.Add(2*time.Hour)); !ok || err != nil {
+		t.Fatal(err)
+	}
+	subs2 := s.LandmarkSubtrees(s.All()[2])
+	if len(subs2) != 2 || subs2[0].Start != 13 || subs2[0].End != 14 || subs2[1].Start != 14 || subs2[1].End != 14 {
+		t.Errorf("landmark 2 subtrees = %+v, want [13,14) [14,14)", subs2)
 	}
 }
 

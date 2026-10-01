@@ -70,8 +70,11 @@ func largestPowerOfTwoLT(n uint64) uint64 {
 }
 
 func subtreeHashFromHR(start, end uint64, hr tlog.HashReader) (Hash, error) {
-	if start >= end {
-		return Hash{}, fmt.Errorf("empty subtree [%d,%d)", start, end)
+	if start > end {
+		return Hash{}, fmt.Errorf("invalid range [%d,%d)", start, end)
+	}
+	if start == end {
+		return sha256Hash(nil), nil // MTH({}) = HASH()
 	}
 	width := end - start
 	// Power-of-two-aligned subtree: exactly one stored hash.

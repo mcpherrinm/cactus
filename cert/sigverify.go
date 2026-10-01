@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// SignatureAlgorithm identifies how to interpret an MTCSignature's
-// public key + signature bytes. draft-05 §5.3.3 no longer fixes an
+// SignatureAlgorithm identifies how to interpret a Cosignature's
+// public key + signature bytes. §5.3.3 does not fix an
 // algorithm registry — a cosigner's algorithm is a PKIX
 // AlgorithmIdentifier carried in the CA certificate's sigAlg (§5.5),
 // resolved out-of-band. Per the MTC-with-tlog profile, cosigners use
@@ -29,11 +29,11 @@ type CosignerKey struct {
 	PublicKey []byte
 }
 
-// VerifyMTCSignature checks an MTCSignature.Signature against the signing
+// VerifyCosignature checks a Cosignature.Signature against the signing
 // message (a CosignedMessage per §5.3.1). The caller supplies a
 // CosignerKey carrying the algorithm + key bytes so the cosigner ID is
 // resolved out-of-band.
-func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte) error {
+func VerifyCosignature(key CosignerKey, sig Cosignature, signedMessage []byte) error {
 	if string(sig.CosignerID) != string(key.ID) {
 		return fmt.Errorf("cert: cosigner ID mismatch: sig=%q key=%q", sig.CosignerID, key.ID)
 	}
@@ -46,7 +46,7 @@ func VerifyMTCSignature(key CosignerKey, sig MTCSignature, signedMessage []byte)
 }
 
 // verifyMLDSA verifies a pure ML-DSA signature with an empty context
-// (draft-05 §5.3.3 / RFC 9881 §3). pub is the raw FIPS 204 public key as
+// (c2sp.org/tlog-cosignature ML-DSA-44 signed messages, RFC 9881 §3). pub is the raw FIPS 204 public key as
 // extracted from the cosigner SPKI by cosignerKeyFromSPKI.
 func verifyMLDSA(alg SignatureAlgorithm, pub, msg, sig []byte) error {
 	var params mldsa.Parameters

@@ -158,7 +158,7 @@ func entryShow(logURL string, idx uint64) {
 		die("entry %d not present in %s", idx, tilePath)
 	}
 	body := entries[posInTile]
-	// MerkleTreeCertEntry (§5.2.1): extensions<0..2^16-1> then uint16 type
+	// MTCLogEntry (§5.2.1): extensions<0..2^16-1> then uint16 type
 	// then the type-specific data. The leading uint16 is the extensions
 	// vector length, NOT the type.
 	if len(body) < 2 {
@@ -221,12 +221,24 @@ var attrNames = map[string]string{
 	"2.5.4.11":                         "OU",
 }
 
+// rawAttribute is an AttributeTypeAndValue whose value is kept raw, so
+// that a RELATIVE-OID trust anchor ID (which encoding/asn1 cannot decode
+// into an interface) survives. rdnSET's name ends in "SET" so
+// encoding/asn1 decodes it as a SET OF.
+type rawAttribute struct {
+	Type  asn1.ObjectIdentifier
+	Value asn1.RawValue
+}
+
+type rdnSET []rawAttribute
+
 // formatDN renders a DER-encoded Name (RDNSequence) as "type=value, …".
+// An id-rdna-trustAnchorID value is shown in its ASCII representation.
 func formatDN(der []byte) string {
 	if len(der) == 0 {
 		return "(empty)"
 	}
-	var rdns pkix.RDNSequence
+	var rdns []rdnSET
 	if _, err := asn1.Unmarshal(der, &rdns); err != nil {
 		return fmt.Sprintf("<unparseable: %x>", der)
 	}
@@ -240,10 +252,25 @@ func formatDN(der []byte) string {
 			if n, ok := attrNames[name]; ok {
 				name = n
 			}
-			parts = append(parts, fmt.Sprintf("%s=%v", name, atv.Value))
+			parts = append(parts, fmt.Sprintf("%s=%s", name, formatAttrValue(atv.Value)))
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// formatAttrValue renders a Name attribute value: a RELATIVE-OID (tag 13)
+// as dotted decimal, anything else as encoding/asn1 decodes it.
+func formatAttrValue(v asn1.RawValue) string {
+	if v.Class == asn1.ClassUniversal && v.Tag == 13 && !v.IsCompound {
+		if id, err := cert.TrustAnchorIDFromBinary(v.Bytes); err == nil {
+			return string(id)
+		}
+	}
+	var decoded any
+	if _, err := asn1.Unmarshal(v.FullBytes, &decoded); err != nil || decoded == nil {
+		return fmt.Sprintf("#%x", v.FullBytes)
+	}
+	return fmt.Sprint(decoded)
 }
 
 // formatAlgID renders an AlgorithmIdentifier as its OID (named if known).
@@ -354,12 +381,12 @@ func certVerify(certPath, logURL string) {
 	if err != nil {
 		die("rebuild log entry: %v", err)
 	}
-	// draft-05 §6.2: serial = (log_number << 48) | index.
+	// draft-07 §6.2: serial = (log_number << 48) | index.
 	logNumber, index, err := cert.SplitSerial(serial)
 	if err != nil {
 		die("decode serial: %v", err)
 	}
-	// §7.2 step 8.2: the MerkleTreeCertEntry's extensions come from the
+	// §7.2 step 8.2: the MTCLogEntry's extensions come from the
 	// MTCProof, not the X.509 cert. Feed them into the leaf hash so a
 	// proof carrying entry extensions hashes correctly.
 	leafHash, err := cert.EntryHashExt(proof.Extensions, tbsContents)

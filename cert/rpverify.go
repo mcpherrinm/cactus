@@ -9,7 +9,7 @@ import (
 	"github.com/letsencrypt/cactus/tlogx"
 )
 
-// This file implements the draft-05 §7 relying-party side: deriving a
+// This file implements the draft-07 §7 relying-party side: deriving a
 // relying party's configuration from a CA certificate (§7.1) and the
 // full certificate-signature verification procedure (§7.2), including
 // revoked-range (§7.5) and trusted-subtree (§7.4) handling.
@@ -30,9 +30,6 @@ type RelyingPartyConfig struct {
 	// CADN is the DER of the CA ID distinguished name; an incoming
 	// certificate's issuer MUST equal it.
 	CADN []byte
-	// LogHash is the hash algorithm used by all of the CA's logs.
-	// cactus only implements SHA-256.
-	LogHash asn1.ObjectIdentifier
 	// Cosigners are the cosigner keys the relying party knows, keyed by
 	// cosigner ID. It MUST include the CA cosigner (ID == CAID).
 	Cosigners []CosignerKey
@@ -53,10 +50,11 @@ type RelyingPartyConfig struct {
 var ErrRevoked = errors.New("cert: serial number is revoked")
 
 // ConfigFromCACertificate derives a RelyingPartyConfig from a §5.5 CA
-// certificate (§7.1): the CA ID from the subject, the log hash and CA
-// cosigner signature algorithm from the id-pe-mtcCertificationAuthority
-// extension, the CA cosigner key from the subjectPublicKeyInfo, and the
-// initial revoked range [0, minSerial). The CA cosigner ID is the CA ID.
+// certificate (§7.1): the CA ID from the subject, the log hash from the
+// Merkle Tree CA extension's type (only SHA-256 is supported), the CA
+// cosigner signature algorithm from that extension, the CA cosigner key
+// from the subjectPublicKeyInfo, and the initial revoked ranges below
+// minSerial and above maxSerial. The CA cosigner ID is the CA ID.
 // Relying parties may then extend RevokedRanges, TrustedSubtrees, and
 // Cosigners out-of-band.
 func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
@@ -64,19 +62,16 @@ func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
 	if err != nil {
 		return RelyingPartyConfig{}, err
 	}
-	mtcExt, ok := exts[OIDExtMTCCertificationAuthority.String()]
+	// The Merkle Tree CA extension's type names the tree hash (§5.5).
+	// Verification is SHA-256-only, so a CA cert carrying only some other
+	// tree construction's extension fails closed here.
+	mtcExt, ok := exts[OIDExtMTCCertificationAuthoritySHA256.String()]
 	if !ok {
-		return RelyingPartyConfig{}, fmt.Errorf("cert: CA certificate missing id-pe-mtcCertificationAuthority extension")
+		return RelyingPartyConfig{}, fmt.Errorf("cert: CA certificate missing id-pe-mtcCertificationAuthority-SHA256 extension")
 	}
 	ca, err := ParseMTCCertificationAuthority(mtcExt)
 	if err != nil {
 		return RelyingPartyConfig{}, err
-	}
-	// Verification is SHA-256-only, so reject (fail closed) a CA cert
-	// that advertises any other log hash rather than silently verifying
-	// it as SHA-256.
-	if !ca.LogHash.Equal(OIDDigestSHA256) {
-		return RelyingPartyConfig{}, fmt.Errorf("cert: unsupported log hash %v (only id-sha256 is supported)", ca.LogHash)
 	}
 	caID, err := parseCANameDN(subjectDN)
 	if err != nil {
@@ -89,7 +84,6 @@ func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
 	return RelyingPartyConfig{
 		CAID:              caID,
 		CADN:              subjectDN,
-		LogHash:           ca.LogHash,
 		Cosigners:         []CosignerKey{cosigner},
 		RequiredCosigners: []TrustAnchorID{caID},
 		RevokedRanges:     InitialRevokedRanges(ca),
@@ -173,7 +167,7 @@ func verifyCosignatures(cfg RelyingPartyConfig, logID TrustAnchorID, proof *MTCP
 	for _, k := range cfg.Cosigners {
 		keys[string(k.ID)] = k
 	}
-	sigs := make(map[string]MTCSignature, len(proof.Signatures))
+	sigs := make(map[string]Cosignature, len(proof.Signatures))
 	for _, s := range proof.Signatures {
 		sigs[string(s.CosignerID)] = s
 	}
@@ -191,7 +185,7 @@ func verifyCosignatures(cfg RelyingPartyConfig, logID TrustAnchorID, proof *MTCP
 		if err != nil {
 			return err
 		}
-		if err := VerifyMTCSignature(key, sig, msg); err != nil {
+		if err := VerifyCosignature(key, sig, msg); err != nil {
 			return fmt.Errorf("cert: cosignature from %q: %w", id, err)
 		}
 	}
@@ -224,7 +218,7 @@ func cosignerKeyFromSPKI(id TrustAnchorID, spki []byte, sigAlg asn1.ObjectIdenti
 	}
 	// crypto/x509 cannot parse ML-DSA SPKIs, and ML-DSA keys are the raw
 	// FIPS 204 key bytes carried in the SPKI BIT STRING. Extract that BIT
-	// STRING so VerifyMTCSignature (via the crypto/mldsa verifier) gets the
+	// STRING so VerifyCosignature (via the crypto/mldsa verifier) gets the
 	// same raw key encoding signer.Signer emits.
 	raw, err := rawKeyFromSPKI(spki, sigAlg)
 	if err != nil {
@@ -407,39 +401,45 @@ func parseCACertificate(der []byte) (subjectDN, spki []byte, exts map[string][]b
 }
 
 // parseCANameDN extracts the canonical relative TrustAnchorID from a CA
-// ID distinguished name as built by BuildCAName: a single RDN with a
-// single AttributeTypeAndValue of type id-rdna-trustAnchorID (cactus
-// experimental OID) and a UTF8String value.
+// ID distinguished name as built by BuildCAName: exactly one RDN holding
+// exactly one id-rdna-trustAnchorID attribute whose value is a
+// RELATIVE-OID (§5.1).
 func parseCANameDN(dn []byte) (TrustAnchorID, error) {
 	// RDNSequence ::= SEQUENCE OF RelativeDistinguishedName(SET) OF
 	// AttributeTypeAndValue(SEQUENCE). BuildCAName emits exactly one of
 	// each, so we descend explicitly rather than via slice decoding.
 	var rdnSeq asn1.RawValue
-	if _, err := asn1.Unmarshal(dn, &rdnSeq); err != nil {
+	if rest, err := asn1.Unmarshal(dn, &rdnSeq); err != nil {
 		return nil, err
+	} else if len(rest) != 0 {
+		return nil, errors.New("cert: trailing bytes after CA DN")
 	}
 	if rdnSeq.Tag != asn1.TagSequence {
 		return nil, fmt.Errorf("cert: CA DN is not a SEQUENCE (tag %d)", rdnSeq.Tag)
 	}
 	var rdn asn1.RawValue
-	if _, err := asn1.Unmarshal(rdnSeq.Bytes, &rdn); err != nil {
+	if rest, err := asn1.Unmarshal(rdnSeq.Bytes, &rdn); err != nil {
 		return nil, err
+	} else if len(rest) != 0 {
+		return nil, errors.New("cert: CA DN has more than one RDN")
 	}
 	if rdn.Tag != asn1.TagSet {
 		return nil, fmt.Errorf("cert: CA DN RDN is not a SET (tag %d)", rdn.Tag)
 	}
 	var atv struct {
 		Type  asn1.ObjectIdentifier
-		Value string `asn1:"utf8"`
+		Value asn1.RawValue
 	}
-	if _, err := asn1.Unmarshal(rdn.Bytes, &atv); err != nil {
+	if rest, err := asn1.Unmarshal(rdn.Bytes, &atv); err != nil {
 		return nil, err
+	} else if len(rest) != 0 {
+		return nil, errors.New("cert: CA DN RDN has more than one attribute")
 	}
 	if !atv.Type.Equal(OIDRDNATrustAnchorID) {
 		return nil, fmt.Errorf("cert: CA DN attribute type %v is not id-rdna-trustAnchorID", atv.Type)
 	}
-	if atv.Value == "" {
-		return nil, errors.New("cert: CA DN has empty trust anchor ID")
+	if atv.Value.Class != asn1.ClassUniversal || atv.Value.Tag != tagRelativeOID || atv.Value.IsCompound {
+		return nil, fmt.Errorf("cert: CA DN trust anchor ID is not a RELATIVE-OID (class %d, tag %d)", atv.Value.Class, atv.Value.Tag)
 	}
-	return TrustAnchorID(atv.Value), nil
+	return TrustAnchorIDFromBinary(atv.Value.Bytes)
 }

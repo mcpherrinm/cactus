@@ -2,7 +2,7 @@ package cert
 
 import "fmt"
 
-// This file implements the draft-05 §5.1 Certification Authority
+// This file implements the draft-07 §5.1 Certification Authority
 // identifier model. A CA has a single CA ID (a trust anchor ID). All
 // other identifiers — log IDs, landmark IDs, landmark group IDs — are
 // derived from it by appending OID components. cactus stores trust
@@ -34,21 +34,42 @@ func LandmarkID(caID TrustAnchorID, logNumber uint16, landmarkNumber uint64) Tru
 
 // LandmarkGroupID derives the trust anchor group ID for a single-log
 // landmark group per §8.2.1: CA-ID ‖ 2 ‖ logNumber ‖ landmarkNumber.
-// The group contains the CA ID plus each active landmark of the log.
+// Group L contains the CA ID (every standalone certificate) plus
+// landmarks 0 through L of the log.
 func LandmarkGroupID(caID TrustAnchorID, logNumber uint16, landmarkNumber uint64) TrustAnchorID {
 	return TrustAnchorID(fmt.Sprintf("%s.2.%d.%d", string(caID), logNumber, landmarkNumber))
+}
+
+// StandaloneGroupPattern is the trust_anchor_groups pattern a standalone
+// certificate carries per §8.2.1, CA-ID.2.{0-}.{0-}: every single-log
+// landmark group of the CA contains the CA ID.
+func StandaloneGroupPattern(caID TrustAnchorID) TrustAnchorIDPattern {
+	return MustParseTrustAnchorIDPattern(string(caID) + ".2.{0-}.{0-}")
+}
+
+// LandmarkGroupPattern is the trust_anchor_groups pattern a
+// landmark-relative certificate from landmark L of log N carries per
+// §8.2.1, CA-ID.2.N.{L-}: landmark group M contains landmark L for every
+// M >= L.
+func LandmarkGroupPattern(caID TrustAnchorID, logNumber uint16, landmarkNumber uint64) TrustAnchorIDPattern {
+	return MustParseTrustAnchorIDPattern(fmt.Sprintf("%s.2.%d.{%d-}", string(caID), logNumber, landmarkNumber))
 }
 
 // serialIndexBits is the width of the entry-index portion of a serial
 // number (§6.2). The log number occupies the bits above it.
 const serialIndexBits = 48
 
+// MaxLogEntries is the most entries an issuance log may hold (§5.2):
+// 2^48-1, so that the tree size, and thus MTCProof.end, fits in a uint48.
+// The largest index is therefore 2^48-2.
+const MaxLogEntries = maxUint48
+
 // ComposeSerial builds a certificate serial number from a log number
 // and an entry index per §6.2: serial = (logNumber << 48) | index.
-// index MUST fit in 48 bits.
+// index MUST be below MaxLogEntries.
 func ComposeSerial(logNumber uint16, index uint64) (uint64, error) {
-	if index > maxUint48 {
-		return 0, fmt.Errorf("cert: entry index %d exceeds 2^48-1", index)
+	if index >= MaxLogEntries {
+		return 0, fmt.Errorf("cert: entry index %d exceeds 2^48-2", index)
 	}
 	return uint64(logNumber)<<serialIndexBits | index, nil
 }

@@ -23,6 +23,9 @@ func rootOf(leaves []Hash, n uint64) Hash {
 }
 
 func subtreeOf(leaves []Hash, start, end uint64) Hash {
+	if end == start {
+		return sha(nil) // MTH({}) = HASH()
+	}
 	if end-start == 1 {
 		return leaves[start]
 	}

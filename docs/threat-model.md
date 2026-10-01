@@ -32,7 +32,7 @@ local testing, awful for anything else.
 ## Tile data trust
 
 Cactus does not validate that the entry blobs in data tiles are
-parseable MerkleTreeCertEntry structures. If you tamper with a tile
+parseable MTCLogEntry structures. If you tamper with a tile
 file out-of-band, the next reload will replay garbage through
 `tlog.StoredHashes` and produce a tree the server happily continues
 with — but the resulting cosigner signatures will be over a tree

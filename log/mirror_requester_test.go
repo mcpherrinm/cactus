@@ -33,9 +33,9 @@ func TestMirrorRequesterCalledAndSigsEmbedded(t *testing.T) {
 
 	var calls int64
 	fakeMirrorID := cert.TrustAnchorID("32473.24")
-	requester := func(_ context.Context, st *cert.MTCSubtree, caSig cert.MTCSignature) ([]cert.MTCSignature, error) {
+	requester := func(_ context.Context, st *cert.MTCSubtree, caSig cert.Cosignature) ([]cert.Cosignature, error) {
 		atomic.AddInt64(&calls, 1)
-		return []cert.MTCSignature{{
+		return []cert.Cosignature{{
 			CosignerID: fakeMirrorID,
 			Signature:  []byte("synthetic-mirror-sig-" + string(rune('A'+atomic.LoadInt64(&calls)))),
 		}}, nil
@@ -103,7 +103,7 @@ func TestMirrorRequesterErrorIsNonFatal(t *testing.T) {
 	s, _ := signer.FromSeed(signer.AlgMLDSA44, seed)
 	cosigID := cert.TrustAnchorID("32473.1")
 
-	requester := func(_ context.Context, _ *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
+	requester := func(_ context.Context, _ *cert.MTCSubtree, _ cert.Cosignature) ([]cert.Cosignature, error) {
 		return nil, &fakeErr{}
 	}
 
@@ -162,13 +162,13 @@ func TestSlowMirrorSigSurvivesInterveningFlushes(t *testing.T) {
 	// flowing and keep advancing the checkpoint.
 	var targetIdx atomic.Int64
 	targetIdx.Store(-1)
-	requester := func(_ context.Context, st *cert.MTCSubtree, _ cert.MTCSignature) ([]cert.MTCSignature, error) {
+	requester := func(_ context.Context, st *cert.MTCSubtree, _ cert.Cosignature) ([]cert.Cosignature, error) {
 		if ti := targetIdx.Load(); ti >= 0 && st.Start <= uint64(ti) && uint64(ti) < st.End {
 			// Stall past several FlushPeriods so the covering subtree
 			// is evicted by intervening flushes before this returns.
 			time.Sleep(250 * time.Millisecond)
 		}
-		return []cert.MTCSignature{{
+		return []cert.Cosignature{{
 			CosignerID: mirrorID,
 			Signature:  bytes.Repeat([]byte{0xAB}, 8),
 		}}, nil
