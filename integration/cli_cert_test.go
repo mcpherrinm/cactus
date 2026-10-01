@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/pem"
@@ -209,5 +210,22 @@ func TestCLICertLandmarkRelative(t *testing.T) {
 	}
 	if !strings.Contains(string(txt), "form:            landmark-relative") {
 		t.Errorf("converted cert text not reported landmark-relative:\n%s", txt)
+	}
+
+	// Converting it again is allowed (whether a cert is landmark-relative
+	// depends on its subtree, not on lacking cosignatures) and yields the
+	// same certificate.
+	again := exec.Command(bin, "cert", "landmark-relative", lrPath, hTile.URL)
+	var againErr strings.Builder
+	again.Stderr = &againErr
+	againPEM, err := again.Output()
+	if err != nil {
+		t.Fatalf("cert landmark-relative (again): %v\nstderr=%s", err, againErr.String())
+	}
+	if !bytes.Equal(againPEM, outPEM) {
+		t.Errorf("re-converting a landmark-relative cert changed it")
+	}
+	if !strings.Contains(againErr.String(), "already uses this landmark subtree") {
+		t.Errorf("re-conversion stderr lacks the already-landmark-relative note:\n%s", againErr.String())
 	}
 }

@@ -16,9 +16,8 @@ import (
 // certText prints a human-readable view of a Merkle Tree Certificate:
 // the X.509 / log-entry fields, the decoded serial (log number +
 // index), and the MTCProof carried in the signatureValue. It works on
-// both standalone certs (cosigner-signed subtree) and landmark-relative
-// certs (no signatures), and on either a bare CERTIFICATE PEM or the
-// trust-anchor-ids `…-with-properties` form.
+// both standalone and landmark-relative certs, and on either a bare
+// CERTIFICATE PEM or the trust-anchor-ids `…-with-properties` form.
 func certText(certPath string) {
 	der, props, err := readCertPEM(certPath)
 	if err != nil {
@@ -49,9 +48,14 @@ func certText(certPath string) {
 	fmt.Printf("  serial:     %d (log number %d, entry index %d)\n", serial, logNumber, index)
 	printLogEntry(e)
 
-	form := "landmark-relative (no signatures)"
+	// Which form a cert is depends on whether its subtree is a landmark
+	// subtree, which takes the log's landmarks to tell. Without them, the
+	// cosignatures only settle it when there are none: a standalone cert
+	// needs them (§6.3), but a landmark-relative one may carry them too
+	// (e.g. GREASE, §6.2 and §6.4.4).
+	form := "landmark-relative (no cosignatures)"
 	if len(proof.Signatures) > 0 {
-		form = "standalone (cosigner-signed subtree)"
+		form = "standalone, unless its subtree is a landmark subtree (landmark-relative certificates may also carry cosignatures)"
 	}
 	fmt.Println("  MTC proof:")
 	fmt.Printf("    form:            %s\n", form)
@@ -78,12 +82,14 @@ func certText(certPath string) {
 	}
 }
 
-// certLandmarkRelative converts a standalone certificate into the
-// equivalent landmark-relative certificate (§6.4.4): same TBS, but a new
-// MTCProof whose inclusion proof climbs from the entry to a covering
-// subtree of the smallest landmark containing the entry, with the
-// cosigner signatures dropped. The log's /landmarks and tile endpoints
-// are read from logURL to pick the landmark and build the proof.
+// certLandmarkRelative converts a certificate into the equivalent
+// landmark-relative certificate (§6.4.4): same TBS, but a new MTCProof
+// whose inclusion proof climbs from the entry to the landmark subtree
+// containing it, of the lowest landmark whose tree size exceeds the
+// entry's index, with no cosignatures. The log's /landmarks and tile
+// endpoints are read from logURL to pick the landmark and build the
+// proof. Converting a certificate that is already landmark-relative is
+// harmless: it re-derives the same subtree and drops any cosignatures.
 func certLandmarkRelative(certPath, logURL string) {
 	der, props, err := readCertPEM(certPath)
 	if err != nil {
@@ -96,9 +102,6 @@ func certLandmarkRelative(certPath, logURL string) {
 	origProof, err := cert.ParseMTCProof(sigValue)
 	if err != nil {
 		die("parse MTCProof: %v", err)
-	}
-	if len(origProof.Signatures) == 0 {
-		die("input certificate is already landmark-relative (no signatures)")
 	}
 	// BuildLandmarkRelativeCert emits a proof with no entry extensions,
 	// so a cert whose entry carries extensions can't be converted
@@ -212,6 +215,9 @@ func certLandmarkRelative(certPath, logURL string) {
 		_, _ = os.Stdout.Write(cert.EncodePEMWithProperties(out, pl))
 	} else {
 		_ = pem.Encode(stdout(), &pem.Block{Type: "CERTIFICATE", Bytes: out})
+	}
+	if origProof.Start == chosen.Start && origProof.End == chosen.End {
+		fmt.Fprintln(os.Stderr, "note: input certificate already uses this landmark subtree")
 	}
 	fmt.Fprintf(os.Stderr, "landmark-relative: landmark %d, subtree [%d,%d), %d-node inclusion proof\n",
 		lmNum, chosen.Start, chosen.End, len(proof))
