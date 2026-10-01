@@ -678,12 +678,12 @@ func (s *Service) pushClient(h *logHandle, origin string, mt *mirrorTarget) (*mi
 		return c, nil
 	}
 	c, err := mirrorpush.New(nil, mirrorpush.Target{
-		Origin:           origin,
-		SubmissionPrefix: mt.subURL,
-		MonitoringPrefix: mt.baseURL,
-		Key:              mt.key,
-		HTTPClient:       s.hc,
-		Timeout:          s.cfg.RequestTimeout(),
+		Origin:             origin,
+		SubmissionPrefix:   mt.subURL,
+		MonitoringPrefixes: []string{mt.baseURL},
+		Key:                mt.key,
+		HTTPClient:         s.hc,
+		Timeout:            s.cfg.RequestTimeout(),
 	}, h.src, s.fsys, s.logger.With("origin", origin))
 	if err != nil {
 		return nil, err

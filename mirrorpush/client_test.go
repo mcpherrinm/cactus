@@ -359,9 +359,9 @@ func newTestClient(t *testing.T, l *cactuslog.Log, m *stubMirror) (*Client, *htt
 		t.Fatal(err)
 	}
 	c, err := New(testLogID, Target{
-		SubmissionPrefix: srv.URL,
-		MonitoringPrefix: srv.URL, // no /checkpoint route: discovery 404s, as for a new mirror
-		Key:              m.key,
+		SubmissionPrefix:   srv.URL,
+		MonitoringPrefixes: []string{srv.URL}, // no /checkpoint route: discovery 404s, as for a new mirror
+		Key:                m.key,
 	}, logSource{l}, fsys, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -609,7 +609,7 @@ func TestPushStatePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := Target{SubmissionPrefix: srv.URL, MonitoringPrefix: srv.URL, Key: m.key}
+	target := Target{SubmissionPrefix: srv.URL, MonitoringPrefixes: []string{srv.URL}, Key: m.key}
 
 	c1, err := New(testLogID, target, logSource{l}, fsys, nil)
 	if err != nil {
@@ -679,9 +679,9 @@ func TestDiscoverClampsOversizedCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := New(testLogID, Target{
-		SubmissionPrefix: srv.URL,
-		MonitoringPrefix: srv.URL,
-		Key:              m.key,
+		SubmissionPrefix:   srv.URL,
+		MonitoringPrefixes: []string{srv.URL},
+		Key:                m.key,
 	}, logSource{l}, fsys, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -693,5 +693,45 @@ func TestDiscoverClampsOversizedCheckpoint(t *testing.T) {
 	if c.st.nextEntry > ourSize {
 		t.Fatalf("discover seeded next-entry %d beyond our size %d; wedge not closed",
 			c.st.nextEntry, ourSize)
+	}
+}
+
+// TestDiscoverFallsBackAcrossMonitoringPrefixes pins the tlog-mirror /
+// tlog-tiles multi-prefix rule: if fetching the checkpoint from one
+// monitoring prefix fails, the client tries the next.
+func TestDiscoverFallsBackAcrossMonitoringPrefixes(t *testing.T) {
+	origin := cert.OIDName(testLogID)
+	sum := sha256.Sum256([]byte(origin))
+	wantPath := "/" + hex.EncodeToString(sum[:]) + "/checkpoint"
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "maintenance", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, "%s\n%d\n%s\n\n", origin, 3, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	}))
+	t.Cleanup(up.Close)
+
+	l := newTestLog(t, 5)
+	m := newStubMirror(t, testLogID, 0x42)
+	c, err := New(testLogID, Target{
+		SubmissionPrefix:   up.URL,
+		MonitoringPrefixes: []string{down.URL, up.URL},
+		Key:                m.key,
+	}, logSource{l}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := c.fetchMirrorCheckpointSize(context.Background())
+	if err != nil {
+		t.Fatalf("fetchMirrorCheckpointSize: %v", err)
+	}
+	if size != 3 {
+		t.Errorf("size = %d, want 3 from the second prefix", size)
 	}
 }

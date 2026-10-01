@@ -75,11 +75,11 @@ func FuzzAddEntriesFraming(f *testing.F) {
 	seed(Header{Origin: "oid/1.3.6.1.4.1.32473.1.0.1", UploadStart: 100, UploadEnd: 600}, -1)
 	seed(Header{Origin: "oid/1.3.6.1.4.1.32473.1.0.1", UploadStart: 100, UploadEnd: 600, Ticket: []byte{1, 2, 3}}, 1)
 	f.Add([]byte{})
-	f.Add([]byte{0x00, 0x01, 0x61})
+	f.Add([]byte{0x01, 0x61})
 	// A header describing an enormous interval: the parser must not try
 	// to materialise the sequence it implies.
 	f.Add([]byte{
-		0x00, 0x01, 0x61, // origin "a"
+		0x01, 0x61, // origin "a"
 		0, 0, 0, 0, 0, 0, 0, 0, // upload_start
 		0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // upload_end
 		0x00, 0x00, // ticket

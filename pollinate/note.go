@@ -34,7 +34,13 @@ type NoteSig struct {
 	Blob  []byte
 }
 
-// ParseNote parses a checkpoint note body plus signature lines.
+// maxOriginLen is the c2sp.org/tlog-checkpoint cap on the origin line.
+const maxOriginLen = 255
+
+// ParseNote parses a checkpoint note body plus signature lines. Per
+// c2sp.org/tlog-checkpoint it rejects an origin over 255 bytes and two
+// signature lines with the same key name and key ID (lines sharing just
+// a name, e.g. across a key rotation, are fine).
 func ParseNote(data []byte) (*Note, error) {
 	body, sigText, ok := strings.Cut(string(data), "\n\n")
 	if !ok {
@@ -54,6 +60,9 @@ func ParseNote(data []byte) (*Note, error) {
 	if n.Origin == "" {
 		return nil, errors.New("pollinate: note has empty origin")
 	}
+	if len(n.Origin) > maxOriginLen {
+		return nil, fmt.Errorf("pollinate: note origin is %d bytes, over the %d-byte limit", len(n.Origin), maxOriginLen)
+	}
 	size, err := strconv.ParseUint(lines[1], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("pollinate: note size: %w", err)
@@ -68,6 +77,11 @@ func ParseNote(data []byte) (*Note, error) {
 	}
 	copy(n.Root[:], root)
 
+	type sigKey struct {
+		name  string
+		keyID [4]byte
+	}
+	seen := map[sigKey]bool{}
 	for _, line := range strings.Split(sigText, "\n") {
 		if line == "" {
 			continue
@@ -87,6 +101,11 @@ func ParseNote(data []byte) (*Note, error) {
 		if len(raw) < 4 {
 			return nil, errors.New("pollinate: signature too short for a key ID")
 		}
+		k := sigKey{name, [4]byte(raw[:4])}
+		if seen[k] {
+			return nil, fmt.Errorf("pollinate: note has two signature lines from %q with key ID %x", name, k.keyID)
+		}
+		seen[k] = true
 		n.Sigs = append(n.Sigs, NoteSig{
 			Name:  name,
 			KeyID: [4]byte(raw[:4]),

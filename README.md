@@ -111,8 +111,12 @@ config-example listens on:
 - `:14080` — monitoring read-path. The monitoring base URL is the **CA
   prefix**; each issuance log is served as a tiled transparency log under
   `/<log number>/` (`/<log number>/checkpoint`, `/<log number>/tile/…`,
-  `/<log number>/landmarks`), per the MTC-with-tlog profile. The
-  CA-level `/ca-certificate` lives at the root.
+  `/<log number>/landmarks`), per the MTC-with-tlog profile
+  ([c2sp.org/mtc-tlog]). The CA-level `/ca-certificate` lives at the
+  root. When `monitoring.external_url` is set, the CA certificate lists
+  it as the CA prefix URL in the profile's `id-mtcTlogPrefixURLs`
+  extension (1.3.6.1.4.1.64829.2.2), so a relying party can find the
+  logs from the certificate alone.
 - `127.0.0.1:14090` — Prometheus metrics + pprof
 
 Once it's up (log number `1` in the example config):
@@ -409,7 +413,13 @@ each target, in parallel and best effort:
    `ca_cosigner_quorum` presents to `sign-subtree`.
 
 `monitoring_prefix` is optional and only used to guess a starting index
-for a mirror cactus has no state for; the mirror corrects any guess.
+for a mirror cactus has no state for; the mirror corrects any guess. A
+mirror may have several monitoring prefixes serving the same content;
+list the others in `monitoring_prefixes` and cactus tries them in order
+if one fails. The `add-entries` body uses the current tlog-mirror
+framing, with a one-byte `log_origin_size` (it was two bytes before
+C2SP aligned it with the 255-byte checkpoint origin limit), so the
+mirror must be recent enough to speak it; Sunlight has since `42d2b79`.
 Resume state (next entry, pending size, and the mirror's opaque ticket)
 is persisted under `<data_dir>/mirrorpush/`.
 
@@ -604,5 +614,6 @@ specs.
 
 [draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt
 [tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
+[c2sp.org/mtc-tlog]: https://c2sp.org/mtc-tlog
 [tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
 [tlog-witness]: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md

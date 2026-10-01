@@ -70,9 +70,11 @@ sed -i "s|/tmp/cactus-data|$DATA_DIR|" config.json
 `external_url` to whatever clients reach. `acme.external_url` is
 load-bearing — it is the base URL cactus puts in ACME directory entries,
 account/order locations, and the JWS `url`-header check — so it must
-match what clients actually use. `monitoring.external_url` is
-informational only: it is published in the `/config` output for
-discovery but does not change how the monitoring endpoint is served.
+match what clients actually use. `monitoring.external_url` does not
+change how the monitoring endpoint is served, but it is published: in
+the `/config` output, and as the CA prefix URL in the CA certificate's
+c2sp.org/mtc-tlog `id-mtcTlogPrefixURLs` extension. Set it to the base
+under which clients reach `/<log number>/checkpoint`.
 cactus speaks plaintext HTTP unless you set `acme.tls_cert`/`tls_key`
 (or terminate TLS at a reverse proxy); either way, set `external_url` to
 the public `https://…`. Keep `metrics.listen` on `127.0.0.1` — it is

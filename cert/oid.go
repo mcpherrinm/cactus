@@ -24,6 +24,13 @@ var (
 	// SHA-256. Since draft-06 the extension type, not a field of the
 	// extension, identifies the tree hash.
 	OIDExtMTCCertificationAuthoritySHA256 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 38}
+
+	// OIDExtMTCTlogPrefixURLs is id-mtcTlogPrefixURLs {C2SP(64829)
+	// mtc-tlog(2) 2}, the non-critical CA certificate extension from
+	// c2sp.org/mtc-tlog listing the CA prefix URLs. Its presence says the
+	// CA serves its issuance logs per that profile, at
+	// <CA prefix URL>/<log number>.
+	OIDExtMTCTlogPrefixURLs = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 64829, 2, 2}
 )
 
 // SubtreeSignatureLabel is the 12-byte fixed prefix from §5.3.1:

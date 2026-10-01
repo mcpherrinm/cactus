@@ -121,17 +121,25 @@ func TestParseNoteNonOIDOrigin(t *testing.T) {
 func TestParseNoteRejectsMalformed(t *testing.T) {
 	root := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	for name, in := range map[string]string{
-		"no separator": "origin\n5\n" + root + "\n",
-		"two lines":    "origin\n5\n\nsigs\n",
-		"bad size":     "origin\nfive\n" + root + "\n\n— a " + base64.StdEncoding.EncodeToString(make([]byte, 8)) + "\n",
-		"short root":   "origin\n5\nAAAA\n\n— a AAAAAAAA\n",
-		"bad sig line": "origin\n5\n" + root + "\n\nnot a sig\n",
-		"short sig":    "origin\n5\n" + root + "\n\n— a " + base64.StdEncoding.EncodeToString([]byte{1, 2}) + "\n",
-		"empty origin": "\n5\n" + root + "\n\n— a AAAAAAAA\n",
+		"no separator":  "origin\n5\n" + root + "\n",
+		"two lines":     "origin\n5\n\nsigs\n",
+		"bad size":      "origin\nfive\n" + root + "\n\n— a " + base64.StdEncoding.EncodeToString(make([]byte, 8)) + "\n",
+		"short root":    "origin\n5\nAAAA\n\n— a AAAAAAAA\n",
+		"bad sig line":  "origin\n5\n" + root + "\n\nnot a sig\n",
+		"short sig":     "origin\n5\n" + root + "\n\n— a " + base64.StdEncoding.EncodeToString([]byte{1, 2}) + "\n",
+		"empty origin":  "\n5\n" + root + "\n\n— a AAAAAAAA\n",
+		"long origin":   strings.Repeat("o", 256) + "\n5\n" + root + "\n\n— a AAAAAAAA\n",
+		"duplicate key": "origin\n5\n" + root + "\n\n— a AAAAAAAA\n— a AAAAAAAAAAA=\n",
 	} {
 		if _, err := ParseNote([]byte(in)); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+	// Same key name with different key IDs (e.g. a key rotation) is
+	// allowed; only a repeated (name, key ID) pair is not.
+	ok := "origin\n5\n" + root + "\n\n— a AAAAAAAA\n— a AQAAAAAA\n"
+	if _, err := ParseNote([]byte(ok)); err != nil {
+		t.Errorf("same name, different key IDs: %v", err)
 	}
 	if !strings.HasPrefix("— x", "— ") {
 		t.Fatal("sanity: em dash prefix")

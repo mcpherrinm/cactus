@@ -22,7 +22,7 @@
 //
 // Update flow per mirror, per log flush:
 //
-//	discover  — learn the mirror's checkpoint size (monitoring prefix)
+//	discover  — learn the mirror's checkpoint size (monitoring prefixes)
 //	            and the size it will accept as `old` (add-checkpoint 409)
 //	add-checkpoint — move the mirror's *pending* checkpoint to ours,
 //	            with an RFC 6962 tree consistency proof
@@ -94,9 +94,11 @@ type Target struct {
 	// profile's oid/ form). Set it when following a log whose origin is
 	// not oid-derived, e.g. a plain hostname-path origin.
 	Origin string
-	// MonitoringPrefix is the base URL of the read APIs, under which
-	// the mirror serves "<origin hash>/checkpoint".
-	MonitoringPrefix string
+	// MonitoringPrefixes are the base URLs of the read APIs, under each
+	// of which the mirror serves "<origin hash>/checkpoint". A
+	// c2sp.org/tlog-mirror mirror has one or more; they serve the same
+	// content, so they are tried in order until one answers.
+	MonitoringPrefixes []string
 	// Key is the mirror's cosigner identity and public key, used to
 	// pick its cosignature lines out of an add-entries 200 response and
 	// verify them.
@@ -281,7 +283,7 @@ func (c *Client) CosignedCheckpoint() (uint64, []string) {
 // tlog-mirror sanctions exactly this bootstrap: a client without
 // information on the mirror "MAY initially make an add-checkpoint
 // request to obtain a pending checkpoint size and fetch a checkpoint
-// from the monitoring prefix". Both can be stale by the time
+// from a monitoring prefix". Both can be stale by the time
 // add-entries runs, which is fine — they are a starting point, and any
 // error is corrected by the 202/409 loop, which is the only thing we
 // actually trust to set next entry.
@@ -324,15 +326,34 @@ func (c *Client) discover(ctx context.Context, ourSize uint64) error {
 
 // fetchMirrorCheckpointSize GETs <monitoring prefix>/<origin hash>/
 // checkpoint and returns its tree size, or 0 if the mirror has never
-// cosigned this log (404).
+// cosigned this log (404). Per c2sp.org/tlog-tiles, a client that fails
+// to fetch from one URL prefix SHOULD try another, so each monitoring
+// prefix is tried in turn until one answers.
 func (c *Client) fetchMirrorCheckpointSize(ctx context.Context) (uint64, error) {
-	if c.target.MonitoringPrefix == "" {
+	if len(c.target.MonitoringPrefixes) == 0 {
 		return 0, errors.New("mirrorpush: no monitoring prefix configured")
 	}
+	var errs []error
+	for _, prefix := range c.target.MonitoringPrefixes {
+		size, err := c.fetchMirrorCheckpointSizeAt(ctx, prefix)
+		if err == nil {
+			return size, nil
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", prefix, err))
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return 0, errors.Join(errs...)
+}
+
+// fetchMirrorCheckpointSizeAt is fetchMirrorCheckpointSize against one
+// monitoring prefix.
+func (c *Client) fetchMirrorCheckpointSizeAt(ctx context.Context, prefix string) (uint64, error) {
 	// The origin hash is the SHA-256 of the log's origin, hex encoded,
 	// in lowercase.
 	sum := sha256.Sum256([]byte(c.origin))
-	url := strings.TrimSuffix(c.target.MonitoringPrefix, "/") + "/" + hex.EncodeToString(sum[:]) + "/checkpoint"
+	url := strings.TrimSuffix(prefix, "/") + "/" + hex.EncodeToString(sum[:]) + "/checkpoint"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -528,10 +549,11 @@ func (c *Client) pushEntries(ctx context.Context, uploadEnd uint64, root tlogx.H
 				// is a serious mirror fault, not a retryable blip.
 				return errFatal{err}
 			}
-			lines := make([]string, 0, len(cosigs))
-			for _, cs := range cosigs {
-				lines = append(lines, cs.Line)
-			}
+			// Every verified line carries the mirror's key name and key
+			// ID, and c2sp.org/tlog-checkpoint forbids two signature
+			// lines with the same name and key ID, so retain just one
+			// for the reference checkpoint.
+			lines := []string{cosigs[0].Line}
 			c.mu.Lock()
 			c.st.nextEntry = uploadEnd
 			c.st.pendingSize = uploadEnd

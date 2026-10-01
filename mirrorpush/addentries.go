@@ -27,10 +27,11 @@ const MaxPackagesPerRequest = 32
 // byte and "MUST be at most 63".
 const MaxProofHashes = 63
 
-// maxOriginLen is the ceiling implied by the uint16 log_origin_size
-// header field. cactus origins are ~40 bytes, so this only ever fires
-// on a caller bug.
-const maxOriginLen = 0xffff
+// maxOriginLen is the ceiling implied by the uint8 log_origin_size
+// header field (a uint16 before c2sp.org/tlog-mirror aligned it with the
+// 255-byte origin cap of c2sp.org/tlog-checkpoint). cactus origins are
+// ~40 bytes, so this only ever fires on a caller bug.
+const maxOriginLen = 0xff
 
 // Package is one element of the canonical entry-package sequence.
 //
@@ -177,7 +178,7 @@ func BuildAddEntries(h Header, pkgs []PackageData) ([]byte, error) {
 	}
 
 	var b []byte
-	b = binary.BigEndian.AppendUint16(b, uint16(len(h.Origin)))
+	b = append(b, byte(len(h.Origin)))
 	b = append(b, h.Origin...)
 	b = binary.BigEndian.AppendUint64(b, h.UploadStart)
 	b = binary.BigEndian.AppendUint64(b, h.UploadEnd)
@@ -247,10 +248,11 @@ func ParseAddEntries(body []byte) (h Header, pkgs []Package, data []PackageData,
 		return v, true
 	}
 
-	originLen, ok := readUint16()
-	if !ok {
+	if len(s) < 1 {
 		return h, nil, nil, errors.New("mirrorpush: short read log_origin_size")
 	}
+	originLen := s[0]
+	s = s[1:]
 	if originLen == 0 {
 		// A zero-length origin is framing-legal but cannot name a log,
 		// and BuildAddEntries refuses to emit one. Rejecting it here

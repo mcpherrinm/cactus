@@ -152,8 +152,8 @@ func buildPushClients(
 			return nil, fmt.Errorf("mirror_push.targets[%d] public_key_path: %w", i, err)
 		}
 		c, err := mirrorpush.New(logID, mirrorpush.Target{
-			SubmissionPrefix: t.SubmissionPrefix,
-			MonitoringPrefix: t.MonitoringPrefix,
+			SubmissionPrefix:   t.SubmissionPrefix,
+			MonitoringPrefixes: t.AllMonitoringPrefixes(),
 			Key: cert.CosignerKey{
 				ID:        cert.TrustAnchorID(t.ID),
 				Algorithm: signerAlgToCertAlg(alg),
@@ -263,7 +263,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	// (§7.1). Built once at startup and served at /ca-certificate on the
 	// monitoring listener so peers can derive trust via
 	// cert.ConfigFromCACertificate.
-	caCertPEM, err := buildCACertPEM(caID, sgn)
+	caCertPEM, err := buildCACertPEM(caID, sgn, cfg.Monitoring.ExternalURL)
 	if err != nil {
 		return fmt.Errorf("build CA certificate: %w", err)
 	}
@@ -676,7 +676,11 @@ func die(format string, args ...any) {
 // 2^64-1 because cactus does not bound its log numbers, so no valid
 // serials are initially revoked. An operator wanting to bound a relying
 // party's monitoring scope would lower maxSerial (§7.5).
-func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) {
+//
+// If monitoring.external_url is set it is the CA prefix URL (each log is
+// served under <prefix>/<log number>), and the certificate lists it in a
+// c2sp.org/mtc-tlog id-mtcTlogPrefixURLs extension.
+func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer, prefixURL string) ([]byte, error) {
 	alg := cert.SignatureAlgorithm(sgn.Algorithm())
 	sigAlg, err := cert.SigAlgOID(alg)
 	if err != nil {
@@ -686,6 +690,12 @@ func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+	var prefixURLs []string
+	if prefixURL != "" {
+		// mtc-tlog joins "<CA prefix URL>/<log number>", so drop any
+		// trailing slash.
+		prefixURLs = []string{strings.TrimSuffix(prefixURL, "/")}
+	}
 	now := time.Now()
 	der, err := cert.BuildCACertificate(cert.CACertificateInput{
 		CAID:         caID,
@@ -693,6 +703,7 @@ func buildCACertPEM(caID cert.TrustAnchorID, sgn signer.Signer) ([]byte, error) 
 		SigAlg:       sigAlg,
 		MinSerial:    cert.MTCMinSerial,
 		MaxSerial:    cert.MTCMaxSerial,
+		PrefixURLs:   prefixURLs,
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.AddDate(10, 0, 0),
 	})

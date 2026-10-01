@@ -40,6 +40,10 @@ type RelyingPartyConfig struct {
 	// RevokedRanges are revoked serial-number ranges (§7.5), seeded from
 	// the CA certificate's minSerial and optionally extended out-of-band.
 	RevokedRanges RevokedRanges
+	// PrefixURLs are the CA prefix URLs from the CA certificate's
+	// c2sp.org/mtc-tlog id-mtcTlogPrefixURLs extension, if present: log
+	// N is served as a tiled transparency log at <prefix URL>/N.
+	PrefixURLs []string
 	// TrustedSubtrees is the optional predistributed set (§7.4) enabling
 	// the landmark-relative fast path.
 	TrustedSubtrees map[TrustedSubtreeKey]tlogx.Hash
@@ -73,6 +77,12 @@ func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
 	if err != nil {
 		return RelyingPartyConfig{}, err
 	}
+	var prefixURLs []string
+	if v, ok := exts[OIDExtMTCTlogPrefixURLs.String()]; ok {
+		if prefixURLs, err = ParsePrefixURLs(v); err != nil {
+			return RelyingPartyConfig{}, err
+		}
+	}
 	caID, err := parseCANameDN(subjectDN)
 	if err != nil {
 		return RelyingPartyConfig{}, fmt.Errorf("cert: CA certificate subject: %w", err)
@@ -87,6 +97,7 @@ func ConfigFromCACertificate(caCertDER []byte) (RelyingPartyConfig, error) {
 		Cosigners:         []CosignerKey{cosigner},
 		RequiredCosigners: []TrustAnchorID{caID},
 		RevokedRanges:     InitialRevokedRanges(ca),
+		PrefixURLs:        prefixURLs,
 	}, nil
 }
 

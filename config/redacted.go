@@ -70,10 +70,11 @@ type RedactedPush struct {
 // prefixes are kept: they are public endpoints, and publishing which
 // mirrors a log replicates to is the point of the exercise.
 type RedactedPushTarget struct {
-	ID               string `json:"id"`
-	SubmissionPrefix string `json:"submission_prefix"`
-	MonitoringPrefix string `json:"monitoring_prefix"`
-	Algorithm        string `json:"algorithm"`
+	ID                 string   `json:"id"`
+	SubmissionPrefix   string   `json:"submission_prefix"`
+	MonitoringPrefix   string   `json:"monitoring_prefix"`
+	MonitoringPrefixes []string `json:"monitoring_prefixes,omitempty"`
+	Algorithm          string   `json:"algorithm"`
 }
 
 // Redacted returns the public-safe view of c. See RedactedConfig.
@@ -109,10 +110,11 @@ func (c Config) Redacted() RedactedConfig {
 	}
 	for _, t := range c.MirrorPush.Targets {
 		rc.MirrorPush.Targets = append(rc.MirrorPush.Targets, RedactedPushTarget{
-			ID:               t.ID,
-			SubmissionPrefix: t.SubmissionPrefix,
-			MonitoringPrefix: t.MonitoringPrefix,
-			Algorithm:        t.Algorithm,
+			ID:                 t.ID,
+			SubmissionPrefix:   t.SubmissionPrefix,
+			MonitoringPrefix:   t.MonitoringPrefix,
+			MonitoringPrefixes: t.MonitoringPrefixes,
+			Algorithm:          t.Algorithm,
 		})
 	}
 	return rc

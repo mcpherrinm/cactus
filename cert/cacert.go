@@ -206,8 +206,70 @@ type CACertificateInput struct {
 	// least MTCMinSerial.
 	MinSerial uint64
 	// MaxSerial is the maximum valid serial number (§7.1 / §7.5).
-	MaxSerial           uint64
+	MaxSerial uint64
+	// PrefixURLs, if non-empty, are the CA prefix URLs to list in a
+	// c2sp.org/mtc-tlog id-mtcTlogPrefixURLs extension.
+	PrefixURLs          []string
 	NotBefore, NotAfter time.Time
+}
+
+// MarshalPrefixURLs returns the DER of an MTCTlogPrefixURLs extension
+// value (c2sp.org/mtc-tlog):
+//
+//	MTCTlogPrefixURLs ::= SEQUENCE SIZE (1..MAX) OF IA5String
+func MarshalPrefixURLs(urls []string) ([]byte, error) {
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("cert: MTCTlogPrefixURLs needs at least one URL")
+	}
+	for _, u := range urls {
+		if err := checkIA5(u); err != nil {
+			return nil, err
+		}
+	}
+	var b cryptobyte.Builder
+	b.AddASN1(cryptobyte_asn1.SEQUENCE, func(seq *cryptobyte.Builder) {
+		for _, u := range urls {
+			seq.AddASN1(cryptobyte_asn1.IA5String, func(s *cryptobyte.Builder) { s.AddBytes([]byte(u)) })
+		}
+	})
+	return b.Bytes()
+}
+
+// ParsePrefixURLs decodes an MTCTlogPrefixURLs extension value.
+func ParsePrefixURLs(der []byte) ([]string, error) {
+	in := cryptobyte.String(der)
+	var seq cryptobyte.String
+	if !in.ReadASN1(&seq, cryptobyte_asn1.SEQUENCE) || !in.Empty() {
+		return nil, fmt.Errorf("cert: malformed MTCTlogPrefixURLs")
+	}
+	var urls []string
+	for !seq.Empty() {
+		var u cryptobyte.String
+		if !seq.ReadASN1(&u, cryptobyte_asn1.IA5String) {
+			return nil, fmt.Errorf("cert: malformed MTCTlogPrefixURLs entry")
+		}
+		if err := checkIA5(string(u)); err != nil {
+			return nil, err
+		}
+		urls = append(urls, string(u))
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("cert: MTCTlogPrefixURLs is empty")
+	}
+	return urls, nil
+}
+
+// checkIA5 rejects a string that is empty or not IA5 (7-bit ASCII).
+func checkIA5(s string) error {
+	if s == "" {
+		return fmt.Errorf("cert: empty CA prefix URL")
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] > 0x7f {
+			return fmt.Errorf("cert: CA prefix URL %q is not IA5String", s)
+		}
+	}
+	return nil
 }
 
 // pkixExtension is one X.509 v3 extension. asn1.Marshal of this struct
@@ -224,8 +286,9 @@ type pkixExtension struct {
 // subject and issuer are the CA ID DN (§5.1), the subjectPublicKeyInfo
 // is the CA cosigner key, and the extensions carry a critical
 // id-pe-mtcCertificationAuthority-SHA256 (§5.5), a critical basicConstraints
-// with cA=TRUE, a critical keyUsage asserting keyCertSign, and a
-// subjectKeyId set to the CA ID's binary representation. The
+// with cA=TRUE, a critical keyUsage asserting keyCertSign, a
+// subjectKeyId set to the CA ID's binary representation, and, if
+// PrefixURLs is set, a c2sp.org/mtc-tlog id-mtcTlogPrefixURLs. The
 // signatureAlgorithm is id-alg-unsigned and the signatureValue is a
 // zero-length BIT STRING.
 func BuildCACertificate(in CACertificateInput) ([]byte, error) {
@@ -267,12 +330,20 @@ func BuildCACertificate(in CACertificateInput) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	extsDER, err := asn1.Marshal([]pkixExtension{
+	exts := []pkixExtension{
 		{ID: oidExtBasicConstraints, Critical: true, Value: bcVal},
 		{ID: oidExtKeyUsage, Critical: true, Value: kuVal},
 		{ID: OIDExtMTCCertificationAuthoritySHA256, Critical: true, Value: mtcExtVal},
 		{ID: oidExtSubjectKeyID, Value: skiVal},
-	})
+	}
+	if len(in.PrefixURLs) > 0 {
+		v, err := MarshalPrefixURLs(in.PrefixURLs)
+		if err != nil {
+			return nil, err
+		}
+		exts = append(exts, pkixExtension{ID: OIDExtMTCTlogPrefixURLs, Value: v})
+	}
+	extsDER, err := asn1.Marshal(exts)
 	if err != nil {
 		return nil, err
 	}

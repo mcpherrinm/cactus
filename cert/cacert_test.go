@@ -1,11 +1,13 @@
 package cert
 
 import (
+	"bytes"
 	"encoding/asn1"
 	"math"
 	"math/big"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestMTCCertificationAuthorityRoundTrip(t *testing.T) {
@@ -154,5 +156,67 @@ func TestInitialRevokedRangesBothBounds(t *testing.T) {
 		if rr.Contains(s) {
 			t.Errorf("serial %d should not be revoked", s)
 		}
+	}
+}
+
+// TestPrefixURLsExtension pins the c2sp.org/mtc-tlog
+// id-mtcTlogPrefixURLs encoding (SEQUENCE OF IA5String) and checks it
+// round-trips through a CA certificate into the relying-party config.
+func TestPrefixURLsExtension(t *testing.T) {
+	der, err := MarshalPrefixURLs([]string{"https://a.test", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append([]byte{0x30, 0x13, 0x16, 0x0e}, append([]byte("https://a.test"), 0x16, 0x01, 'b')...)
+	if !bytes.Equal(der, want) {
+		t.Errorf("MarshalPrefixURLs = %x, want %x", der, want)
+	}
+	for _, bad := range [][]string{nil, {""}, {"https://ä.test"}} {
+		if _, err := MarshalPrefixURLs(bad); err == nil {
+			t.Errorf("MarshalPrefixURLs(%q) succeeded", bad)
+		}
+	}
+	if _, err := ParsePrefixURLs([]byte{0x30, 0x00}); err == nil {
+		t.Error("ParsePrefixURLs accepted an empty SEQUENCE")
+	}
+
+	spki, err := MarshalCosignerSPKI(AlgMLDSA44, make([]byte, 1312))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigAlg, err := SigAlgOID(AlgMLDSA44)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := CACertificateInput{
+		CAID:         TrustAnchorID("32473.1"),
+		CosignerSPKI: spki,
+		SigAlg:       sigAlg,
+		MinSerial:    MTCMinSerial,
+		MaxSerial:    MTCMaxSerial,
+		NotBefore:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	caDER, err := BuildCACertificate(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ConfigFromCACertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PrefixURLs != nil {
+		t.Errorf("PrefixURLs = %q without the extension", cfg.PrefixURLs)
+	}
+
+	in.PrefixURLs = []string{"https://ca.test/mtc"}
+	if caDER, err = BuildCACertificate(in); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = ConfigFromCACertificate(caDER); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.PrefixURLs, in.PrefixURLs) {
+		t.Errorf("PrefixURLs = %q, want %q", cfg.PrefixURLs, in.PrefixURLs)
 	}
 }

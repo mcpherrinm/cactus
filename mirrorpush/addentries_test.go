@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/letsencrypt/cactus/tlogx"
@@ -226,12 +227,36 @@ func TestBuildAddEntriesRejectsBadInput(t *testing.T) {
 			t.Error("accepted an empty origin")
 		}
 	})
+	t.Run("origin over 255 bytes", func(t *testing.T) {
+		if _, err := BuildAddEntries(Header{Origin: strings.Repeat("a", 256)}, nil); err == nil {
+			t.Error("accepted a 256-byte origin")
+		}
+	})
 	t.Run("oversized proof", func(t *testing.T) {
 		bad := []PackageData{{Entries: good[0].Entries, Proof: make([]tlogx.Hash, MaxProofHashes+1)}}
 		if _, err := BuildAddEntries(h, bad); err == nil {
 			t.Errorf("accepted a proof with more than %d hashes", MaxProofHashes)
 		}
 	})
+}
+
+// TestAddEntriesHeaderFraming pins the header layout byte for byte,
+// in particular the one-byte log_origin_size that c2sp.org/tlog-mirror
+// switched to from a uint16.
+func TestAddEntriesHeaderFraming(t *testing.T) {
+	body, err := BuildAddEntries(Header{Origin: "ab", UploadStart: 5, UploadEnd: 5, Ticket: []byte{0xcc}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{
+		0x02, 'a', 'b', // log_origin_size (uint8), log_origin
+		0, 0, 0, 0, 0, 0, 0, 5, // upload_start
+		0, 0, 0, 0, 0, 0, 0, 5, // upload_end
+		0x00, 0x01, 0xcc, // ticket_size (uint16), ticket
+	}
+	if !bytes.Equal(body, want) {
+		t.Errorf("body = %x, want %x", body, want)
+	}
 }
 
 // TestParseAddEntriesRejectsTruncationAndTrailingBytes pins the two

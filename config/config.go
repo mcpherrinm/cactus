@@ -94,10 +94,26 @@ type MirrorPushTarget struct {
 	// which it serves "<origin hash>/checkpoint". Used only to
 	// bootstrap a starting index for a mirror we have no state for.
 	MonitoringPrefix string `json:"monitoring_prefix"`
-	Algorithm        string `json:"algorithm"`
+	// MonitoringPrefixes lists further monitoring prefixes: a
+	// c2sp.org/tlog-mirror mirror may have several, serving the same
+	// content. They are tried after MonitoringPrefix, in order.
+	MonitoringPrefixes []string `json:"monitoring_prefixes"`
+	Algorithm          string   `json:"algorithm"`
 	// PublicKeyPath points to a PEM "PUBLIC KEY" file holding the
 	// mirror's cosigner key, resolved relative to data_dir.
 	PublicKeyPath string `json:"public_key_path"`
+}
+
+// AllMonitoringPrefixes returns MonitoringPrefix followed by
+// MonitoringPrefixes, skipping empty values.
+func (t MirrorPushTarget) AllMonitoringPrefixes() []string {
+	var out []string
+	for _, p := range append([]string{t.MonitoringPrefix}, t.MonitoringPrefixes...) {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // MirrorEndpointConfig is one mirror the CA fans out to.
