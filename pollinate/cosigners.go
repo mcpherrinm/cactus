@@ -65,6 +65,9 @@ type Signer struct {
 	Realm                  string           `json:"realm"`
 	MaxCertLifetimeSeconds int64            `json:"max_cert_lifetime_seconds"`
 	KeySHA256              string           `json:"key_sha256"`
+	// MinLogNumber is, for issuers, the lowest log number Chrome still
+	// recognizes as valid. Zero means unset.
+	MinLogNumber int `json:"min_log_number"`
 }
 
 // CurrentState returns the signer's current inclusion state, or "" if

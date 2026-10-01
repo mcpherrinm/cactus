@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/letsencrypt/cactus/cert"
 	"github.com/letsencrypt/cactus/mirrorpush"
 	"github.com/letsencrypt/cactus/storage"
@@ -61,6 +63,28 @@ type issuer struct {
 	// forwards is still authenticated against the checkpoint root, and
 	// the receiving mirror independently verifies the log's signature.
 	key []byte
+	// minLogNumber is the lowest log number the cosigners list still
+	// recognizes for this issuer (0 if unset). Lower-numbered logs are
+	// neither discovered nor pushed: relying parties reject their
+	// certificates, so mirroring them is wasted work.
+	minLogNumber uint64
+}
+
+// retired reports whether the log with the given checkpoint origin is
+// one of the issuer's logs below its minimum log number. Only
+// c2sp.org/mtc-tlog origins ("oid/1.3.6.1.4.1.<CA ID>.0.<log number>")
+// carry a log number; any other origin is never considered retired.
+func (is *issuer) retired(origin string) bool {
+	if is.minLogNumber == 0 {
+		return false
+	}
+	prefix := cert.OIDName(cert.TrustAnchorID(is.id)) + ".0."
+	numStr, ok := strings.CutPrefix(origin, prefix)
+	if !ok {
+		return false
+	}
+	n, err := strconv.ParseUint(numStr, 10, 16)
+	return err == nil && n < is.minLogNumber
 }
 
 // mirrorTarget is one mirror from the cosigners file, with its key
@@ -224,9 +248,10 @@ func (s *Service) loadCosigners(ctx context.Context) error {
 			continue
 		}
 		is := &issuer{
-			id:       sg.BaseID,
-			friendly: sg.FriendlyName,
-			baseURL:  trimSlash(sg.BaseURL),
+			id:           sg.BaseID,
+			friendly:     sg.FriendlyName,
+			baseURL:      trimSlash(sg.BaseURL),
+			minLogNumber: uint64(max(sg.MinLogNumber, 0)),
 		}
 		if spki, ok := keys[sg.KeySHA256]; !ok {
 			s.logger.Warn("issuer key missing from bundle; checkpoints will not be signature-verified",
@@ -333,7 +358,7 @@ func (s *Service) fetcher(ctx context.Context, base, origin, sourceLabel string)
 func (s *Service) discover(ctx context.Context, now time.Time) {
 	for _, is := range s.issuers {
 		candidates := []string{is.baseURL}
-		for n := 0; n <= s.cfg.Discovery.MaxLogNumber; n++ {
+		for n := int(is.minLogNumber); n <= s.cfg.Discovery.MaxLogNumber; n++ {
 			candidates = append(candidates, is.baseURL+"/"+strconv.Itoa(n))
 		}
 		for _, url := range candidates {
@@ -347,6 +372,9 @@ func (s *Service) discover(ctx context.Context, now time.Time) {
 			}
 			if _, known := s.state.Logs[note.Origin]; known {
 				continue
+			}
+			if is.retired(note.Origin) {
+				continue // e.g. a single-log layout serving an old log
 			}
 			if is.key != nil {
 				if err := note.VerifySignature(cert.TrustAnchorID(is.id), is.key); err != nil {
@@ -396,6 +424,19 @@ func (s *Service) poll(ctx context.Context, now time.Time) map[string][]pushJob 
 		}
 		ls := s.state.logState(origin)
 		logger := s.logger.With("origin", origin)
+		if is := issuerByID[ls.IssuerID]; is != nil && is.retired(origin) {
+			// The list's min_log_number has moved past this log since it
+			// was discovered; stop following it.
+			logger.Debug("skipping log below issuer's min_log_number", "min_log_number", is.minLogNumber)
+			// Drop its gauges too, so a frozen lag value doesn't keep an
+			// alert firing for a log nobody needs mirrored any more.
+			byOrigin := prometheus.Labels{"origin": origin}
+			s.m.LogHeadSize.DeletePartialMatch(byOrigin)
+			s.m.MirrorSize.DeletePartialMatch(byOrigin)
+			s.m.MirrorLag.DeletePartialMatch(byOrigin)
+			s.m.MirrorCarries.DeletePartialMatch(byOrigin)
+			continue
+		}
 
 		head := uint64(0)
 		seenAny := false

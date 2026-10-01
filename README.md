@@ -468,6 +468,10 @@ Design points:
   `n ≤ discovery.max_log_number`, since both single-log CAs and
   mtc-tlog-profile CAs exist in the wild. A log's identity is the origin
   its checkpoint declares — including non-`oid/` origins.
+- **Retired logs.** If the list gives an issuer a `min_log_number`,
+  logs below it (identified by their `oid/<CA ID>.0.<n>` origin) are
+  neither probed nor pushed, and a log that falls below it after
+  discovery stops being followed and loses its gauges.
 - **The delay window (`push_delay_ms`).** CAs are expected to push on
   their own, so pollinate records a history of log-head sizes and only
   pushes to a mirror that is missing entries the head already had a full

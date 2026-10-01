@@ -439,8 +439,11 @@ type testEnv struct {
 	mirrors []*stubMirror
 	dir     string // holds cosigners.json / cosigners.pem
 	version string
-	svc     *Service
-	m       *Metrics
+	// minLogNumber, if non-zero, is published as the issuer's
+	// min_log_number.
+	minLogNumber int
+	svc          *Service
+	m            *Metrics
 }
 
 func newTestEnv(t *testing.T, ca *testCA, mirrors ...*stubMirror) *testEnv {
@@ -481,6 +484,9 @@ func (env *testEnv) writeCosigners() {
 			"type":          "ISSUER",
 			"key_sha256":    caHash,
 		}},
+	}
+	if env.minLogNumber != 0 {
+		list["issuers"].([]map[string]any)[0]["min_log_number"] = env.minLogNumber
 	}
 	var ms []map[string]any
 	for _, m := range env.mirrors {
@@ -677,5 +683,67 @@ func TestMirrorAsSource(t *testing.T) {
 	assertMirrorMatchesLog(t, m2, ca.log)
 	if reads := testutil.ToFloat64(env.m.SourceReads.WithLabelValues("mirror:" + string(testMirror1))); reads == 0 {
 		t.Error("no reads recorded against the source mirror")
+	}
+}
+
+// TestMinLogNumber covers the cosigners list's issuer min_log_number:
+// logs below it are not discovered, and a log that falls below it after
+// discovery stops being polled and pushed, and loses its gauges.
+func TestMinLogNumber(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("not discovered", func(t *testing.T) {
+		env := newTestEnv(t, newTestCA(t, 10), newStubMirror(t, testMirror1, 0x55))
+		env.minLogNumber = 2
+		env.writeCosigners()
+		env.svc.sweep(ctx, time.Now())
+		if len(env.svc.state.Logs) != 0 {
+			t.Errorf("discovered %d logs below min_log_number", len(env.svc.state.Logs))
+		}
+	})
+
+	t.Run("retired after discovery", func(t *testing.T) {
+		mirror := newStubMirror(t, testMirror1, 0x55)
+		env := newTestEnv(t, newTestCA(t, 10), mirror)
+		t0 := time.Now()
+		env.svc.sweep(ctx, t0)
+		if env.svc.state.Logs[testOrigin] == nil {
+			t.Fatal("log 1 not discovered")
+		}
+		if testutil.CollectAndCount(env.m.MirrorLag) == 0 {
+			t.Fatal("no mirror lag gauge after the first sweep")
+		}
+
+		// The list moves on to log 2. On the next sweep, after the delay
+		// window and a cosigners refresh, the lagging mirror would
+		// normally be pushed to; log 1 is skipped instead.
+		env.minLogNumber = 2
+		env.version = "1.0.1"
+		env.writeCosigners()
+		env.svc.sweep(ctx, t0.Add(env.svc.cfg.PushDelay()+env.svc.cfg.Cosigners.Refresh()+time.Minute))
+		if mirror.addEntriesCalls != 0 {
+			t.Errorf("pushed a log below min_log_number (%d add-entries calls)", mirror.addEntriesCalls)
+		}
+		if n := testutil.CollectAndCount(env.m.MirrorLag); n != 0 {
+			t.Errorf("%d mirror lag series remain for a retired log", n)
+		}
+	})
+}
+
+func TestIssuerRetired(t *testing.T) {
+	is := &issuer{id: "32473.1", minLogNumber: 3}
+	for origin, want := range map[string]bool{
+		"oid/1.3.6.1.4.1.32473.1.0.2":  true,
+		"oid/1.3.6.1.4.1.32473.1.0.3":  false,
+		"oid/1.3.6.1.4.1.32473.1.0.12": false,
+		"oid/1.3.6.1.4.1.32473.10.0.1": false, // another CA's log
+		"bootstrap-mtca.example/log":   false, // no log number
+	} {
+		if got := is.retired(origin); got != want {
+			t.Errorf("retired(%q) = %v, want %v", origin, got, want)
+		}
+	}
+	if (&issuer{id: "32473.1"}).retired("oid/1.3.6.1.4.1.32473.1.0.1") {
+		t.Error("retired a log with min_log_number unset")
 	}
 }
