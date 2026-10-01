@@ -408,3 +408,54 @@ func TestSimulatedMonth(t *testing.T) {
 		}
 	}
 }
+
+// TestRunAllocatesWithoutFlush pins the timer path: with no Append from
+// a log flush, Run allocates a landmark at the reported tree size once
+// the interval elapses, and stops when its context is cancelled.
+func TestRunAllocatesWithoutFlush(t *testing.T) {
+	fs, err := storage.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		CAID:                 cert.TrustAnchorID("32473.1"),
+		LogNumber:            1,
+		TimeBetweenLandmarks: 50 * time.Millisecond,
+		MaxCertLifetime:      time.Hour,
+	}, fs, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	allocated := make(chan Landmark, 4)
+	done := make(chan struct{})
+	go func() {
+		s.Run(ctx, func() uint64 { return 7 }, func(l Landmark, err error) {
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			allocated <- l
+		})
+		close(done)
+	}()
+	select {
+	case l := <-allocated:
+		if l.Number != 1 || l.TreeSize != 7 {
+			t.Errorf("allocated %+v, want landmark 1 at tree size 7", l)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not allocate a landmark")
+	}
+	// The tree has not grown, so later ticks allocate nothing more.
+	time.Sleep(150 * time.Millisecond)
+	if n := len(s.All()); n != 2 {
+		t.Errorf("%d landmarks after idle ticks, want 2", n)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}

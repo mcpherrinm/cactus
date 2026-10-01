@@ -341,6 +341,39 @@ func (s *Sequence) TimeUntilNextLandmark(now time.Time) time.Duration {
 	return max(0, s.cfg.TimeBetweenLandmarks-now.Sub(last.AllocatedAt))
 }
 
+// Run allocates landmarks on a timer until ctx is done, so that entries
+// get a landmark (and thus a landmark-relative certificate) once the
+// §6.4.2 interval elapses even if no further issuance follows. Callers
+// typically also call Append on every log flush, which allocates at
+// once when an interval has already elapsed; Run covers the case where
+// the log grew earlier in the interval and then went quiet.
+//
+// treeSize reports the tree size to allocate at (e.g. the latest
+// checkpoint). onAppend, if non-nil, is called with the result of every
+// Append that allocated a landmark or failed.
+func (s *Sequence) Run(ctx context.Context, treeSize func() uint64, onAppend func(Landmark, error)) {
+	for {
+		wait := s.TimeUntilNextLandmark(time.Now())
+		if wait == 0 {
+			// The interval has elapsed but the last attempt found no new
+			// entries. The next flush allocates directly, so this is only
+			// a fallback poll.
+			wait = s.cfg.TimeBetweenLandmarks
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		l, ok, err := s.Append(ctx, treeSize(), time.Now())
+		if onAppend != nil && (ok || err != nil) {
+			onAppend(l, err)
+		}
+	}
+}
+
 // LatestTreeSize returns the tree size of the most recent landmark.
 // Useful for "is there a landmark covering this index yet?" checks.
 func (s *Sequence) LatestTreeSize() uint64 {

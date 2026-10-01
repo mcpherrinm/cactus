@@ -342,6 +342,12 @@ finalize. Defaults: 1-hour landmark cadence, 7-day max cert lifetime ⇒
 at most `ceil(168) + 1 = 169` active landmarks ⇒ ~10 KiB of relying
 party state per CA (§6.4.2).
 
+A landmark is allocated at most once per `time_between_landmarks_ms`,
+covering the latest checkpoint: on the first log flush after the
+interval elapses or, if the log has gone quiet, by a timer when it
+does, so the last certificates before a lull still get their
+landmark-relative form on schedule.
+
 Landmark files written by an earlier cactus have no expiries; on
 startup each landmark is given `allocated_at + max_cert_lifetime_ms`
 and the file is rewritten.

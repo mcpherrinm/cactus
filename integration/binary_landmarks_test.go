@@ -9,20 +9,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/letsencrypt/cactus/landmark"
 )
 
-// TestCactusBinaryWithLandmarks builds the cactus binary, lets it
-// allocate at least one landmark (using a 50ms interval), then hits
-// /landmarks and confirms the body matches the §6.4.1 format with at
-// least one allocated landmark.
-func TestCactusBinaryWithLandmarks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in -short mode")
-	}
+// startLandmarkBinary builds and starts the cactus binary with the given
+// landmark cadence and max cert lifetime, waits for /landmarks to
+// answer, and returns the ACME and monitoring base URLs. The process is
+// stopped at test cleanup.
+func startLandmarkBinary(t *testing.T, interval, lifetime time.Duration) (acmeBase, monBase string) {
+	t.Helper()
 	dataDir := t.TempDir()
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
@@ -57,8 +56,8 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 			"listen": fmt.Sprintf("127.0.0.1:%d", metricsPort),
 		},
 		"landmarks": map[string]any{
-			"time_between_landmarks_ms": 50, // 50ms so a landmark allocates fast
-			"max_cert_lifetime_ms":      300,
+			"time_between_landmarks_ms": interval.Milliseconds(),
+			"max_cert_lifetime_ms":      lifetime.Milliseconds(),
 		},
 		"log_level": "info",
 	}
@@ -69,12 +68,10 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 
 	bin := buildBinary(t, "cmd/cactus")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, bin, "-config", configPath)
-	stderrCap := &capWriter{prefix: "cactus.stderr"}
-	stdoutCap := &capWriter{prefix: "cactus.stdout"}
-	cmd.Stderr = stderrCap
-	cmd.Stdout = stdoutCap
+	cmd.Stderr = &capWriter{prefix: "cactus.stderr"}
+	cmd.Stdout = &capWriter{prefix: "cactus.stdout"}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start cactus: %v", err)
 	}
@@ -92,16 +89,53 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 		}
 	})
 
-	monBase := fmt.Sprintf("http://127.0.0.1:%d", monPort)
-
-	// Wait for /landmarks to come up.
+	acmeBase = fmt.Sprintf("http://127.0.0.1:%d", acmePort)
+	monBase = fmt.Sprintf("http://127.0.0.1:%d", monPort)
 	if err := waitForHTTP(monBase+"/1/landmarks", 5*time.Second); err != nil {
 		t.Fatalf("/landmarks never answered: %v", err)
 	}
+	return acmeBase, monBase
+}
+
+// waitForLandmark polls /landmarks until the latest landmark's tree size
+// is at least minTreeSize, and fails the test if that doesn't happen
+// within timeout.
+func waitForLandmark(t *testing.T, monBase string, minTreeSize uint64, timeout time.Duration) landmark.Landmark {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastBody string
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(monBase + "/1/landmarks")
+		if err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastBody = string(b)
+			lms, err := landmark.ParseList(b, time.Now())
+			if err != nil {
+				t.Fatalf("/landmarks: %v\n%s", err, b)
+			}
+			if lms[0].TreeSize >= minTreeSize {
+				return lms[0]
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no landmark reached tree size %d within %v; last /landmarks body:\n%s", minTreeSize, timeout, lastBody)
+	return landmark.Landmark{}
+}
+
+// TestCactusBinaryWithLandmarks builds the cactus binary, lets it
+// allocate landmarks (using a 50ms interval) while issuing, then hits
+// /landmarks and confirms the body parses in the §6.4.3 format with at
+// least one allocated landmark.
+func TestCactusBinaryWithLandmarks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in -short mode")
+	}
+	acmeBase, monBase := startLandmarkBinary(t, 50*time.Millisecond, 300*time.Millisecond)
 
 	// Issue a few certs through the live ACME endpoint so the log
 	// grows and a non-zero landmark gets allocated.
-	acmeBase := fmt.Sprintf("http://127.0.0.1:%d", acmePort)
 	for i := 0; i < 3; i++ {
 		_, err := acmeIssueOne(acmeBase, fmt.Sprintf("bin-lm%d.test", i))
 		if err != nil {
@@ -110,27 +144,27 @@ func TestCactusBinaryWithLandmarks(t *testing.T) {
 		// Sleep so the 50ms landmark interval rolls between issuances.
 		time.Sleep(80 * time.Millisecond)
 	}
-
-	// Poll /landmarks until the binary has allocated at least one
-	// non-zero landmark.
-	deadline := time.Now().Add(3 * time.Second)
-	var lastBody string
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(monBase + "/1/landmarks")
-		if err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			lastBody = string(b)
-			lines := strings.Split(strings.TrimRight(lastBody, "\n"), "\n")
-			if len(lines) >= 2 {
-				header := strings.Fields(lines[0])
-				if header[0] != "0" {
-					// Got at least one non-zero landmark.
-					return
-				}
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
+	if lm := waitForLandmark(t, monBase, 1, 3*time.Second); lm.Number == 0 {
+		t.Errorf("latest landmark is landmark 0")
 	}
-	t.Fatalf("no non-zero landmark allocated within deadline; last /landmarks body:\n%s", lastBody)
+}
+
+// TestCactusBinaryLandmarkWithoutFurtherIssuance covers a quiet log: a
+// cert issued early in the landmark interval, with no issuance after
+// it, must still be covered by a landmark once the interval elapses. A
+// landmark used to be allocated only on a log flush, i.e. only on the
+// next issuance, which left the entry without a landmark-relative
+// certificate indefinitely.
+func TestCactusBinaryLandmarkWithoutFurtherIssuance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in -short mode")
+	}
+	acmeBase, monBase := startLandmarkBinary(t, 500*time.Millisecond, time.Hour)
+	if _, err := acmeIssueOne(acmeBase, "quiet.test"); err != nil {
+		t.Fatal(err)
+	}
+	lm := waitForLandmark(t, monBase, 1, 5*time.Second)
+	if lm.Number != 1 || lm.TreeSize != 1 {
+		t.Errorf("latest landmark = %+v, want landmark 1 at tree size 1", lm)
+	}
 }

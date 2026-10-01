@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"strings"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -311,6 +312,16 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			SignatureDuration: m.SignatureDurationVec(),
 		},
 	}
+	logLandmark := func(lm landmark.Landmark, err error) {
+		if err != nil {
+			logger.Error("landmark append", "err", err)
+			return
+		}
+		logger.Info("landmark allocated", "number", lm.Number, "tree_size", lm.TreeSize)
+	}
+	// pushedSize is the largest tree size whose flush has finished its
+	// mirror push; the landmark timer below allocates at it.
+	var pushedSize atomic.Uint64
 	logCfg.OnFlush = func(treeSize uint64) {
 		// Push before allocating a landmark: a landmark is only useful
 		// once mirrors can serve the range it names, and a push failure
@@ -320,14 +331,15 @@ func run(cfg config.Config, logger *slog.Logger) error {
 			pushPool.Push(pushCtx)
 			cancel()
 		}
-		lm, ok, err := landmarkSeq.Append(ctx, treeSize, time.Now())
-		if err != nil {
-			logger.Error("landmark append", "err", err)
-			return
+		for {
+			old := pushedSize.Load()
+			if treeSize <= old || pushedSize.CompareAndSwap(old, treeSize) {
+				break
+			}
 		}
-		if ok {
-			logger.Info("landmark allocated",
-				"number", lm.Number, "tree_size", lm.TreeSize)
+		lm, ok, err := landmarkSeq.Append(ctx, treeSize, time.Now())
+		if ok || err != nil {
+			logLandmark(lm, err)
 		}
 	}
 	if len(cfg.CACosignerQuorum.Mirrors) > 0 {
@@ -404,6 +416,14 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	}
 	defer l.Stop()
 	logger.Info("log ready", "size", l.CurrentCheckpoint().Size)
+
+	// Allocate landmarks on a timer too, not just on flushes, so the
+	// last entries before a quiet period still get a landmark (and a
+	// landmark-relative certificate) once the interval elapses. Entries
+	// from before a restart count as pushed: they were pushed then, or
+	// will be with the next flush.
+	pushedSize.Store(l.CurrentCheckpoint().Size)
+	go landmarkSeq.Run(ctx, pushedSize.Load, logLandmark)
 
 	// c2sp.org/tlog-mirror push clients. Built after the log because
 	// they read entries and proofs from it.
