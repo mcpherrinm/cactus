@@ -9,8 +9,7 @@
 # pushes its log to sunlight and collects the mirror cosignatures that
 # go into issued certificates.
 #
-# Start with `make docker-up` (which builds the cactus binaries on the
-# host with gotip first — see docker/README.md for why).
+# Start with `make docker-up`; see docker/README.md.
 
 name: cactus
 

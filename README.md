@@ -152,11 +152,8 @@ exchange in both directions. cactus pushes its log to the mirror
 cosigned checkpoint is what makes `sign-subtree` work — so certificates
 issued against the stack verify with two cosignatures.
 
-Because cactus needs Go 1.27 and no `golang:1.27` image exists yet, the
-cactus image is built from binaries cross-compiled on the host with
-`gotip`; `make docker-up` does that first. `docker/README.md` covers
-that and the several non-obvious things Sunlight needs in order to run
-as a mirror.
+`docker/README.md` covers the several non-obvious things Sunlight needs
+in order to run as a mirror.
 
 ---
 
@@ -295,9 +292,8 @@ ML-DSA-44 [tlog-cosignature] signed messages, since that is currently the
 only algorithm available in both X.509 and C2SP in a subtree-capable
 form. ML-DSA-44 is the only cosigner algorithm cactus implements (with
 `mldsa-65`/`mldsa-87` available for experiments). It uses Go's built-in
-`crypto/mldsa`, so **cactus requires a Go 1.27+ build** (until 1.27
-ships, a `gotip` 1.27-devel toolchain works); there are no build tags,
-and an older toolchain simply won't compile cactus.
+`crypto/mldsa`, so **cactus requires a Go 1.27+ build**; there are no
+build tags, and an older toolchain simply won't compile cactus.
 
 ### `acme`
 
@@ -566,13 +562,13 @@ to "verifiable bytes on disk".
 
 ## Tests
 
-cactus requires **Go 1.27+** (built-in `crypto/mldsa`). Until 1.27 ships,
-use a `gotip` 1.27-devel toolchain; an older `go` won't compile cactus.
+cactus requires **Go 1.27+** (built-in `crypto/mldsa`); an older `go`
+won't compile cactus.
 
 ```sh
-gotip test -race -count=1 ./...
-gotip test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
-make integration                                       # `gotip test -race -count=1 -tags=integration ./integration/...`
+go test -race -count=1 ./...
+go test -fuzz=FuzzParseMTCProof -fuzztime=30s ./cert/...
+make integration                                       # `go test -race -count=1 -tags=integration ./integration/...`
 make stress                                            # bulk issuance stress test (see below)
 ```
 

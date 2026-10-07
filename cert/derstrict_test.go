@@ -171,21 +171,6 @@ func parseTLVStrict(data []byte) (consumed int, contents []byte, constructed boo
 	return hdr + l, data[hdr : hdr+l], constructed, nil
 }
 
-// appendDERLengthInline mirrors the appendDERLength helper in entry.go
-// but is local to this test file so the test stays self-contained.
-func appendDERLengthInline(b []byte, n int) []byte {
-	switch {
-	case n < 0x80:
-		return append(b, byte(n))
-	case n <= 0xff:
-		return append(b, 0x81, byte(n))
-	case n <= 0xffff:
-		return append(b, 0x82, byte(n>>8), byte(n))
-	default:
-		return append(b, 0x83, byte(n>>16), byte(n>>8), byte(n))
-	}
-}
-
 // TestParseTLVStrictRejectsBER pins the parser's job: it must reject
 // a DER-style message that has been re-encoded with a non-minimum
 // length form.

@@ -42,7 +42,7 @@ below the `1.3.6.1.4.1` enterprise base). The log ID is the CA ID with
 ## Setup
 
 ```sh
-# 0. Build (cactus needs Go 1.27 / gotip; see README).
+# 0. Build (cactus needs Go 1.27+; see README).
 make build                      # ./bin/cactus, cactus-cli, cactus-keygen
 
 # 1. Pick a data dir and create the keys dir.

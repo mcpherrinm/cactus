@@ -1,0 +1,3 @@
+# The docker images build from the repository root (docker/compose.yaml).
+# Host build output would only bloat the context.
+bin/

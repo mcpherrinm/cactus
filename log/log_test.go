@@ -443,7 +443,7 @@ func TestFlushRecoversUncoveredGap(t *testing.T) {
 	// The covering subtree must actually contain the entry (a real §4.5
 	// covering subtree of [0,3), not the signature-less whole-tree
 	// fallback).
-	if !(iss.Subtree.Start <= 2 && 2 < iss.Subtree.End) {
+	if iss.Subtree.Start > 2 || 2 >= iss.Subtree.End {
 		t.Fatalf("covering subtree [%d,%d) does not contain index 2", iss.Subtree.Start, iss.Subtree.End)
 	}
 }

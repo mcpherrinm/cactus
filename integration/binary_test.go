@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,27 +37,14 @@ func buildBinary(t *testing.T, pkg string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, filepath.Base(pkg))
-	// Build with the same toolchain that's running the test, so a binary
-	// exercising ML-DSA (the witness path) is compiled with Go 1.27+ when
-	// the test itself runs under gotip.
-	cmd := exec.Command(goToolPath(), "build", "-o", bin, "../"+pkg)
+	// `go test` puts its own GOROOT/bin first on PATH, so this is the
+	// toolchain running the test.
+	cmd := exec.Command("go", "build", "-o", bin, "../"+pkg)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("go build %s: %v", pkg, err)
 	}
 	return bin
-}
-
-// goToolPath returns the `go` binary of the toolchain running the test
-// (via GOROOT), falling back to whatever `go` is on PATH.
-func goToolPath() string {
-	if gr := runtime.GOROOT(); gr != "" {
-		cand := filepath.Join(gr, "bin", "go")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
-		}
-	}
-	return "go"
 }
 
 // TestCactusBinaryStartsAndServes is an end-to-end smoke test of

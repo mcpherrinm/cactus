@@ -209,8 +209,6 @@ In cactus, the cosigner abstraction is in `signer/`:
   via HKDF. cactus is ML-DSA-only: ML-DSA-44/65/87, using Go's
   built-in `crypto/mldsa` (FIPS 204). That package needs Go 1.27+, so
   the whole module is `go 1.27` in go.mod — no per-file build tags.
-  Until Go 1.27 is released, a `gotip` 1.27-devel toolchain builds it
-  (`gotip build ./...`).
 
 ## §6: Building the certificate
 

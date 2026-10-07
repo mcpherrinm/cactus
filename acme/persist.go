@@ -151,11 +151,7 @@ func readDirIfExists(p string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(infos))
-	for _, name := range infos {
-		out = append(out, name)
-	}
-	return out, nil
+	return infos, nil
 }
 
 // JSON marshalling helpers — the in-package types use unexported fields

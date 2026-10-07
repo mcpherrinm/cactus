@@ -34,10 +34,9 @@ on:
 permissions:
   contents: read
 
-# See .github/workflows/ci.yml for why this pins a 1.27 release
-# candidate. Keep GO_VERSION in sync with that workflow.
+# Keep in sync with .github/workflows/ci.yml.
 env:
-  GO_VERSION: '1.27.0-rc.2'
+  GO_VERSION: '1.27'
   GOTOOLCHAIN: local
 
 jobs:
@@ -69,4 +68,4 @@ jobs:
         env:
           CACTUS_STRESS_CERTS: ${{ inputs.certs }}
           CACTUS_STRESS_CONCURRENCY: ${{ inputs.concurrency }}
-        run: make GO=go stress
+        run: make stress
