@@ -1,8 +1,9 @@
 # Sunlight configured as a tlog-mirror + ML-DSA-44 cosigner for cactus.
 #
-# No `logs:` section: witness/mirror setup is gated only on witness.name,
-# so Sunlight runs happily without operating any CT log of its own. It is
-# here purely to mirror cactus's issuance log and cosign its subtrees.
+# No `logs:` section: Sunlight runs as a witness/mirror alone, without
+# operating any CT log of its own. It is here purely to mirror cactus's
+# issuance log and cosign its subtrees. (Before v0.10.0 Sunlight exited
+# when no logs were configured, so this needs SUNLIGHT_REF >= v0.10.0.)
 #
 # No `acme:` section either, so Sunlight serves plain HTTP/h2c, which is
 # what we want inside the compose network.
@@ -55,29 +56,3 @@ witness:
 
   # Public mirror data (checkpoint + tiles) lands here for skylight.
   localdirectory: /var/lib/sunlight/public
-
-# Sunlight cannot run as a mirror alone. main() ends with
-# sequencerGroup.Wait(), and sequencer goroutines are only started per
-# entry in `logs:` — so with no logs the group is empty, Wait() returns
-# immediately, and the process shuts down and exits 1 without logging
-# anything. The witness/mirror machinery is fully set up by then; it just
-# never gets to serve.
-#
-# So we run one throwaway CT log purely to keep the sequencer alive. We
-# never submit to it. Its inception date must be today when it is first
-# created, which is why this file is a template rendered at init time.
-#
-# `roots` is set deliberately: if it were omitted, CCADBRoots would
-# default to "trusted" and the log would fetch the CCADB root list over
-# the network on startup.
-logs:
-  - shortname: keepalive
-    inception: "__INCEPTION__"
-    submissionprefix: https://keepalive.invalid
-    monitoringprefix: https://keepalive.invalid
-    secret: /var/lib/sunlight/keepalive-seed.bin
-    cache: /var/lib/sunlight/keepalive-cache.db
-    roots: /var/lib/sunlight/keepalive-roots.pem
-    localdirectory: /var/lib/sunlight/keepalive-public
-    notafterstart: "__NOTAFTER_START__"
-    notafterlimit: "__NOTAFTER_LIMIT__"

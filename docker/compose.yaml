@@ -66,10 +66,9 @@ services:
 
   sunlight:
     image: sunlight:local
-    # Config is rendered by sunlight-init (it needs today's date for the
-    # keep-alive log's inception), so it is read from the data volume.
-    command: ["-c", "/var/lib/sunlight/sunlight.yaml"]
+    command: ["-c", "/etc/sunlight/sunlight.yaml"]
     volumes:
+      - ./sunlight.yaml:/etc/sunlight/sunlight.yaml:ro
       - sunlight-data:/var/lib/sunlight
     ports:
       - "8080:8080"

@@ -1,16 +1,18 @@
 # Sunlight, acting as a tlog-mirror and ML-DSA-44 cosigner for cactus.
 #
-# Sunlight declares `go 1.25.0` and gets ML-DSA from filippo.io/mldsa
-# rather than the standard library, so unlike cactus it builds with a
-# stock released toolchain and can be built inside the image.
+# Sunlight declares `go 1.27.0` and gets ML-DSA from filippo.io/mldsa
+# rather than the standard library, so it builds with a stock released
+# toolchain and can be built inside the image.
 #
 # Upstream publishes no Dockerfile and no image, so this is ours.
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 FROM golang:${GO_VERSION} AS build
 
 # Pin the revision so a rebuild is reproducible. Bump deliberately.
+# v0.10.0 is the minimum: earlier releases exit at startup when only a
+# witness is configured (see sunlight.yaml).
 ARG SUNLIGHT_REPO=https://github.com/FiloSottile/sunlight
-ARG SUNLIGHT_REF=main
+ARG SUNLIGHT_REF=v0.10.0
 
 WORKDIR /src
 RUN git clone --filter=blob:none "${SUNLIGHT_REPO}" . \
