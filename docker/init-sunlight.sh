@@ -14,7 +14,6 @@ SHARED=/shared
 DB=/var/lib/sunlight/checkpoints.db
 SEED=/var/lib/sunlight/witness-seed.bin
 LOGS=/var/lib/sunlight/logs.txt
-CFG=/var/lib/sunlight/sunlight.yaml
 
 # The witness cosigner name is a hostname; the mirror cosigner name is
 # an OID name, so that Sunlight publishes a cosigner_id for it and the
@@ -76,25 +75,6 @@ if [ ! -f "$DB" ]; then
     echo "init-sunlight: creating checkpoint lock database"
     sqlite3 "$DB" \
         "CREATE TABLE checkpoints (logID BLOB PRIMARY KEY, body BLOB NOT NULL) STRICT"
-fi
-
-# Keep-alive CT log. Sunlight exits immediately with no logs configured
-# (see the comment in sunlight.yaml.tmpl), so we run one throwaway log we
-# never submit to. Its seed is separate from the witness seed, and its
-# roots file is empty so startup does not reach out to CCADB.
-[ -f /var/lib/sunlight/keepalive-seed.bin ] || \
-    sunlight-keygen -f /var/lib/sunlight/keepalive-seed.bin >/dev/null
-: > /var/lib/sunlight/keepalive-roots.pem
-
-# Render the config. The inception date must be today the first time the
-# log is created; afterwards the stored log is found and the date is not
-# consulted, so pinning the rendered file keeps restarts working.
-if [ ! -f "$CFG" ]; then
-    sed -e "s|__INCEPTION__|$(date -u +%Y-%m-%d)|" \
-        -e "s|__NOTAFTER_START__|$(date -u +%Y)-01-01T00:00:00Z|" \
-        -e "s|__NOTAFTER_LIMIT__|$(($(date -u +%Y) + 1))-01-01T00:00:00Z|" \
-        /docker/sunlight.yaml.tmpl > "$CFG"
-    echo "init-sunlight: rendered $CFG (inception $(date -u +%Y-%m-%d))"
 fi
 
 echo "init-sunlight: log list:"

@@ -27,9 +27,10 @@ released Go cannot download the toolchain. `make docker-binaries`
 therefore cross-builds the binaries on the host with `gotip`
 (`CGO_ENABLED=0 GOOS=linux`) and the Dockerfile copies them in.
 
-Sunlight has no such constraint: it declares `go 1.25` and gets ML-DSA
+Sunlight has no such constraint: it declares `go 1.27.0` and gets ML-DSA
 from `filippo.io/mldsa` rather than the standard library, so it builds
-inside its own image. It does need **cgo**, because its checkpoint lock
+inside its own image from a pinned release (`SUNLIGHT_REF`, at least
+v0.10.0, the first that runs as a mirror without a CT log of its own). It does need **cgo**, because its checkpoint lock
 backend uses `crawshaw.io/sqlite`; with `CGO_ENABLED=0` only
 `sunlight-keygen` builds.
 
