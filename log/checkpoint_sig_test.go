@@ -99,8 +99,8 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 	if len(sigBytes) < 5 {
 		t.Fatalf("sig too short: %d bytes", len(sigBytes))
 	}
-	// First 4 bytes are the c2sp.org/signed-note keyID; the rest is the
-	// c2sp.org/tlog-cosignature timestamped_signature (u64 timestamp ||
+	// First 4 bytes are the c2sp.org/signed-note keyID; the rest is a
+	// c2sp.org/tlog-cosignature checkpoint cosignature (u64 timestamp ||
 	// raw signature). For ML-DSA-44 the key ID is
 	// SHA-256(name || 0x0A || 0x06 || raw key)[:4].
 	wantKeyID, err := cert.CosignatureKeyID(cert.OIDName(cosignerID),
@@ -111,19 +111,21 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 	if !bytes.Equal(sigBytes[:4], wantKeyID[:]) {
 		t.Errorf("keyID mismatch: got %x, want %x", sigBytes[:4], wantKeyID)
 	}
-	ts, rawSig, err := cert.ParseTimestampedSignature(sigBytes[4:])
+	ts, rawSig, err := cert.ParseCheckpointCosignature(sigBytes[4:])
 	if err != nil {
-		t.Fatalf("parse timestamped_signature: %v", err)
+		t.Fatalf("parse checkpoint cosignature: %v", err)
 	}
-	if ts != 0 {
-		t.Errorf("checkpoint cosignature timestamp = %d, want 0", ts)
+	// A checkpoint cosignature carries the time it was made
+	// (c2sp.org/tlog-cosignature@v1.1.0), unlike a subtree cosignature.
+	if now := uint64(time.Now().Unix()); ts == 0 || ts > now || now-ts > 60 {
+		t.Errorf("checkpoint cosignature timestamp = %d, want about %d", ts, now)
 	}
 
 	// Build CosignedSubtree for [0, size) with the checkpoint root.
 	subtree := &cert.MTCSubtree{
 		LogID: logID, Start: 0, End: cp.Size, Hash: cp.Root,
 	}
-	sigInput, err := cert.MarshalSignatureInput(cosignerID, subtree)
+	sigInput, err := cert.MarshalSignatureInputAt(cosignerID, subtree, ts)
 	if err != nil {
 		t.Fatal(err)
 	}

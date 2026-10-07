@@ -1,10 +1,8 @@
 package pollinate
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/letsencrypt/cactus/cert"
@@ -63,12 +61,12 @@ func ParseNote(data []byte) (*Note, error) {
 	if len(n.Origin) > maxOriginLen {
 		return nil, fmt.Errorf("pollinate: note origin is %d bytes, over the %d-byte limit", len(n.Origin), maxOriginLen)
 	}
-	size, err := strconv.ParseUint(lines[1], 10, 64)
+	size, err := cert.ParseDecimal(lines[1])
 	if err != nil {
 		return nil, fmt.Errorf("pollinate: note size: %w", err)
 	}
 	n.Size = size
-	root, err := base64.StdEncoding.DecodeString(lines[2])
+	root, err := cert.DecodeBase64(lines[2])
 	if err != nil {
 		return nil, fmt.Errorf("pollinate: note root: %w", err)
 	}
@@ -94,7 +92,7 @@ func ParseNote(data []byte) (*Note, error) {
 		if !ok || name == "" {
 			return nil, fmt.Errorf("pollinate: malformed signature line %q", line)
 		}
-		raw, err := base64.StdEncoding.DecodeString(b64)
+		raw, err := cert.DecodeBase64(b64)
 		if err != nil {
 			return nil, fmt.Errorf("pollinate: signature base64: %w", err)
 		}
@@ -134,7 +132,7 @@ func (n *Note) VerifySignature(signerID cert.TrustAnchorID, rawKey []byte) error
 			continue
 		}
 		found = true
-		ts, sig, err := cert.ParseTimestampedSignature(s.Blob)
+		ts, sig, err := cert.ParseCheckpointCosignature(s.Blob)
 		if err != nil {
 			return fmt.Errorf("pollinate: signature from %q: %w", name, err)
 		}

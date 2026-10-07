@@ -45,12 +45,15 @@ func sha256Hash(b []byte) tlogx.Hash {
 // *CA-side* cosignature-collection client (cert.RequestCosignatures)
 // without cactus itself implementing a mirror.
 //
-// It deliberately performs NO verification: it parses only the subtree
-// range and hash out of the request, and signs whatever it is handed.
-// The reference checkpoint, the consistency proof, and any CA subtree
-// cosignature line are all ignored. Witness-side validation is not what
-// these tests are about — they assert that the CA fans out, collects a
-// quorum, verifies the responses, and embeds them in issued certs.
+// It performs almost no verification: it parses the subtree range and
+// hash out of the request and signs whatever it is handed, ignoring the
+// consistency proof. It does enforce the c2sp.org/tlog-witness@v1.1.0
+// rule that the request's checkpoint carries exactly one note signature,
+// its own (else 403), because that is a rule the CA-side client must
+// follow; use cosign to give a reference checkpoint that signature.
+// Otherwise witness-side validation is not what these tests are about —
+// they assert that the CA fans out, collects a quorum, verifies the
+// responses, and embeds them in issued certs.
 type stubWitness struct {
 	id     cert.TrustAnchorID
 	signer signer.Signer
@@ -91,9 +94,58 @@ func (w *stubWitness) endpoint(url string) cert.MirrorEndpoint {
 	return cert.MirrorEndpoint{URL: url, Key: w.key()}
 }
 
-// ServeHTTP implements the sign-subtree POST. The response is a single
-// c2sp.org/signed-note signature line, matching what requestOne in
-// cert/cosigner_request.go looks for.
+// cosign returns note with the stub's checkpoint cosignature line
+// appended, standing in for the cosigned checkpoint a real mirror hands
+// back from add-entries.
+func (w *stubWitness) cosign(t *testing.T, note []byte) []byte {
+	t.Helper()
+	text, _, ok := strings.Cut(string(note), "\n\n")
+	lines := strings.Split(text, "\n")
+	if !ok || len(lines) != 3 {
+		t.Fatalf("cosign: malformed checkpoint %q", note)
+	}
+	size, err := cert.ParseDecimal(lines[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := cert.DecodeBase64(lines[2])
+	if err != nil || len(root) != 32 {
+		t.Fatalf("cosign: bad root: %v", err)
+	}
+	const ts = 1790000000
+	msg, err := cert.MarshalSignatureInputAt(w.id, &cert.MTCSubtree{
+		LogID: cert.TrustAnchorID(strings.TrimPrefix(lines[0], cert.OIDNamePrefix+cert.TrustAnchorOIDBase+".")),
+		Start: 0, End: size, Hash: tlogx.Hash(root),
+	}, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := w.signer.Sign(nil, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := cert.OIDName(w.id)
+	keyID, err := cert.CosignatureKeyID(name, cert.AlgMLDSA44, w.signer.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := append(keyID[:], cert.MarshalCheckpointCosignature(ts, sig)...)
+	out := append([]byte(nil), note...)
+	return fmt.Appendf(out, "— %s %s\n", name, base64.StdEncoding.EncodeToString(blob))
+}
+
+// cosignAll applies each witness's cosign to note.
+func cosignAll(t *testing.T, note []byte, ws ...*stubWitness) []byte {
+	t.Helper()
+	for _, w := range ws {
+		note = w.cosign(t, note)
+	}
+	return note
+}
+
+// ServeHTTP implements the sign-subtree POST. The response is the
+// c2sp.org/tlog-witness@v1.1.0 form, a base64 subtree cosignature and a
+// newline, which requestOne in cert/cosigner_request.go parses.
 func (w *stubWitness) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.calls.Add(1)
 	w.lastUA.Store(r.Header.Get("User-Agent"))
@@ -110,10 +162,24 @@ func (w *stubWitness) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The checkpoint follows the first blank line, and must carry
+	// exactly one note signature, from this witness.
+	head, checkpoint, ok := strings.Cut(string(body), "\n\n")
+	if !ok {
+		http.Error(rw, "no checkpoint", http.StatusBadRequest)
+		return
+	}
+	_, sigs, _ := strings.Cut(checkpoint, "\n\n")
+	sigLines := strings.Split(strings.TrimSuffix(sigs, "\n"), "\n")
+	name := cert.OIDName(w.id)
+	if len(sigLines) != 1 || !strings.HasPrefix(sigLines[0], "— "+name+" ") {
+		http.Error(rw, "checkpoint must carry exactly one signature, ours", http.StatusForbidden)
+		return
+	}
+
 	// Line 1: "subtree <start> <end>". Line 2: base64 32-byte hash.
-	// Everything after that (proof hashes, blank line, reference
-	// checkpoint) is intentionally ignored.
-	lines := strings.Split(string(body), "\n")
+	// The proof hashes after that are intentionally ignored.
+	lines := strings.Split(head, "\n")
 	if len(lines) < 2 {
 		http.Error(rw, "short request", http.StatusBadRequest)
 		return
@@ -142,15 +208,8 @@ func (w *stubWitness) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := cert.OIDName(w.id)
-	keyID, err := cert.CosignatureKeyID(name, cert.AlgMLDSA44, w.signer.PublicKey())
-	if err != nil {
-		http.Error(rw, "key ID", http.StatusInternalServerError)
-		return
-	}
-	// Subtree cosignatures carry a zero timestamp. The leading rune is
-	// an EM DASH (U+2014), per c2sp.org/signed-note.
-	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(0, sig)...)
+	// A subtree cosignature is the bare signature: no key name, key ID,
+	// or timestamp.
 	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintf(rw, "— %s %s\n", name, base64.StdEncoding.EncodeToString(blob))
+	fmt.Fprintf(rw, "%s\n", base64.StdEncoding.EncodeToString(sig))
 }

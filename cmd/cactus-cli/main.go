@@ -14,7 +14,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -463,11 +462,11 @@ func parseSignedNoteFlat(data []byte) (uint64, [32]byte, string, error) {
 	if len(lines) != 3 {
 		return 0, [32]byte{}, "", fmt.Errorf("expected 3 lines, got %d", len(lines))
 	}
-	size, err := strconv.ParseUint(lines[1], 10, 64)
+	size, err := cert.ParseDecimal(lines[1])
 	if err != nil {
 		return 0, [32]byte{}, "", err
 	}
-	rb, err := base64.StdEncoding.DecodeString(lines[2])
+	rb, err := cert.DecodeBase64(lines[2])
 	if err != nil {
 		return 0, [32]byte{}, "", err
 	}

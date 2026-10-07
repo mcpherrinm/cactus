@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/letsencrypt/cactus/cert"
 )
 
 // Handler returns an http.Handler that serves the §6.4.3 landmark list
@@ -75,7 +77,7 @@ func ParseList(body []byte, now time.Time) ([]Landmark, error) {
 		return nil, errors.New("landmark: list does not end in a newline")
 	}
 	lines := strings.Split(text, "\n")
-	latest, err := parseDecimal(lines[0])
+	latest, err := cert.ParseDecimal(lines[0])
 	if err != nil {
 		return nil, fmt.Errorf("landmark: header: %w", err)
 	}
@@ -96,14 +98,14 @@ func ParseList(body []byte, now time.Time) ([]Landmark, error) {
 		if !ok {
 			return nil, fmt.Errorf("landmark: line %q is not <tree_size> <expiry>", line)
 		}
-		size, err := parseDecimal(sizeStr)
+		size, err := cert.ParseDecimal(sizeStr)
 		if err != nil {
 			return nil, fmt.Errorf("landmark: tree size: %w", err)
 		}
 		if size > maxUint48 {
 			return nil, fmt.Errorf("landmark: tree size %d exceeds 2^48-1", size)
 		}
-		expiry, err := parseDecimal(expiryStr)
+		expiry, err := cert.ParseDecimal(expiryStr)
 		if err != nil {
 			return nil, fmt.Errorf("landmark: expiry: %w", err)
 		}
@@ -130,13 +132,4 @@ func ParseList(body []byte, now time.Time) ([]Landmark, error) {
 		return nil, errors.New("landmark: list has no expired landmark to end the active ones")
 	}
 	return out, nil
-}
-
-// parseDecimal parses a §2 decimal representation: ASCII digits only,
-// and no leading zero except for zero itself.
-func parseDecimal(s string) (uint64, error) {
-	if s == "" || (len(s) > 1 && s[0] == '0') || strings.TrimLeft(s, "0123456789") != "" {
-		return 0, fmt.Errorf("%q is not a decimal integer", s)
-	}
-	return strconv.ParseUint(s, 10, 64)
 }

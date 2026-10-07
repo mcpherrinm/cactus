@@ -9,10 +9,9 @@
 // cactus is therefore the client on all three.
 //
 // The reason cactus cares about more than durability is sign-subtree.
-// MTC §5.3.1 CosignedSubtree and a c2sp.org/tlog-cosignature
-// cosigned_message are byte-identical under SHA-256 + ML-DSA-44, so a
-// mirror's sign-subtree response drops straight into an MTCProof with
-// no translation. But a mirror will only sign a subtree against a
+// MTC §5.3.1 and c2sp.org/tlog-cosignature@v1.1.0 define the same
+// CosignedSubtree under SHA-256 + ML-DSA-44, so a mirror's sign-subtree
+// response drops straight into an MTCProof with no translation. But a mirror will only sign a subtree against a
 // reference checkpoint that already carries its own cosignature, and
 // the only place that cosignature is ever produced is the add-entries
 // 200 response. Pushing entries is thus a precondition for collecting
@@ -46,7 +45,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -378,7 +376,7 @@ func (c *Client) fetchMirrorCheckpointSizeAt(ctx context.Context, prefix string)
 	if lines[0] != c.origin {
 		return 0, fmt.Errorf("mirrorpush: mirror checkpoint origin %q != %q", lines[0], c.origin)
 	}
-	size, err := strconv.ParseUint(lines[1], 10, 64)
+	size, err := cert.ParseDecimal(lines[1])
 	if err != nil {
 		return 0, fmt.Errorf("mirrorpush: mirror checkpoint size: %w", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/letsencrypt/cactus/cert"
@@ -13,8 +12,8 @@ import (
 
 // buildSignedNote returns a c2sp signed-note for the checkpoint, using
 // the cosigner's signature over the §5.3.1 CosignedSubtree for
-// [0, size). The checkpoint origin and signature line follow
-// c2sp.org/tlog-checkpoint and c2sp.org/signed-note.
+// [0, size) made at timestamp. The checkpoint origin and signature line
+// follow c2sp.org/tlog-checkpoint and c2sp.org/signed-note.
 //
 // Body lines (each terminated by \n):
 //
@@ -25,12 +24,12 @@ import (
 // Origin is "oid/<logID>".
 //
 // Trailing signature line:
-// "— <key-name> <base64(keyID || timestamped_signature)>\n", where keyID
-// is the c2sp.org/signed-note key ID for (cosigner name, alg, pub) and
-// timestamped_signature is the c2sp.org/tlog-cosignature wrapper
-// (u64 timestamp || sig) with timestamp 0 for MTC subtree cosignatures.
+// "— <key-name> <base64(keyID || timestamp || sig)>\n", where keyID is
+// the c2sp.org/signed-note key ID for (cosigner name, alg, pub) and
+// timestamp || sig is a c2sp.org/tlog-cosignature checkpoint
+// cosignature: the signing time as a big-endian u64, then the signature.
 func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
-	size uint64, root tlogx.Hash, alg cert.SignatureAlgorithm, pub, sig []byte) ([]byte, error) {
+	size uint64, root tlogx.Hash, timestamp uint64, alg cert.SignatureAlgorithm, pub, sig []byte) ([]byte, error) {
 	if len(logID) == 0 {
 		return nil, errors.New("buildSignedNote: empty logID")
 	}
@@ -44,7 +43,7 @@ func buildSignedNote(logID, cosignerID cert.TrustAnchorID,
 	if err != nil {
 		return nil, fmt.Errorf("buildSignedNote: %w", err)
 	}
-	sigWithID := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(0, sig)...)
+	sigWithID := append(append([]byte(nil), keyID[:]...), cert.MarshalCheckpointCosignature(timestamp, sig)...)
 	sigB64 := base64.StdEncoding.EncodeToString(sigWithID)
 
 	out := body + "\n" // blank line separating body from signatures
@@ -81,11 +80,11 @@ func parseSignedNoteFull(data []byte, logID cert.TrustAnchorID) (uint64, tlogx.H
 	if lines[0] != wantOrigin {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: origin %q != %q", lines[0], wantOrigin)
 	}
-	size, err := strconv.ParseUint(lines[1], 10, 64)
+	size, err := cert.ParseDecimal(lines[1])
 	if err != nil {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: bad size: %w", err)
 	}
-	rootBytes, err := base64.StdEncoding.DecodeString(lines[2])
+	rootBytes, err := cert.DecodeBase64(lines[2])
 	if err != nil {
 		return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: bad root b64: %w", err)
 	}
@@ -109,21 +108,22 @@ func parseSignedNoteFull(data []byte, logID cert.TrustAnchorID) (uint64, tlogx.H
 			if len(fields) != 2 {
 				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: malformed sig line %q", line)
 			}
-			raw, err := base64.StdEncoding.DecodeString(fields[1])
+			raw, err := cert.DecodeBase64(fields[1])
 			if err != nil {
 				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: sig b64: %w", err)
 			}
 			if len(raw) < 4 {
 				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: sig too short for keyID")
 			}
-			_, bareSig, err := cert.ParseTimestampedSignature(raw[4:])
+			ts, bareSig, err := cert.ParseCheckpointCosignature(raw[4:])
 			if err != nil {
 				return 0, tlogx.Hash{}, nil, fmt.Errorf("parseSignedNote: %w", err)
 			}
 			sigs = append(sigs, parsedNoteSig{
-				keyName: fields[0],
-				keyID:   [4]byte{raw[0], raw[1], raw[2], raw[3]},
-				sig:     bareSig,
+				keyName:   fields[0],
+				keyID:     [4]byte{raw[0], raw[1], raw[2], raw[3]},
+				sig:       bareSig,
+				timestamp: ts,
 			})
 		}
 	}
@@ -131,7 +131,8 @@ func parseSignedNoteFull(data []byte, logID cert.TrustAnchorID) (uint64, tlogx.H
 }
 
 type parsedNoteSig struct {
-	keyName string
-	keyID   [4]byte
-	sig     []byte
+	keyName   string
+	keyID     [4]byte
+	timestamp uint64 // checkpoint cosignature timestamp
+	sig       []byte
 }

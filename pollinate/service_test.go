@@ -316,7 +316,7 @@ func (m *stubMirror) addEntries(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "key id", http.StatusInternalServerError)
 		return
 	}
-	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(ts, sig)...)
+	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalCheckpointCosignature(ts, sig)...)
 	fmt.Fprintf(w, "— %s %s\n", name, base64.StdEncoding.EncodeToString(blob))
 }
 

@@ -46,7 +46,7 @@ func sigLineFor(t *testing.T, key cert.CosignerKey, timestamp uint64, sig []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(timestamp, sig)...)
+	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalCheckpointCosignature(timestamp, sig)...)
 	return fmt.Sprintf("— %s %s", name, base64.StdEncoding.EncodeToString(blob))
 }
 

@@ -82,7 +82,7 @@ func TestMultiCosignerQuorum(t *testing.T) {
 	}
 	req := &cert.SubtreeRequest{
 		Subtree:          mtcSubtree,
-		CACheckpointBody: ca.log.CurrentCheckpoint().SignedNote,
+		CACheckpointBody: cosignAll(t, ca.log.CurrentCheckpoint().SignedNote, stubs...),
 		ConsistencyProof: proof,
 	}
 
@@ -160,7 +160,7 @@ func TestMultiCosignerQuorumNotMet(t *testing.T) {
 			LogID: ca.logID, Start: 0, End: 1,
 			Hash: tlogx.Hash{},
 		},
-		CACheckpointBody: ca.log.CurrentCheckpoint().SignedNote,
+		CACheckpointBody: w.cosign(t, ca.log.CurrentCheckpoint().SignedNote),
 	}
 	_, err := cert.RequestCosignatures(ctx, req, []cert.MirrorEndpoint{
 		w.endpoint(srv.URL),

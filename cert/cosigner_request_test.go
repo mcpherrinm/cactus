@@ -1,6 +1,8 @@
 package cert
 
 import (
+	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -60,8 +62,72 @@ func TestBuildSignSubtreeBodyGrammar(t *testing.T) {
 				"and a strict mirror parses it as a proof hash and answers 400", i+1, l)
 		}
 	}
-	if rest != string(checkpoint) {
-		t.Errorf("reference checkpoint was not emitted verbatim:\n got %q\nwant %q", rest, checkpoint)
+	// The checkpoint is appended per mirror, by requestOne.
+	if rest != "" {
+		t.Errorf("request head has trailing data after the blank line: %q", rest)
+	}
+}
+
+// TestCheckpointForCosigner pins the c2sp.org/tlog-witness@v1.1.0 rule
+// that a sign-subtree request's checkpoint carries exactly one note
+// signature, from the asked witness: the reference checkpoint is cut down
+// to that witness's line, matching both key name and key ID.
+func TestCheckpointForCosigner(t *testing.T) {
+	line := func(name string, keyID byte) string {
+		blob := append([]byte{keyID, 0, 0, 0}, make([]byte, 12)...)
+		return "— " + name + " " + base64.StdEncoding.EncodeToString(blob)
+	}
+	text := "oid/1.3.6.1.4.1.32473.1.0.1\n14\nAAAA\n"
+	note := []byte(text + "\n" +
+		line("oid/1.3.6.1.4.1.32473.1", 1) + "\n" +
+		line("oid/1.3.6.1.4.1.32473.77", 9) + "\n" + // same name, other key
+		line("oid/1.3.6.1.4.1.32473.77", 2) + "\n" +
+		line("oid/1.3.6.1.4.1.32473.78", 3) + "\n")
+
+	got, err := checkpointForCosigner(note, "oid/1.3.6.1.4.1.32473.77", [4]byte{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := text + "\n" + line("oid/1.3.6.1.4.1.32473.77", 2) + "\n"; string(got) != want {
+		t.Errorf("checkpointForCosigner =\n%q\nwant\n%q", got, want)
+	}
+	if _, err := checkpointForCosigner(note, "oid/1.3.6.1.4.1.32473.79", [4]byte{4}); err == nil {
+		t.Error("checkpointForCosigner succeeded without a line from the cosigner")
+	}
+}
+
+// TestParseSignSubtreeResponse covers the c2sp.org/tlog-witness@v1.1.0
+// response (base64 subtree cosignature and a newline) and the earlier
+// note-signature-line form that mirrors such as Sunlight still return.
+func TestParseSignSubtreeResponse(t *testing.T) {
+	const name = "oid/1.3.6.1.4.1.32473.77"
+	keyID := [4]byte{1, 2, 3, 4}
+	sig := []byte("signature-bytes!")
+	legacy := func(id [4]byte, ts uint64) string {
+		blob := append(id[:], MarshalCheckpointCosignature(ts, sig)...)
+		return "— " + name + " " + base64.StdEncoding.EncodeToString(blob) + "\n"
+	}
+	for desc, body := range map[string]string{
+		"v1.1.0":           base64.StdEncoding.EncodeToString(sig) + "\n",
+		"legacy":           legacy(keyID, 0),
+		"legacy, two keys": legacy([4]byte{9}, 0) + legacy(keyID, 0),
+	} {
+		got, err := parseSignSubtreeResponse([]byte(body), name, keyID)
+		if err != nil || !bytes.Equal(got, sig) {
+			t.Errorf("%s: parseSignSubtreeResponse = %q, %v; want %q", desc, got, err, sig)
+		}
+	}
+	for desc, body := range map[string]string{
+		"no newline":           base64.StdEncoding.EncodeToString(sig),
+		"two lines":            "AAAA\nAAAA\n",
+		"non-canonical base64": "AB==\n",
+		"legacy, timestamped":  legacy(keyID, 1),
+		"legacy, other key":    legacy([4]byte{9}, 0),
+		"legacy, bad base64":   "— " + name + " !!!\n",
+	} {
+		if _, err := parseSignSubtreeResponse([]byte(body), name, keyID); err == nil {
+			t.Errorf("%s: parseSignSubtreeResponse succeeded", desc)
+		}
 	}
 }
 

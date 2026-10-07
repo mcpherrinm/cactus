@@ -527,12 +527,18 @@ func (l *Log) flush() error {
 		End:   newSize,
 		Hash:  rootCp,
 	}
-	checkpointSig, err := l.signSubtree(&checkpointSubtree)
+	// A checkpoint's signature line is a c2sp.org/tlog-cosignature
+	// checkpoint cosignature, which carries the time it was made (MTC
+	// §5.3.1 allows a non-zero timestamp because start is zero and end is
+	// the whole tree). Subtree cosignatures for certificates, below, keep
+	// timestamp zero.
+	checkpointTime := uint64(now.Unix())
+	checkpointSig, err := l.sign(&checkpointSubtree, checkpointTime)
 	if err != nil {
 		return fmt.Errorf("flush sign checkpoint: %w", err)
 	}
 	signedNote, err := buildSignedNote(l.cfg.LogID, l.cfg.CosignerID,
-		newSize, rootCp, cert.SignatureAlgorithm(l.cfg.Signer.Algorithm()),
+		newSize, rootCp, checkpointTime, cert.SignatureAlgorithm(l.cfg.Signer.Algorithm()),
 		l.cfg.Signer.PublicKey(), checkpointSig.Signature)
 	if err != nil {
 		return fmt.Errorf("flush build note: %w", err)
@@ -678,7 +684,14 @@ func (l *Log) collectMirrorSigs(subs []signedSubtree) {
 }
 
 func (l *Log) signSubtree(st *cert.MTCSubtree) (cert.Cosignature, error) {
-	msg, err := cert.MarshalSignatureInput(l.cfg.CosignerID, st)
+	return l.sign(st, 0)
+}
+
+// sign signs the CosignedSubtree for st with the given timestamp: zero
+// for a subtree cosignature, the signing time for a checkpoint
+// cosignature.
+func (l *Log) sign(st *cert.MTCSubtree, timestamp uint64) (cert.Cosignature, error) {
+	msg, err := cert.MarshalSignatureInputAt(l.cfg.CosignerID, st, timestamp)
 	if err != nil {
 		return cert.Cosignature{}, err
 	}
@@ -741,8 +754,10 @@ func (l *Log) loadCheckpoint() error {
 
 // verifyLoadedCheckpointSig confirms that one of the signatures on the
 // loaded signed-note is from our configured CA cosigner over the
-// reconstructed §5.3.1 CosignedSubtree for [0, size). Any
-// other sigs (mirrors) are not checked here.
+// reconstructed §5.3.1 CosignedSubtree for [0, size), with the
+// timestamp the signature line carries (zero in checkpoints written by
+// cactus before it timestamped them). Any other sigs (mirrors) are not
+// checked here.
 func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []parsedNoteSig) error {
 	cosignerKeyName := cert.OIDName(l.cfg.CosignerID)
 	wantKeyID, err := cert.CosignatureKeyID(cosignerKeyName,
@@ -766,7 +781,7 @@ func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []par
 		LogID: l.cfg.LogID,
 		Start: 0, End: size, Hash: root,
 	}
-	msg, err := cert.MarshalSignatureInput(l.cfg.CosignerID, &subtree)
+	msg, err := cert.MarshalSignatureInputAt(l.cfg.CosignerID, &subtree, sig.timestamp)
 	if err != nil {
 		return fmt.Errorf("build signature input: %w", err)
 	}

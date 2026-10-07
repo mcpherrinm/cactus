@@ -1,7 +1,6 @@
 package mirrorpush
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,9 +23,10 @@ type Cosignature struct {
 	// KeyID is the 4-byte c2sp signed-note key ID that prefixes the
 	// signature blob.
 	KeyID [4]byte
-	// Timestamp is the c2sp.org/tlog-cosignature timestamped_signature
-	// timestamp: zero for subtree cosignatures, non-zero (seconds since
-	// the UNIX epoch) for checkpoint cosignatures.
+	// Timestamp is the checkpoint cosignature's timestamp (seconds since
+	// the UNIX epoch), which c2sp.org/tlog-cosignature@v1.1.0 puts before
+	// the signature. Subtree cosignatures have none, which the earlier
+	// note-line form wrote as zero.
 	Timestamp uint64
 	// Signature is the bare algorithm signature, with the key ID and
 	// timestamp stripped.
@@ -59,14 +59,14 @@ func ParseCosignatureLines(body []byte) ([]Cosignature, error) {
 		if !ok || name == "" {
 			return nil, fmt.Errorf("mirrorpush: malformed signature line: %q", line)
 		}
-		raw, err := base64.StdEncoding.DecodeString(b64)
+		raw, err := cert.DecodeBase64(b64)
 		if err != nil {
 			return nil, fmt.Errorf("mirrorpush: signature line base64: %w", err)
 		}
 		if len(raw) < 4 {
 			return nil, errors.New("mirrorpush: signature blob too short for a key ID")
 		}
-		ts, sig, err := cert.ParseTimestampedSignature(raw[4:])
+		ts, sig, err := cert.ParseCheckpointCosignature(raw[4:])
 		if err != nil {
 			return nil, fmt.Errorf("mirrorpush: %w", err)
 		}

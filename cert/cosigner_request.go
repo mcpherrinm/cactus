@@ -50,24 +50,20 @@ type SubtreeRequest struct {
 	// these values.
 	Subtree *MTCSubtree
 	// CACheckpointBody is the bytes of the *reference checkpoint*: a
-	// signed-note checkpoint that MUST already carry a cosignature
-	// from the responding mirror's own key.
+	// signed-note checkpoint carrying a checkpoint cosignature from
+	// each mirror to be asked (and typically the CA's own signature).
 	//
-	// c2sp.org/tlog-witness sign-subtree: "The witness MUST verify that
-	// the checkpoint includes a valid cosignature from one of its own
-	// keys. If the witness can't verify the checkpoint, it MUST respond
-	// with a 403 Forbidden." The CA's own signature alone is therefore
-	// not enough — a strict mirror rejects it.
+	// c2sp.org/tlog-witness@v1.1.0 sign-subtree: "The checkpoint MUST
+	// include exactly one note signature. That signature MUST be from
+	// one of the witness's keys." So each mirror is sent this
+	// checkpoint cut down to its own signature line; a mirror with no
+	// line here is not asked at all, since it would answer 403.
 	//
 	// A mirror's cosignature over a checkpoint is only ever produced by
 	// the c2sp.org/tlog-mirror add-entries 200 response, so the caller
 	// has to push entries first and feed the resulting cosigned
 	// checkpoint back in here. See package mirrorpush, whose
-	// Pool.CheckpointWithCosignatures does exactly that. Because a
-	// signed note may carry many signature lines and each mirror
-	// ignores lines that aren't its own, one body with every mirror's
-	// cosignature appended satisfies all of them at once — which is
-	// what lets this function keep fanning a single body out.
+	// Pool.CheckpointWithCosignatures does exactly that.
 	CACheckpointBody []byte
 	// ConsistencyProof is the §4.4 subtree consistency proof from
 	// (start, end, hash) up to the checkpoint root.
@@ -139,7 +135,7 @@ func RequestCosignaturesWithMetrics(
 		wg.Add(1)
 		go func(m MirrorEndpoint) {
 			defer wg.Done()
-			sig, err := requestOne(deadlineCtx, m, body, req.Subtree)
+			sig, err := requestOne(deadlineCtx, m, body, req.CACheckpointBody, req.Subtree)
 			if mx.Requests != nil {
 				result := "ok"
 				if err != nil {
@@ -189,7 +185,7 @@ func RequestCosignaturesWithMetrics(
 	}
 }
 
-func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTCSubtree) (Cosignature, error) {
+func requestOne(ctx context.Context, m MirrorEndpoint, prefix, referenceCheckpoint []byte, subtree *MTCSubtree) (Cosignature, error) {
 	// The witness sign-subtree path is ML-DSA-44 only (c2sp.org/tlog-
 	// cosignature has no ECDSA cosignature type); reject other keys up
 	// front rather than emitting a request we could never verify.
@@ -202,6 +198,11 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 	if err != nil {
 		return Cosignature{}, err
 	}
+	checkpoint, err := checkpointForCosigner(referenceCheckpoint, wantKey, wantKeyID)
+	if err != nil {
+		return Cosignature{}, err
+	}
+	body := append(append([]byte(nil), prefix...), checkpoint...)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.URL, bytes.NewReader(body))
 	if err != nil {
@@ -224,56 +225,104 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		return Cosignature{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
 
-	// Response: one or more c2sp.org/signed-note signature lines. We
-	// accept the one whose key name AND key ID match the configured
-	// mirror key, ignoring all others (per signed-note).
-	prefix := "— " + wantKey + " "
-	for _, line := range strings.Split(strings.TrimRight(string(respBody), "\n"), "\n") {
-		if !strings.HasPrefix(line, prefix) {
+	rawSig, err := parseSignSubtreeResponse(respBody, wantKey, wantKeyID)
+	if err != nil {
+		return Cosignature{}, err
+	}
+	// Verify against the §5.3.1 CosignedSubtree, with timestamp zero.
+	msg, err := MarshalSignatureInput(m.Key.ID, subtree)
+	if err != nil {
+		return Cosignature{}, err
+	}
+	sig := Cosignature{CosignerID: m.Key.ID, Signature: rawSig}
+	if err := VerifyCosignature(m.Key, sig, msg); err != nil {
+		return Cosignature{}, fmt.Errorf("verify: %w", err)
+	}
+	return sig, nil
+}
+
+// checkpointForCosigner returns the signed note cut down to its text and
+// the one signature line from the given cosigner (key name and key ID),
+// as a c2sp.org/tlog-witness@v1.1.0 sign-subtree request requires.
+func checkpointForCosigner(note []byte, name string, keyID [4]byte) ([]byte, error) {
+	text, sigs, ok := strings.Cut(string(note), "\n\n")
+	if !ok {
+		return nil, errors.New("cert: reference checkpoint has no signatures")
+	}
+	for _, line := range strings.Split(sigs, "\n") {
+		b64, ok := strings.CutPrefix(line, "— "+name+" ")
+		if !ok {
 			continue
 		}
-		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(line, prefix))
+		raw, err := DecodeBase64(b64)
+		if err != nil || len(raw) < 4 || [4]byte(raw[:4]) != keyID {
+			continue
+		}
+		return []byte(text + "\n\n" + line + "\n"), nil
+	}
+	return nil, fmt.Errorf("cert: reference checkpoint has no cosignature from %s", name)
+}
+
+// parseSignSubtreeResponse extracts the bare ML-DSA-44 signature from a
+// sign-subtree response. c2sp.org/tlog-witness@v1.1.0 defines the body
+// as a base64 subtree cosignature and a newline. Mirrors implementing the
+// earlier draft of the endpoint (Sunlight, as of 42d2b79) instead answer
+// with note signature lines carrying key ID || timestamp(0) || signature;
+// those are accepted too, picking the line with our key name and ID.
+func parseSignSubtreeResponse(body []byte, name string, keyID [4]byte) ([]byte, error) {
+	text, ok := strings.CutSuffix(string(body), "\n")
+	if !ok {
+		return nil, errors.New("cert: sign-subtree response does not end in a newline")
+	}
+	if !strings.HasPrefix(text, "— ") {
+		if strings.Contains(text, "\n") {
+			return nil, errors.New("cert: sign-subtree response has more than one line")
+		}
+		sig, err := DecodeBase64(text)
 		if err != nil {
-			return Cosignature{}, fmt.Errorf("decode sig: %w", err)
-		}
-		if len(raw) < 4 {
-			return Cosignature{}, errors.New("sig too short for key ID")
-		}
-		if [4]byte(raw[:4]) != wantKeyID {
-			continue // same name, different key ID: not our key.
-		}
-		ts, rawSig, err := ParseTimestampedSignature(raw[4:])
-		if err != nil {
-			return Cosignature{}, err
-		}
-		// Subtree cosignatures MUST carry a zero timestamp
-		// (c2sp.org/tlog-witness / tlog-cosignature).
-		if ts != 0 {
-			return Cosignature{}, fmt.Errorf("cert: mirror cosignature has non-zero timestamp %d", ts)
-		}
-		// Verify against the §5.3.1 CosignedSubtree.
-		msg, err := MarshalSignatureInput(m.Key.ID, subtree)
-		if err != nil {
-			return Cosignature{}, err
-		}
-		sig := Cosignature{CosignerID: m.Key.ID, Signature: rawSig}
-		if err := VerifyCosignature(m.Key, sig, msg); err != nil {
-			return Cosignature{}, fmt.Errorf("verify: %w", err)
+			return nil, fmt.Errorf("cert: sign-subtree response: %w", err)
 		}
 		return sig, nil
 	}
-	return Cosignature{}, errors.New("no matching signature line in response")
+	for _, line := range strings.Split(text, "\n") {
+		b64, ok := strings.CutPrefix(line, "— "+name+" ")
+		if !ok {
+			continue
+		}
+		raw, err := DecodeBase64(b64)
+		if err != nil {
+			return nil, fmt.Errorf("cert: sign-subtree response: %w", err)
+		}
+		if len(raw) < 4 {
+			return nil, errors.New("cert: sign-subtree signature too short for key ID")
+		}
+		if [4]byte(raw[:4]) != keyID {
+			continue // same name, different key ID: not our key.
+		}
+		ts, sig, err := ParseCheckpointCosignature(raw[4:])
+		if err != nil {
+			return nil, err
+		}
+		// A subtree cosignature has no timestamp, which this legacy form
+		// expressed as zero.
+		if ts != 0 {
+			return nil, fmt.Errorf("cert: mirror subtree cosignature has non-zero timestamp %d", ts)
+		}
+		return sig, nil
+	}
+	return nil, errors.New("cert: no matching signature line in sign-subtree response")
 }
 
 // buildSignSubtreeBody assembles the c2sp.org/tlog-witness sign-subtree
-// request body:
+// request body up to and including the blank line; requestOne appends
+// the checkpoint for the mirror it is asking. The whole body is:
 //
 //	subtree <start> <end>
 //	<base64 subtree hash>
 //	<base64 consistency-proof hash>        (0..63 lines)
 //	...
 //	<empty line>
-//	<reference checkpoint, a full signed checkpoint>
+//	<checkpoint text, blank line, the asked mirror's signature line>
 //
 // Note there is no CA cosignature line. An earlier revision of
 // c2sp.org/tlog-witness allowed the client to prepend a subtree
@@ -303,12 +352,7 @@ func buildSignSubtreeBody(req *SubtreeRequest) ([]byte, error) {
 		b.WriteString(base64.StdEncoding.EncodeToString(h[:]) + "\n")
 	}
 
-	// Empty line, then the reference checkpoint verbatim.
+	// Empty line; each mirror's own checkpoint follows (see requestOne).
 	b.WriteString("\n")
-	b.Write(req.CACheckpointBody)
-	if !bytes.HasSuffix(req.CACheckpointBody, []byte("\n")) {
-		b.WriteString("\n")
-	}
-
 	return b.Bytes(), nil
 }

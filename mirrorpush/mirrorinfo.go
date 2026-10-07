@@ -1,10 +1,10 @@
 package mirrorpush
 
 import (
-	"encoding/base64"
 	"fmt"
-	"strconv"
 	"strings"
+
+	"github.com/letsencrypt/cactus/cert"
 )
 
 // MirrorInfoContentType is the media type a mirror MUST use for the
@@ -65,9 +65,9 @@ func ParseMirrorInfo(body []byte) (MirrorInfo, error) {
 		if in == "" {
 			return 0, fmt.Errorf("mirrorpush: mirror-info %s line is empty", what)
 		}
-		v, err := strconv.ParseUint(in, 10, 64)
+		v, err := cert.ParseDecimal(in)
 		if err != nil {
-			return 0, fmt.Errorf("mirrorpush: mirror-info %s %q: %w", what, in, err)
+			return 0, fmt.Errorf("mirrorpush: mirror-info %s: %w", what, err)
 		}
 		return v, nil
 	}
@@ -81,7 +81,7 @@ func ParseMirrorInfo(body []byte) (MirrorInfo, error) {
 	// An empty ticket line is normal: base64 of the empty string is the
 	// empty string, and the spec explicitly allows a zero-length ticket.
 	if lines[2] != "" {
-		mi.Ticket, err = base64.StdEncoding.DecodeString(lines[2])
+		mi.Ticket, err = cert.DecodeBase64(lines[2])
 		if err != nil {
 			return MirrorInfo{}, fmt.Errorf("mirrorpush: mirror-info ticket base64: %w", err)
 		}
@@ -97,7 +97,7 @@ func ParseSize(body []byte) (uint64, error) {
 	if s == "" || strings.Contains(s, "\n") {
 		return 0, fmt.Errorf("mirrorpush: malformed tlog.size body %q", string(body))
 	}
-	v, err := strconv.ParseUint(s, 10, 64)
+	v, err := cert.ParseDecimal(s)
 	if err != nil {
 		return 0, fmt.Errorf("mirrorpush: tlog.size %q: %w", s, err)
 	}

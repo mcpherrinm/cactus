@@ -166,7 +166,7 @@ func printPEMFromVkey(vkey string) error {
 		return fmt.Errorf("vkey has %d '+'-separated fields, want 3", len(parts))
 	}
 	name, gotID := parts[0], parts[1]
-	material, err := base64.StdEncoding.DecodeString(parts[2])
+	material, err := cert.DecodeBase64(parts[2])
 	if err != nil {
 		return fmt.Errorf("vkey key material: %w", err)
 	}

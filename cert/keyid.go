@@ -46,27 +46,28 @@ func expectedPubKeyLen(alg SignatureAlgorithm) (int, bool) {
 }
 
 // timestampedSigTimestampLen is the width of the big-endian u64
-// timestamp that prefixes a c2sp.org/tlog-cosignature
-// timestamped_signature.
+// timestamp that prefixes a c2sp.org/tlog-cosignature checkpoint
+// cosignature.
 const timestampedSigTimestampLen = 8
 
-// MarshalTimestampedSignature returns the c2sp.org/tlog-cosignature
-// timestamped_signature wire form: an 8-byte big-endian timestamp
-// followed by the algorithm-specific signature. This is the value that
-// follows the 4-byte key ID in a signed-note signature line. For MTC
-// (sub)tree cosignatures the timestamp is zero.
-func MarshalTimestampedSignature(timestamp uint64, sig []byte) []byte {
+// MarshalCheckpointCosignature returns a c2sp.org/tlog-cosignature@v1.1.0
+// checkpoint cosignature: an 8-byte big-endian timestamp followed by the
+// algorithm-specific signature. This is the value that follows the
+// 4-byte key ID in a checkpoint's signed-note signature line. (A subtree
+// cosignature, as in an MTCProof or a sign-subtree response, is the bare
+// signature.)
+func MarshalCheckpointCosignature(timestamp uint64, sig []byte) []byte {
 	out := make([]byte, timestampedSigTimestampLen+len(sig))
 	binary.BigEndian.PutUint64(out[:timestampedSigTimestampLen], timestamp)
 	copy(out[timestampedSigTimestampLen:], sig)
 	return out
 }
 
-// ParseTimestampedSignature splits a timestamped_signature into its
+// ParseCheckpointCosignature splits a checkpoint cosignature into its
 // timestamp and the underlying signature bytes.
-func ParseTimestampedSignature(b []byte) (timestamp uint64, sig []byte, err error) {
+func ParseCheckpointCosignature(b []byte) (timestamp uint64, sig []byte, err error) {
 	if len(b) < timestampedSigTimestampLen {
-		return 0, nil, errors.New("cert: timestamped_signature too short for timestamp")
+		return 0, nil, errors.New("cert: checkpoint cosignature too short for timestamp")
 	}
 	return binary.BigEndian.Uint64(b[:timestampedSigTimestampLen]), b[timestampedSigTimestampLen:], nil
 }

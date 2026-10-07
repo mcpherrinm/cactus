@@ -74,7 +74,7 @@ func TestEndToEndCAWithThreeCosigners(t *testing.T) {
 		}
 		return cert.RequestCosignatures(ctx, &cert.SubtreeRequest{
 			Subtree:          st,
-			CACheckpointBody: cp.SignedNote,
+			CACheckpointBody: cosignAll(t, cp.SignedNote, stubs...),
 			ConsistencyProof: proof,
 		}, endpoints, 2, 2*time.Second, false)
 	}

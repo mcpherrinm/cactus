@@ -30,7 +30,7 @@ func buildTestNote(t *testing.T, sgn signer.Signer, signerID cert.TrustAnchorID,
 	if err != nil {
 		t.Fatal(err)
 	}
-	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalTimestampedSignature(ts, sig)...)
+	blob := append(append([]byte(nil), keyID[:]...), cert.MarshalCheckpointCosignature(ts, sig)...)
 	return fmt.Appendf(nil, "%s\n%d\n%s\n\n— %s %s\n",
 		origin, size, base64.StdEncoding.EncodeToString(root[:]),
 		name, base64.StdEncoding.EncodeToString(blob))
