@@ -4,7 +4,7 @@
 // it issues hundreds of certificates and takes far longer than the rest
 // of the suite, which is meant to stay fast enough to run on every save.
 //
-//	gotip test -tags=stress -run TestBulkIssuanceStress -timeout 30m ./integration/
+//	go test -tags=stress -run TestBulkIssuanceStress -timeout 30m ./integration/
 //	make stress
 //
 // Size and concurrency are tunable so the same test can be a quick smoke

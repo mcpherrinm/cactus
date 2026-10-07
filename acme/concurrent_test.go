@@ -33,7 +33,7 @@ func TestConcurrentFinalizeOnSameOrder(t *testing.T) {
 
 	jws = jwsSign(t, acctKey, nil, kid, nonce, base+"/new-order",
 		mustMarshal(NewOrderReq{Identifiers: []Identifier{{Type: "dns", Value: "race.test"}}}))
-	resp, body := post(t, base, "/new-order", jws)
+	_, body := post(t, base, "/new-order", jws)
 	var ord OrderResp
 	if err := json.Unmarshal(body, &ord); err != nil {
 		t.Fatalf("unmarshal order: %v", err)

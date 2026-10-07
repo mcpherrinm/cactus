@@ -19,23 +19,15 @@ make docker-down    # stop and delete volumes (destroys key material)
 | `sunlight` | 8080 | mirror write path: `add-checkpoint`, `add-entries`, `sign-subtree` |
 | `skylight` | 8081 | mirror read path: mirrored checkpoint and tiles |
 
-## Why the cactus image does not build from source
+## Building the images
 
-cactus uses the standard library's `crypto/mldsa` and declares `go 1.27`,
-and there is no `golang:1.27` image yet — 1.27 is still devel, so even a
-released Go cannot download the toolchain. `make docker-binaries`
-therefore cross-builds the binaries on the host with `gotip`
-(`CGO_ENABLED=0 GOOS=linux`) and the Dockerfile copies them in.
-
-Sunlight has no such constraint: it declares `go 1.27.0` and gets ML-DSA
-from `filippo.io/mldsa` rather than the standard library, so it builds
-inside its own image from a pinned release (`SUNLIGHT_REF`, at least
-v0.10.0, the first that runs as a mirror without a CT log of its own). It does need **cgo**, because its checkpoint lock
-backend uses `crawshaw.io/sqlite`; with `CGO_ENABLED=0` only
-`sunlight-keygen` builds.
-
-Once Go 1.27 ships, `Dockerfile.cactus` can become an ordinary
-multi-stage build and `docker-binaries` can go away.
+Both images build from source inside Docker on `golang:1.27`. cactus
+needs 1.27 for the standard library's `crypto/mldsa`; Sunlight v0.10.0
+declares `go 1.27.0` too, though it gets ML-DSA from `filippo.io/mldsa`.
+The Sunlight image clones a pinned release (`SUNLIGHT_REF`, at least
+v0.10.0, the first that runs as a mirror without a CT log of its own).
+It needs **cgo**, because its checkpoint lock backend uses
+`crawshaw.io/sqlite`; with `CGO_ENABLED=0` only `sunlight-keygen` builds.
 
 ## Mirroring is push-based
 

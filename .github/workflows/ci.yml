@@ -9,14 +9,11 @@ permissions:
   contents: read
 
 # cactus uses Go's built-in crypto/mldsa and declares `go 1.27` in
-# go.mod, so it must be built with a Go 1.27 toolchain. 1.27 has not had
-# a final release yet, so CI pins the newest release candidate; bump
-# GO_VERSION as later RCs appear and set it to '1.27' once 1.27.0 ships.
-# GOTOOLCHAIN=local keeps the go command from downloading a different
-# toolchain behind our backs -- the RC satisfies the go.mod requirement
-# on its own.
+# go.mod, so it must be built with a Go 1.27 toolchain. GOTOOLCHAIN=local
+# keeps the go command from downloading a different toolchain than the
+# one setup-go installed.
 env:
-  GO_VERSION: '1.27.0-rc.2'
+  GO_VERSION: '1.27'
   GOTOOLCHAIN: local
 
 jobs:
@@ -35,19 +32,17 @@ jobs:
       - name: Toolchain version
         run: go version
 
-      # The Makefile defaults to gotip for local development; CI has a
-      # real 1.27 toolchain on PATH as `go`.
       - name: Vet
-        run: make GO=go vet
+        run: make vet
 
       - name: Build
-        run: make GO=go build
+        run: make build
 
       - name: Test (race)
         run: go test -race -count=1 ./...
 
       - name: Integration tests (race)
-        run: make GO=go integration
+        run: make integration
 
       # The stress test is build-tagged, so the steps above never compile
       # it. Vet it here so a break is caught on the pull request rather
@@ -66,15 +61,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # golangci-lint release binaries are built with the latest released
-      # Go and cannot type-check a `go 1.27` module, so build it from
-      # source with the toolchain installed above instead of using
-      # golangci/golangci-lint-action. setup-go's cache keeps this fast
-      # after the first run. Keep the pinned version in sync with the
-      # Makefile comment. Formatting (gofmt + goimports) is checked here
-      # too, via the formatters enabled in .golangci.yml.
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-
+      # Formatting (gofmt + goimports) is checked here too, via the
+      # formatters enabled in .golangci.yml. v2.13.0 is the minimum that
+      # can type-check a Go 1.27 module.
       - name: Lint
-        run: make GO=go lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0

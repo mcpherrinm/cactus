@@ -262,10 +262,7 @@ func (c *Config) Validate() error {
 	// the CA cosigner that signs checkpoints — to use an ML-DSA-44 key and
 	// produce ML-DSA-44 signed messages (c2sp.org/tlog-cosignature), since
 	// that is currently the only signature algorithm available in both
-	// X.509 and C2SP in a subtree-capable form. ML-DSA-44 validates here
-	// regardless of toolchain, but only produces a working signer when
-	// built with Go 1.27+ (where crypto/mldsa exists); on older toolchains
-	// signer.FromSeed reports the missing support at startup.
+	// X.509 and C2SP in a subtree-capable form.
 	if c.CACosigner.Algorithm != "mldsa-44" {
 		return fmt.Errorf("ca_cosigner.algorithm must be \"mldsa-44\" (the MTC-with-tlog profile requires ML-DSA-44 cosigners), got %q", c.CACosigner.Algorithm)
 	}

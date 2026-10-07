@@ -140,7 +140,7 @@ func finalizeOneCert(t *testing.T, base, dnsName string) (certURL, certID string
 	nonce = resp.Header.Get("Replay-Nonce")
 	jws = jwsSign(t, acctKey, nil, kid, nonce, ord.Finalize,
 		mustMarshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csrDER)}))
-	resp, body = post(t, base, strings.TrimPrefix(ord.Finalize, base), jws)
+	_, body = post(t, base, strings.TrimPrefix(ord.Finalize, base), jws)
 	var ord2 OrderResp
 	if err := json.Unmarshal(body, &ord2); err != nil {
 		t.Fatalf("unmarshal body: %v", err)

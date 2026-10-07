@@ -236,12 +236,6 @@ func acmeIssueOneFull(base, dnsName string) ([]byte, string, error) {
 	return der, certURL, err
 }
 
-// doFullFlow returns just the cert URL from a full ACME flow.
-func doFullFlow(base, dnsName string) (string, error) {
-	_, url, _, _, err := acmeIssueOneInner(base, dnsName)
-	return url, err
-}
-
 // acmeIssueOneWithKeys is the full-flow helper for tests that need to
 // re-download the cert via POST-as-GET (RFC 8555 §6.3).
 func acmeIssueOneWithKeys(base, dnsName string) ([]byte, string, *ecdsa.PrivateKey, string, error) {

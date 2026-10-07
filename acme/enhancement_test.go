@@ -90,7 +90,7 @@ func TestEnhancementURLPending(t *testing.T) {
 	nonce = resp.Header.Get("Replay-Nonce")
 	jws = jwsSign(t, acctKey, nil, kid, nonce, ord.Finalize,
 		mustMarshal(FinalizeReq{CSR: base64.RawURLEncoding.EncodeToString(csr)}))
-	resp, body = post(t, hsrv.URL, strings.TrimPrefix(ord.Finalize, hsrv.URL), jws)
+	_, body = post(t, hsrv.URL, strings.TrimPrefix(ord.Finalize, hsrv.URL), jws)
 	var ord2 OrderResp
 	if err := json.Unmarshal(body, &ord2); err != nil {
 		t.Fatalf("unmarshal order: %v", err)

@@ -13,13 +13,6 @@ linters:
     - gosec
     - misspell
     - unconvert
-  # golangci-lint vendors honnef.co/go/tools v0.7.0 (staticcheck
-  # 2026.1), whose IR builder panics on the Go 1.27 standard library.
-  # Re-enable staticcheck and unused once golangci-lint ships
-  # staticcheck 2026.2+.
-  disable:
-    - staticcheck
-    - unused
   settings:
     errcheck:
       exclude-functions:
@@ -68,6 +61,10 @@ linters:
       # storage key -> response body) is not script injection.
       - path: tile/server\.go
         text: "G705"
+      # pollinate shuffles candidate mirrors only to break ties in which
+      # one it reads from first; G404 (weak RNG) does not apply.
+      - path: pollinate/service\.go
+        text: "G404"
 
 issues:
   # Report everything; the default per-linter and per-issue caps hide
