@@ -2,7 +2,7 @@
 
 A `docker compose` stack that runs cactus as a Merkle Tree Certificate CA
 and [Sunlight](https://github.com/FiloSottile/sunlight) as a
-[c2sp.org/tlog-mirror](https://c2sp.org/tlog-mirror) and ML-DSA-44
+[c2sp.org/tlog-mirror](https://c2sp.org/tlog-mirror@v0.1.0) and ML-DSA-44
 cosigner for it.
 
 ```sh

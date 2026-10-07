@@ -61,4 +61,4 @@ This is the [c2sp tlog-tiles] entry-bundle framing ("entry bundles are
 sequences of big-endian uint16 length-prefixed log entries"), matching
 the IETF reference tooling.
 
-[c2sp tlog-tiles]: https://c2sp.org/tlog-tiles
+[c2sp tlog-tiles]: https://c2sp.org/tlog-tiles@v1.0.0

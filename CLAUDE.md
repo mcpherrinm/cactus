@@ -76,7 +76,7 @@ Cert issuance data flow (CSR → verifiable bytes on disk):
    (`/<lognum>/checkpoint`, `/<lognum>/tile/…`, `/<lognum>/landmarks`).
 
 Supporting packages: **`cert/`** holds the wire types (`TBSCertificateLogEntry`,
-`MTCProof`, `CosignedMessage`, `CertificatePropertyList`) and the multi-mirror
+`MTCProof`, `CosignedSubtree`, `CertificatePropertyList`) and the multi-mirror
 sign-subtree request client. **`mirrorpush/`** is the c2sp.org/tlog-mirror push
 client: it replicates the log to external mirrors (`add-checkpoint`, `add-entries`)
 and retains the mirror-cosigned checkpoint that `sign-subtree` then requires. **`tlogx/`** extends `x/mod/sumdb/tlog` with the §4 subtree primitives

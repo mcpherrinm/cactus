@@ -5,10 +5,10 @@ the parts of [draft-ietf-plants-merkle-tree-certs][draft] that you
 need to keep in your head while reading the code.
 
 It's deliberately thinner than the IETF draft. For anything you can't
-find here, the draft is the source of truth — draft-07 is the version
-cactus targets (until it is published, `specs/draft-ietf-plants-merkle-tree-certs-07-pre.md`
-is the editor's copy it was cut from), and section numbers in this doc
-match it.
+find here, the draft is the source of truth — `specs/draft-ietf-plants-merkle-tree-certs-07.txt`
+is the version cactus targets, and section numbers in this doc match
+that file. The C2SP specs it builds on are the versions draft-07 cites
+(mtc-tlog@v0.1.0, tlog-cosignature@v1.1.0, and so on).
 
 ## Why MTC exists
 
@@ -176,7 +176,7 @@ There are two kinds:
   Mirrors prove transparency: a misbehaving CA can't issue a cert
   that mirrors haven't seen.
 
-A cosigner's signature is over a structure called `CosignedMessage`
+A cosigner's signature is over a structure called `CosignedSubtree`
 (§5.3.1):
 
 ```
@@ -188,14 +188,18 @@ struct {
     uint64 start;
     uint64 end;
     HashValue subtree_hash;
-} CosignedMessage;
+} CosignedSubtree;
 ```
 
 The 12-byte label is domain separation (§12.8): it does not begin with
 the DER SEQUENCE tag `0x30`, so a subtree signature can never collide
 with a TBSCertificate / TBSCertList / OCSP signing input. The structure
-is compatible with the c2sp tlog-cosignature ML-DSA-44 construction.
-MTC proofs always use `timestamp = 0`.
+is the same `CosignedSubtree` c2sp tlog-cosignature defines for its
+ML-DSA-44 cosigners. MTC proofs always use `timestamp = 0`: they carry
+*subtree cosignatures*, which are the bare signature. The signature
+line on a checkpoint is instead a *checkpoint cosignature*, signed with
+the current time as the timestamp and serialized as that timestamp
+followed by the signature.
 
 In cactus, the cosigner abstraction is in `signer/`:
 
@@ -284,7 +288,7 @@ The CA:
 
 2. Computes the Merkle hashes of those two subtrees from the tiles.
 
-3. Signs each subtree's `CosignedMessage` (§5.3.1) with its CA
+3. Signs each subtree's `CosignedSubtree` (§5.3.1) with its CA
    cosigner key.
 
 4. Optionally fans the request out to mirrors. Each mirror that has
@@ -474,9 +478,9 @@ re-verified using the §7.2 procedure on the live log.
   conventions MTC builds on.
 
 [draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt
-[c2sp.org/tlog-tiles]: https://c2sp.org/tlog-tiles
-[c2sp tlog-tiles]: https://c2sp.org/tlog-tiles
-[c2sp tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
-[c2sp tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
-[c2sp signed-note]: https://c2sp.org/signed-note
+[c2sp.org/tlog-tiles]: https://c2sp.org/tlog-tiles@v1.0.0
+[c2sp tlog-tiles]: https://c2sp.org/tlog-tiles@v1.0.0
+[c2sp tlog-cosignature]: https://c2sp.org/tlog-cosignature@v1.1.0
+[c2sp tlog-mirror]: https://c2sp.org/tlog-mirror@v0.1.0
+[c2sp signed-note]: https://c2sp.org/signed-note@v1.1.0
 [RFC 9162]: https://www.rfc-editor.org/rfc/rfc9162

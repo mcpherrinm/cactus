@@ -378,13 +378,16 @@ the requester poll-and-retry while mirrors catch up to the new
 checkpoint (mirrors can't sign a subtree until they've verified the
 checkpoint that contains it).
 
-Note that a mirror will only answer `sign-subtree` if the reference
-checkpoint in the request already carries **that mirror's own
-cosignature** (c2sp.org/tlog-witness; otherwise it responds 403). The
-only place such a cosignature is produced is the `add-entries` success
-response, so `ca_cosigner_quorum` against a real c2sp mirror requires
-`mirror_push` to be configured for the same mirror. Against a witness
-that does not enforce the rule, `ca_cosigner_quorum` works alone.
+Note that a `sign-subtree` request's checkpoint must carry **exactly
+one signature: the asked mirror's own cosignature**
+([tlog-witness]@v1.1.0; otherwise it responds 403). The only place
+such a cosignature is produced is the `add-entries` success response,
+so `ca_cosigner_quorum` requires `mirror_push` to be configured for the
+same mirrors: cactus sends each mirror the checkpoint with just that
+mirror's line, and skips a mirror it has no cosignature from yet. It
+accepts both the v1.1.0 response (a bare base64 subtree cosignature)
+and the signature-line response of mirrors that predate it, such as
+Sunlight as of `42d2b79`.
 
 ### `mirror_push` (optional, c2sp.org/tlog-mirror push client)
 
@@ -537,7 +540,7 @@ cactus/
 │   └── cactus-pollinate/ mirror-repair service (see section above)
 ├── acme/      RFC 8555 ACME server with §9 extensions
 ├── ca/        Issuer (CSR → X.509 cert via id-alg-mtcProof)
-├── cert/      TBSCertificateLogEntry, MTCProof, CosignedMessage,
+├── cert/      TBSCertificateLogEntry, MTCProof, CosignedSubtree,
 │              CertificatePropertyList, multi-mirror sign-subtree client
 ├── mirrorpush/ c2sp.org/tlog-mirror push client (add-checkpoint, add-entries)
 ├── pollinate/ mirror-repair service: follows the Chrome cosigners list,
@@ -623,7 +626,7 @@ Working draft; APIs may shift to track the upstream IETF and c2sp
 specs.
 
 [draft]: https://www.ietf.org/archive/id/draft-ietf-plants-merkle-tree-certs-07.txt
-[tlog-mirror]: https://github.com/C2SP/C2SP/blob/main/tlog-mirror.md
-[c2sp.org/mtc-tlog]: https://c2sp.org/mtc-tlog
-[tlog-cosignature]: https://github.com/C2SP/C2SP/blob/main/tlog-cosignature.md
-[tlog-witness]: https://github.com/C2SP/C2SP/blob/main/tlog-witness.md
+[tlog-mirror]: https://c2sp.org/tlog-mirror@v0.1.0
+[c2sp.org/mtc-tlog]: https://c2sp.org/mtc-tlog@v0.1.0
+[tlog-cosignature]: https://c2sp.org/tlog-cosignature@v1.1.0
+[tlog-witness]: https://c2sp.org/tlog-witness@v1.1.0
