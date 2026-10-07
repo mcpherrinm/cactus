@@ -115,7 +115,7 @@ const (
 // Skipping it would let a mirror pair one bad signature with one good
 // one and have us quietly accept.
 //
-// timestamp carries into the signed message, so the CosignedMessage is
+// timestamp carries into the signed message, so the CosignedSubtree is
 // rebuilt per line from the timestamp on the wire; the rule argument is
 // then applied to reject a timestamp the protocol forbids.
 func VerifyCosignatures(
@@ -181,7 +181,7 @@ func VerifyCosignaturesForOrigin(
 				return nil, fmt.Errorf("mirrorpush: checkpoint cosignature from %q has a zero timestamp", c.Name)
 			}
 		}
-		msg, err := cert.MarshalCosignedMessage(wantName, origin, c.Timestamp, start, end, hash)
+		msg, err := cert.MarshalCosignedSubtree(wantName, origin, c.Timestamp, start, end, hash)
 		if err != nil {
 			return nil, err
 		}

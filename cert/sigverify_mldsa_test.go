@@ -7,7 +7,7 @@ import (
 
 // On Go 1.27+ (where crypto/mldsa is available), VerifyCosignature verifies pure
 // ML-DSA (FIPS 204, empty context) cosignatures. We round-trip each
-// parameter set: sign a CosignedMessage-shaped message with crypto/mldsa
+// parameter set: sign a CosignedSubtree-shaped message with crypto/mldsa
 // and verify it through VerifyCosignature, using the raw FIPS 204 public
 // key as cosignerKeyFromSPKI would supply it.
 func TestVerifyCosignatureMLDSARoundTrip(t *testing.T) {

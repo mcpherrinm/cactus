@@ -301,7 +301,7 @@ func (m *stubMirror) addEntries(w http.ResponseWriter, r *http.Request) {
 	m.servedSize = h.UploadEnd
 	ts := uint64(time.Now().Unix())
 	name := cert.OIDName(m.id)
-	msg, err := cert.MarshalCosignedMessage(name, testOrigin, ts, 0, h.UploadEnd, m.pendingRoot)
+	msg, err := cert.MarshalCosignedSubtree(name, testOrigin, ts, 0, h.UploadEnd, m.pendingRoot)
 	if err != nil {
 		http.Error(w, "sign", http.StatusInternalServerError)
 		return

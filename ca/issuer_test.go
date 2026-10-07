@@ -79,7 +79,7 @@ func newTestLog(t *testing.T) (*cactuslog.Log, signer.Signer, cert.TrustAnchorID
 //     with HASH(SPKI));
 //  5. compute leaf hash = HASH(0x00 || 0x00 0x01 || tbsContents);
 //  6. evaluate the inclusion proof and compare to MTCProof.subtree.hash;
-//  7. verify the CA cosigner signature over CosignedMessage.
+//  7. verify the CA cosigner signature over CosignedSubtree.
 //
 // All seven checks must pass.
 func TestIssueRoundTripFullValidation(t *testing.T) {

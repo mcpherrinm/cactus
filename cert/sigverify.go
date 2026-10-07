@@ -30,7 +30,7 @@ type CosignerKey struct {
 }
 
 // VerifyCosignature checks a Cosignature.Signature against the signing
-// message (a CosignedMessage per §5.3.1). The caller supplies a
+// message (a CosignedSubtree per §5.3.1). The caller supplies a
 // CosignerKey carrying the algorithm + key bytes so the cosigner ID is
 // resolved out-of-band.
 func VerifyCosignature(key CosignerKey, sig Cosignature, signedMessage []byte) error {

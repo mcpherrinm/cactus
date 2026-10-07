@@ -1,7 +1,7 @@
 // Package signer defines the cosigner signing abstraction. Per the
 // MTC-with-tlog profile, every MTC cosigner — including the CA cosigner
 // (§5.5 of draft-ietf-plants-merkle-tree-certs-07) that signs checkpoints
-// — uses an ML-DSA-44 key and produces the §5.3.1 CosignedMessage. This
+// — uses an ML-DSA-44 key and produces the §5.3.1 CosignedSubtree. This
 // package provides the concrete ML-DSA implementation (FIPS 204, via the
 // built-in crypto/mldsa, which requires Go 1.27+) behind a stable
 // interface.
@@ -50,7 +50,7 @@ func ParseAlgorithm(name string) (Algorithm, error) {
 }
 
 // Signer signs a message with a specific algorithm. Cactus passes the
-// already-prepared CosignedMessage here.
+// already-prepared CosignedSubtree here.
 type Signer interface {
 	Algorithm() Algorithm
 	// PublicKey returns the cosigner's public key in the algorithm's

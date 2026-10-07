@@ -9,7 +9,7 @@
 // cactus is therefore the client on all three.
 //
 // The reason cactus cares about more than durability is sign-subtree.
-// MTC §5.3.1 CosignedMessage and a c2sp.org/tlog-cosignature
+// MTC §5.3.1 CosignedSubtree and a c2sp.org/tlog-cosignature
 // cosigned_message are byte-identical under SHA-256 + ML-DSA-44, so a
 // mirror's sign-subtree response drops straight into an MTCProof with
 // no translation. But a mirror will only sign a subtree against a

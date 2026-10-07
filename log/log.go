@@ -741,7 +741,7 @@ func (l *Log) loadCheckpoint() error {
 
 // verifyLoadedCheckpointSig confirms that one of the signatures on the
 // loaded signed-note is from our configured CA cosigner over the
-// reconstructed §5.3.1 CosignedMessage for [0, size). Any
+// reconstructed §5.3.1 CosignedSubtree for [0, size). Any
 // other sigs (mirrors) are not checked here.
 func (l *Log) verifyLoadedCheckpointSig(size uint64, root tlogx.Hash, sigs []parsedNoteSig) error {
 	cosignerKeyName := cert.OIDName(l.cfg.CosignerID)

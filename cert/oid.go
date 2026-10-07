@@ -37,7 +37,7 @@ var (
 //
 //	subtree/v1\n\0
 //
-// It is the first field of the CosignedMessage a cosigner signs. The
+// It is the first field of the CosignedSubtree a cosigner signs. The
 // label is designed for domain separation (§12.8): it does not begin
 // with the DER SEQUENCE tag 0x30, so subtree signatures cannot collide
 // with TBSCertificate / TBSCertList / OCSP ResponseData signing inputs.

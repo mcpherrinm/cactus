@@ -18,7 +18,7 @@ import (
 func buildTestNote(t *testing.T, sgn signer.Signer, signerID cert.TrustAnchorID, origin string, size uint64, root tlogx.Hash, ts uint64) []byte {
 	t.Helper()
 	name := cert.OIDName(signerID)
-	msg, err := cert.MarshalCosignedMessage(name, origin, ts, 0, size, root)
+	msg, err := cert.MarshalCosignedSubtree(name, origin, ts, 0, size, root)
 	if err != nil {
 		t.Fatal(err)
 	}

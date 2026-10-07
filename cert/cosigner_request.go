@@ -46,7 +46,7 @@ type Counter interface{ Add(float64) }
 // cosignature collection.
 type SubtreeRequest struct {
 	// Subtree is the §5.3.1 MTCSubtree being signed (log_id, start,
-	// end, hash). The mirrors will sign CosignedMessage for
+	// end, hash). The mirrors will sign CosignedSubtree for
 	// these values.
 	Subtree *MTCSubtree
 	// CACheckpointBody is the bytes of the *reference checkpoint*: a
@@ -251,7 +251,7 @@ func requestOne(ctx context.Context, m MirrorEndpoint, body []byte, subtree *MTC
 		if ts != 0 {
 			return Cosignature{}, fmt.Errorf("cert: mirror cosignature has non-zero timestamp %d", ts)
 		}
-		// Verify against the §5.3.1 CosignedMessage.
+		// Verify against the §5.3.1 CosignedSubtree.
 		msg, err := MarshalSignatureInput(m.Key.ID, subtree)
 		if err != nil {
 			return Cosignature{}, err

@@ -12,7 +12,7 @@ import (
 )
 
 // buildSignedNote returns a c2sp signed-note for the checkpoint, using
-// the cosigner's signature over the §5.3.1 CosignedMessage for
+// the cosigner's signature over the §5.3.1 CosignedSubtree for
 // [0, size). The checkpoint origin and signature line follow
 // c2sp.org/tlog-checkpoint and c2sp.org/signed-note.
 //

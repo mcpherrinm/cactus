@@ -138,7 +138,7 @@ func (n *Note) VerifySignature(signerID cert.TrustAnchorID, rawKey []byte) error
 		if err != nil {
 			return fmt.Errorf("pollinate: signature from %q: %w", name, err)
 		}
-		msg, err := cert.MarshalCosignedMessage(name, n.Origin, ts, 0, n.Size, n.Root)
+		msg, err := cert.MarshalCosignedSubtree(name, n.Origin, ts, 0, n.Size, n.Root)
 		if err != nil {
 			return err
 		}

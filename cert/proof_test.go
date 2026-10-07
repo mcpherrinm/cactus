@@ -22,7 +22,7 @@ func TestCosignedMessageLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// §5.3.1 CosignedMessage layout:
+	// §5.3.1 CosignedSubtree layout:
 	//   label[12] || u8 len||cosigner_name || u64 timestamp ||
 	//   u8 len||log_origin || u64 start || u64 end || hash[32].
 	// Names are "oid/1.3.6.1.4.1." + relative ID (OIDName).

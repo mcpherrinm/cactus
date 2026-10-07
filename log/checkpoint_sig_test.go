@@ -16,7 +16,7 @@ import (
 
 // TestCheckpointSignatureVerifies brings up a log, fetches the latest
 // signed-note checkpoint, and verifies the cosigner's signature against
-// the §5.3.1 CosignedMessage for [0, size). This exercises a
+// the §5.3.1 CosignedSubtree for [0, size). This exercises a
 // path the integration test only covers indirectly (it verifies subtree
 // signatures, not checkpoint signatures).
 func TestCheckpointSignatureVerifies(t *testing.T) {
@@ -119,7 +119,7 @@ func TestCheckpointSignatureVerifies(t *testing.T) {
 		t.Errorf("checkpoint cosignature timestamp = %d, want 0", ts)
 	}
 
-	// Build CosignedMessage for [0, size) with the checkpoint root.
+	// Build CosignedSubtree for [0, size) with the checkpoint root.
 	subtree := &cert.MTCSubtree{
 		LogID: logID, Start: 0, End: cp.Size, Hash: cp.Root,
 	}

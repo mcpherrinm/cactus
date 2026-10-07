@@ -23,7 +23,7 @@ type TrustAnchorID []byte
 // MTCSubtree is an internal carrier for the (log ID, [start, end),
 // subtree hash) tuple a cosigner signs. In draft-07 there is no
 // standalone MTCSubtree wire struct; these fields are folded into the
-// CosignedMessage (§5.3.1) produced by MarshalSignatureInput.
+// CosignedSubtree (§5.3.1) produced by MarshalSignatureInput.
 type MTCSubtree struct {
 	LogID      TrustAnchorID
 	Start, End uint64
@@ -31,7 +31,7 @@ type MTCSubtree struct {
 }
 
 // OIDName renders a trust anchor ID as the ASCII OID name used in a
-// CosignedMessage's cosigner_name / log_origin fields (§5.3.1): the
+// CosignedSubtree's cosigner_name / log_origin fields (§5.3.1): the
 // 16-byte ASCII string "oid/1.3.6.1.4.1." followed by the trust anchor
 // ID's relative dotted-decimal ASCII representation. cactus stores
 // TrustAnchorID values in their canonical relative form (e.g.
@@ -42,7 +42,7 @@ func OIDName(id TrustAnchorID) string {
 }
 
 // MarshalSignatureInput returns the bytes a cosigner signs: the §5.3.1
-// CosignedMessage for the given subtree, with timestamp = 0 — the value
+// CosignedSubtree for the given subtree, with timestamp = 0 — the value
 // required for Merkle Tree Certificate proofs (§6.2) and, equivalently,
 // for c2sp.org/tlog-witness `sign-subtree` responses, whose timestamp
 // "MUST be zero".
@@ -55,7 +55,7 @@ func OIDName(id TrustAnchorID) string {
 //	    uint64 start;
 //	    uint64 end;
 //	    HashValue subtree_hash;
-//	} CosignedMessage;
+//	} CosignedSubtree;
 //
 // Use MarshalSignatureInputAt for the other flavour of cosignature: a
 // *checkpoint* cosignature (c2sp.org/tlog-witness `add-checkpoint`, and
@@ -66,7 +66,7 @@ func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byt
 }
 
 // MarshalSignatureInputAt is MarshalSignatureInput with an explicit
-// CosignedMessage timestamp.
+// CosignedSubtree timestamp.
 //
 // The two callers want opposite things and the spec is strict about it:
 //
@@ -82,18 +82,18 @@ func MarshalSignatureInput(cosignerID TrustAnchorID, subtree *MTCSubtree) ([]byt
 // whatever value is on the wire. Callers enforce the rules before
 // trusting a signature (see mirrorpush.VerifyCosignatures).
 func MarshalSignatureInputAt(cosignerID TrustAnchorID, subtree *MTCSubtree, timestamp uint64) ([]byte, error) {
-	return MarshalCosignedMessage(OIDName(cosignerID), OIDName(subtree.LogID),
+	return MarshalCosignedSubtree(OIDName(cosignerID), OIDName(subtree.LogID),
 		timestamp, subtree.Start, subtree.End, subtree.Hash)
 }
 
-// MarshalCosignedMessage builds the §5.3.1 CosignedMessage from its raw
+// MarshalCosignedSubtree builds the §5.3.1 CosignedSubtree from its raw
 // string components. It exists for logs whose checkpoint origin is not
 // an oid/-derived name — a c2sp.org/tlog-cosignature log_origin is just
 // the checkpoint origin, and real-world MTC logs (e.g. Cloudflare's
 // bootstrap CA) use plain hostname-path origins that TrustAnchorID
 // cannot represent. Callers with trust anchor IDs on both sides should
 // use MarshalSignatureInput / MarshalSignatureInputAt instead.
-func MarshalCosignedMessage(cosignerName, logOrigin string, timestamp, start, end uint64, hash tlogx.Hash) ([]byte, error) {
+func MarshalCosignedSubtree(cosignerName, logOrigin string, timestamp, start, end uint64, hash tlogx.Hash) ([]byte, error) {
 	if len(SubtreeSignatureLabel) != 12 {
 		return nil, fmt.Errorf("internal: SubtreeSignatureLabel is %d bytes", len(SubtreeSignatureLabel))
 	}
