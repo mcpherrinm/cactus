@@ -97,35 +97,21 @@ func TestCheckpointForCosigner(t *testing.T) {
 }
 
 // TestParseSignSubtreeResponse covers the c2sp.org/tlog-witness@v1.1.0
-// response (base64 subtree cosignature and a newline) and the earlier
-// note-signature-line form that mirrors such as Sunlight still return.
+// response: a base64 subtree cosignature and a newline.
 func TestParseSignSubtreeResponse(t *testing.T) {
-	const name = "oid/1.3.6.1.4.1.32473.77"
-	keyID := [4]byte{1, 2, 3, 4}
 	sig := []byte("signature-bytes!")
-	legacy := func(id [4]byte, ts uint64) string {
-		blob := append(id[:], MarshalCheckpointCosignature(ts, sig)...)
-		return "— " + name + " " + base64.StdEncoding.EncodeToString(blob) + "\n"
-	}
-	for desc, body := range map[string]string{
-		"v1.1.0":           base64.StdEncoding.EncodeToString(sig) + "\n",
-		"legacy":           legacy(keyID, 0),
-		"legacy, two keys": legacy([4]byte{9}, 0) + legacy(keyID, 0),
-	} {
-		got, err := parseSignSubtreeResponse([]byte(body), name, keyID)
-		if err != nil || !bytes.Equal(got, sig) {
-			t.Errorf("%s: parseSignSubtreeResponse = %q, %v; want %q", desc, got, err, sig)
-		}
+	got, err := parseSignSubtreeResponse([]byte(base64.StdEncoding.EncodeToString(sig) + "\n"))
+	if err != nil || !bytes.Equal(got, sig) {
+		t.Errorf("parseSignSubtreeResponse = %q, %v; want %q", got, err, sig)
 	}
 	for desc, body := range map[string]string{
 		"no newline":           base64.StdEncoding.EncodeToString(sig),
 		"two lines":            "AAAA\nAAAA\n",
 		"non-canonical base64": "AB==\n",
-		"legacy, timestamped":  legacy(keyID, 1),
-		"legacy, other key":    legacy([4]byte{9}, 0),
-		"legacy, bad base64":   "— " + name + " !!!\n",
+		// The note-signature-line form of pre-v1.1.0 mirrors.
+		"signature line": "— oid/1.3.6.1.4.1.32473.77 " + base64.StdEncoding.EncodeToString(sig) + "\n",
 	} {
-		if _, err := parseSignSubtreeResponse([]byte(body), name, keyID); err == nil {
+		if _, err := parseSignSubtreeResponse([]byte(body)); err == nil {
 			t.Errorf("%s: parseSignSubtreeResponse succeeded", desc)
 		}
 	}

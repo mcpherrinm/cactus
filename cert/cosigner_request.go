@@ -225,7 +225,7 @@ func requestOne(ctx context.Context, m MirrorEndpoint, prefix, referenceCheckpoi
 		return Cosignature{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
 
-	rawSig, err := parseSignSubtreeResponse(respBody, wantKey, wantKeyID)
+	rawSig, err := parseSignSubtreeResponse(respBody)
 	if err != nil {
 		return Cosignature{}, err
 	}
@@ -264,53 +264,21 @@ func checkpointForCosigner(note []byte, name string, keyID [4]byte) ([]byte, err
 }
 
 // parseSignSubtreeResponse extracts the bare ML-DSA-44 signature from a
-// sign-subtree response. c2sp.org/tlog-witness@v1.1.0 defines the body
-// as a base64 subtree cosignature and a newline. Mirrors implementing the
-// earlier draft of the endpoint (Sunlight, as of 42d2b79) instead answer
-// with note signature lines carrying key ID || timestamp(0) || signature;
-// those are accepted too, picking the line with our key name and ID.
-func parseSignSubtreeResponse(body []byte, name string, keyID [4]byte) ([]byte, error) {
+// sign-subtree response, which c2sp.org/tlog-witness@v1.1.0 defines as a
+// base64 subtree cosignature and a newline.
+func parseSignSubtreeResponse(body []byte) ([]byte, error) {
 	text, ok := strings.CutSuffix(string(body), "\n")
 	if !ok {
 		return nil, errors.New("cert: sign-subtree response does not end in a newline")
 	}
-	if !strings.HasPrefix(text, "— ") {
-		if strings.Contains(text, "\n") {
-			return nil, errors.New("cert: sign-subtree response has more than one line")
-		}
-		sig, err := DecodeBase64(text)
-		if err != nil {
-			return nil, fmt.Errorf("cert: sign-subtree response: %w", err)
-		}
-		return sig, nil
+	if strings.Contains(text, "\n") {
+		return nil, errors.New("cert: sign-subtree response has more than one line")
 	}
-	for _, line := range strings.Split(text, "\n") {
-		b64, ok := strings.CutPrefix(line, "— "+name+" ")
-		if !ok {
-			continue
-		}
-		raw, err := DecodeBase64(b64)
-		if err != nil {
-			return nil, fmt.Errorf("cert: sign-subtree response: %w", err)
-		}
-		if len(raw) < 4 {
-			return nil, errors.New("cert: sign-subtree signature too short for key ID")
-		}
-		if [4]byte(raw[:4]) != keyID {
-			continue // same name, different key ID: not our key.
-		}
-		ts, sig, err := ParseCheckpointCosignature(raw[4:])
-		if err != nil {
-			return nil, err
-		}
-		// A subtree cosignature has no timestamp, which this legacy form
-		// expressed as zero.
-		if ts != 0 {
-			return nil, fmt.Errorf("cert: mirror subtree cosignature has non-zero timestamp %d", ts)
-		}
-		return sig, nil
+	sig, err := DecodeBase64(text)
+	if err != nil {
+		return nil, fmt.Errorf("cert: sign-subtree response: %w", err)
 	}
-	return nil, errors.New("cert: no matching signature line in sign-subtree response")
+	return sig, nil
 }
 
 // buildSignSubtreeBody assembles the c2sp.org/tlog-witness sign-subtree
