@@ -3,7 +3,7 @@
 # No `logs:` section: Sunlight runs as a witness/mirror alone, without
 # operating any CT log of its own. It is here purely to mirror cactus's
 # issuance log and cosign its subtrees. (Before v0.10.0 Sunlight exited
-# when no logs were configured, so this needs SUNLIGHT_REF >= v0.10.0.)
+# when no logs were configured; Dockerfile.sunlight pins a later ref.)
 #
 # No `acme:` section either, so Sunlight serves plain HTTP/h2c, which is
 # what we want inside the compose network.

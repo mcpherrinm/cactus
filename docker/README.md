@@ -22,10 +22,11 @@ make docker-down    # stop and delete volumes (destroys key material)
 ## Building the images
 
 Both images build from source inside Docker on `golang:1.27`. cactus
-needs 1.27 for the standard library's `crypto/mldsa`; Sunlight v0.10.0
+needs 1.27 for the standard library's `crypto/mldsa`; Sunlight
 declares `go 1.27.0` too, though it gets ML-DSA from `filippo.io/mldsa`.
-The Sunlight image clones a pinned release (`SUNLIGHT_REF`, at least
-v0.10.0, the first that runs as a mirror without a CT log of its own).
+The Sunlight image clones a pinned revision (`SUNLIGHT_REF`, at least
+`5e015ed`, the first that speaks the c2sp.org/tlog-witness@v1.1.0
+sign-subtree response cactus requires).
 It needs **cgo**, because its checkpoint lock backend uses
 `crawshaw.io/sqlite`; with `CGO_ENABLED=0` only `sunlight-keygen` builds.
 
