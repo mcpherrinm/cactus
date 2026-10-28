@@ -9,13 +9,8 @@ ARG GO_VERSION=1.27
 FROM golang:${GO_VERSION} AS build
 
 # Pin the revision so a rebuild is reproducible. Bump deliberately.
-# 5e015ed (after v0.10.1) is the minimum: it is the first to answer
-# sign-subtree in the c2sp.org/tlog-witness@v1.1.0 form, and it includes
-# 42d2b79's one-byte add-entries origin length. Releases before v0.10.0
-# also exit at startup when only a witness is configured (see
-# sunlight.yaml).
 ARG SUNLIGHT_REPO=https://github.com/FiloSottile/sunlight
-ARG SUNLIGHT_REF=5e015ed36b4a24de587531779c54688674fda7cd
+ARG SUNLIGHT_REF=v0.10.2
 
 WORKDIR /src
 RUN git clone --filter=blob:none "${SUNLIGHT_REPO}" . \

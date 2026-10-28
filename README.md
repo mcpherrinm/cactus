@@ -383,7 +383,7 @@ same mirrors: cactus sends each mirror the checkpoint with just that
 mirror's line, and skips a mirror it has no cosignature from yet. The
 response must be the v1.1.0 form, a bare base64 subtree cosignature;
 the signature-line response of mirrors that predate it is rejected.
-Sunlight speaks v1.1.0 since `5e015ed`.
+Sunlight speaks v1.1.0 since v0.10.2.
 
 ### `mirror_push` (optional, c2sp.org/tlog-mirror push client)
 
